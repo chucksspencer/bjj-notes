@@ -41,7 +41,10 @@ In this repo: **Settings → Secrets and variables → Actions → New repositor
 
 1. Sign in at [console.cloud.google.com](https://console.cloud.google.com). If you've never used Google Cloud, start the free trial first: it asks for a card, gives $300 of credit, and this app stays inside the always-free allowances anyway.
 2. Open Cloud Shell (the `>_` icon at the top; also in the Google Cloud iOS app).
-3. Open [`infra/gcp-bootstrap.sh`](infra/gcp-bootstrap.sh) on GitHub, copy the raw file, paste it into Cloud Shell and press return.
+3. Run [`infra/gcp-bootstrap.sh`](infra/gcp-bootstrap.sh) by pasting this one line into Cloud Shell (while the repo is public; otherwise copy the raw file in):
+   ```
+   curl -fsSL https://raw.githubusercontent.com/chucksspencer/bjj-notes/main/infra/gcp-bootstrap.sh | bash
+   ```
 4. It creates a **BJJ Notes** project, links your billing account, turns on the APIs, and sets up keyless deploys that only GitHub Actions on this repo's `main` branch can use. Re-running it is safe if anything stops halfway.
 5. At the end it prints two values. In this repo, add them under **Settings → Secrets and variables → Actions → Variables** (the *Variables* tab, not Secrets): `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT`.
 
