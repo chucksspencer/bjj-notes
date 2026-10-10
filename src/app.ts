@@ -14,7 +14,7 @@ const SCOPES = ['notes'];
 export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structurer | null }): Express {
   const { ctx, config, structurer } = opts;
   const app = express();
-  app.set('trust proxy', 1); // Azure Container Apps terminates TLS in front of us
+  app.set('trust proxy', 1); // Cloud Run terminates TLS in front of us
   app.disable('x-powered-by');
 
   const mcpUrl = new URL('/mcp', config.publicUrl);

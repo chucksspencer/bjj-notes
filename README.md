@@ -14,11 +14,11 @@ The database starts with ~30 positions and your working list from 2026-10-09 (Ba
 
 ## Set it up from your phone
 
-Everything below works in a phone browser. Expect about 30–40 minutes the first time.
+Everything below works in a phone browser. Expect about 30 minutes the first time.
 
 ### 1. Database (Neon, free)
 
-1. Sign up at [neon.com](https://neon.com) and create a project. Pick a US region close to Azure Central US (e.g. US East).
+1. Sign up at [neon.com](https://neon.com) and create a project in a US region (Ohio or N. Virginia are both close to Google's Iowa region).
 2. Copy the connection string (`postgresql://…?sslmode=require`).
 
 ### 2. Two secrets you make up
@@ -35,22 +35,22 @@ In this repo: **Settings → Secrets and variables → Actions → New repositor
 | `DATABASE_URL` | Neon connection string |
 | `OWNER_PASSWORD` | from step 2 |
 | `API_TOKEN` | from step 2 |
-| `GHCR_PULL_TOKEN` | A [classic personal access token](https://github.com/settings/tokens) with only `read:packages`, so Azure can pull the private image |
 | `ANTHROPIC_API_KEY` | *Optional.* Lets Siri captures be tidied and filed by Claude (Haiku). Without it, captures link techniques named word-for-word and the rest goes to the inbox. |
 
-### 4. Azure (Cloud Shell, once)
+### 4. Google Cloud (Cloud Shell, once)
 
-1. Open Cloud Shell (Azure mobile app or [shell.azure.com](https://shell.azure.com)), Bash.
-2. Open [`infra/azure-bootstrap.sh`](infra/azure-bootstrap.sh) on GitHub, use **Copy raw file**, paste into Cloud Shell and press return.
-3. It creates the `bjj-notes` resource group and a deploy identity that only GitHub Actions on this repo's `main` branch can use (no stored password), then prints three values. Add them as repository secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
+1. Sign in at [console.cloud.google.com](https://console.cloud.google.com). If you've never used Google Cloud, start the free trial first: it asks for a card, gives $300 of credit, and this app stays inside the always-free allowances anyway.
+2. Open Cloud Shell (the `>_` icon at the top; also in the Google Cloud iOS app).
+3. Open [`infra/gcp-bootstrap.sh`](infra/gcp-bootstrap.sh) on GitHub, copy the raw file, paste it into Cloud Shell and press return.
+4. It creates a **BJJ Notes** project, links your billing account, turns on the APIs, and sets up keyless deploys that only GitHub Actions on this repo's `main` branch can use. Re-running it is safe if anything stops halfway.
+5. At the end it prints two values. In this repo, add them under **Settings → Secrets and variables → Actions → Variables** (the *Variables* tab, not Secrets): `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT`.
 
 ### 5. Deploy
 
-1. **Settings → Secrets and variables → Actions → Variables**: add `DEPLOY_ENABLED` = `true`.
-2. **Actions → CI → Run workflow** on `main`.
-3. When it finishes, the run summary shows the **Claude connector URL** (`https://bjj-notes.<random>.centralus.azurecontainerapps.io/mcp`).
+1. **Actions → CI → Run workflow** on `main`.
+2. When it finishes, the run summary shows the **Claude connector URL**: `https://bjj-notes-<project number>.us-central1.run.app/mcp`.
 
-From then on, every push to `main` tests, builds and deploys.
+From then on, every push to `main` tests, builds and deploys. The deploy copies your GitHub secrets into Google Secret Manager (only when they change), so GitHub stays the one place you edit them.
 
 ### 6. Connect Claude
 
@@ -76,21 +76,24 @@ Shortcuts also run on Apple Watch.
 
 ## Your own domain on DreamHost (optional)
 
-If your domain's DNS is at DreamHost:
+The `run.app` address works fine. To use something like `bjj.example.com` with DNS at DreamHost (Cloud Run domain mapping, free certificate; Google labels it preview):
 
-1. In Cloud Shell, get the verification ID:
-   `az containerapp show -n bjj-notes -g bjj-notes --query properties.customDomainVerificationId -o tsv`
-2. In the DreamHost panel's DNS settings for the domain, add a **CNAME** `bjj` → the Azure address (without `https://`), and a **TXT** `asuid.bjj` → the verification ID.
-3. Back in Cloud Shell (free managed certificate):
-   ```
-   az containerapp hostname add -n bjj-notes -g bjj-notes --hostname bjj.example.com
-   az containerapp hostname bind -n bjj-notes -g bjj-notes --environment bjj-notes-env --hostname bjj.example.com --validation-method CNAME
-   ```
-4. Add a repository variable `PUBLIC_URL` = `https://bjj.example.com`, re-run the workflow, then remove and re-add the Claude connector with the new URL (tokens are bound to the URL they were issued for).
+1. In Cloud Shell: `gcloud domains verify example.com`, and follow the link. It asks you to add a **TXT** record; add it in the DreamHost panel's DNS settings and finish verification.
+2. `gcloud beta run domain-mappings create --service bjj-notes --domain bjj.example.com --region us-central1`
+3. Add the **CNAME** it prints (`bjj` → `ghs.googlehosted.com.`) at DreamHost. The certificate can take up to an hour.
+4. Add a repository variable `PUBLIC_URL` = `https://bjj.example.com`, re-run the workflow, then remove and re-add the Claude connector with the new URL (tokens are bound to the URL they were issued for), and update the Siri Shortcuts.
 
 ## Costs
 
-Container Apps scales to zero and one person's use fits in its monthly free grant; Neon's free plan covers the database; the image is in GitHub's registry; logs go nowhere by default (stream them with `az containerapp logs show -n bjj-notes -g bjj-notes --follow`). The only running cost is Anthropic API usage for parsed Siri captures, if enabled. The first request after a quiet spell takes a few seconds while the container starts; if that bothers you in voice mode, run `az containerapp update -n bjj-notes -g bjj-notes --min-replicas 1` (a small idle charge).
+Expected bill: $0 apart from optional Anthropic API usage for parsed Siri captures (cents a month).
+
+- **Cloud Run** scales to zero; one person's use is a small fraction of the monthly free allowance (2 million requests, 180,000 vCPU-seconds). It's capped at one instance.
+- **Neon** free plan for the database.
+- **Artifact Registry** keeps the three newest images, about 0.1 GB, inside the 0.5 GB free allowance.
+- **Secret Manager**: 3–4 secrets, inside the free 6 active versions; old versions are destroyed on change.
+- **Logging** stays inside the free allowance. Read logs with `gcloud run services logs read bjj-notes --region us-central1`.
+
+The first request after a quiet spell takes a couple of seconds while the container starts. If that bothers you in voice mode, `gcloud run services update bjj-notes --region us-central1 --min-instances 1` keeps one warm for roughly $10 a month.
 
 The image is also built for Arm, so it runs as-is on a cheap VM with Docker Compose if you go that way later; without `DATABASE_URL` it uses an embedded database in `PGLITE_DIR`.
 
@@ -106,7 +109,7 @@ src/
   auth/              single-user OAuth server (dynamic registration, PKCE, rotating refresh tokens)
   capture.ts         Siri endpoints and the optional Claude parser
 db/migrations/       schema, starter positions, your working list
-infra/               Azure bootstrap and deploy scripts
+infra/               Google Cloud bootstrap (run once) and deploy (run by CI) scripts
 test/                end-to-end tests over HTTP: OAuth flow, every MCP tool, capture API
 ```
 

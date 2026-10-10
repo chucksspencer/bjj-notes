@@ -28,6 +28,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - name: Lint deploy scripts
+        run: shellcheck -S warning infra/*.sh
       - name: Tests (embedded PGlite)
         run: npm test
       - name: Tests (Postgres 16, production driver)
@@ -57,7 +59,7 @@ jobs:
         with:
           context: .
           push: true
-          # arm64 too, so the same image also runs on an Arm VM (e.g. Azure B2pts v2).
+          # arm64 too, so the same image also runs on an Arm VM if you ever move off Cloud Run.
           platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository }}:latest
@@ -67,29 +69,36 @@ jobs:
 
   deploy:
     needs: image
-    # Turn on by adding a repository variable DEPLOY_ENABLED = true once the secrets are in place.
-    if: vars.DEPLOY_ENABLED == 'true'
+    # Runs once the GCP_* repository variables printed by infra/gcp-bootstrap.sh are set.
+    if: vars.GCP_SERVICE_ACCOUNT != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
       id-token: write
     concurrency: deploy
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/login@v2
+      - uses: google-github-actions/auth@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Deploy to Azure Container Apps
-        run: bash infra/deploy.sh
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Deploy to Cloud Run
+        run: bash infra/gcp-deploy.sh
         env:
           IMAGE: ${{ needs.image.outputs.image }}
+          GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           OWNER_PASSWORD: ${{ secrets.OWNER_PASSWORD }}
           API_TOKEN: ${{ secrets.API_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GHCR_USERNAME: ${{ github.repository_owner }}
-          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           PUBLIC_URL: ${{ vars.PUBLIC_URL }}
           TIME_ZONE: ${{ vars.TIME_ZONE }}
