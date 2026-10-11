@@ -18,6 +18,11 @@ retry() { # IAM changes on brand-new service accounts can take a few seconds to 
   "$@" >/dev/null
 }
 
+if [ -z "$(gcloud config get-value account 2>/dev/null)" ]; then
+  echo "Cloud Shell isn't signed in to gcloud. Run:  gcloud auth login   then run this script again." >&2
+  exit 1
+fi
+
 say "Project"
 PROJECT_ID="${PROJECT_ID:-$(gcloud projects list --filter='labels.app=bjj-notes' --format='value(projectId)' --limit=1)}"
 if [ -z "$PROJECT_ID" ]; then
