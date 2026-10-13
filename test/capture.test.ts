@@ -27,7 +27,15 @@ describe('Siri capture API', () => {
     const send = (body: unknown) =>
       fetch(`${s!.base}/api/capture`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect((await send({ text: 'Leg elevation: hook first.', token: API_TOKEN })).status).toBe(200);
-    expect((await send({ text: 'hi', token: 'wrong' })).status).toBe(401);
+    const wrong = await send({ text: 'hi', token: 'wrong' });
+    expect(wrong.status).toBe(401);
+    expect(((await wrong.json()) as any).speech).toBe("BJJ Notes didn't accept that token. Check the token in the shortcut.");
+    const nothing = await send({ text: '', url: '', token: API_TOKEN });
+    expect(nothing.status).toBe(400);
+    expect(((await nothing.json()) as any).speech).toBe('Nothing to save. Say a takeaway or share a link.');
+    const garbled = await fetch(`${s.base}/api/capture`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{not json' });
+    expect(garbled.status).toBe(400);
+    expect(((await garbled.json()) as any).speech).toContain("couldn't read what the shortcut sent");
     expect((await send({ text: 'hi' })).status).toBe(401);
     const saved = (await s.db.query<{ body: string; raw_text: string }>('select body, raw_text from notes')).rows;
     expect(JSON.stringify(saved)).not.toContain(API_TOKEN);

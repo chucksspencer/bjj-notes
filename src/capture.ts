@@ -131,7 +131,10 @@ export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer
     const bodyToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
     const token = header.replace(/^Bearer\s+/i, '').trim() || bodyToken;
     if (!token || !secretsMatch(token, apiToken)) {
-      res.status(401).json({ error: 'unauthorized' });
+      res.status(401).json({
+        error: 'unauthorized',
+        speech: token ? "BJJ Notes didn't accept that token. Check the token in the shortcut." : 'The shortcut sent no token.',
+      });
       return;
     }
     next();
@@ -150,7 +153,7 @@ export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer
       if (candidate === text) text = found.rest;
     }
     if (!text && !url) {
-      res.status(400).json({ error: 'text is required' });
+      res.status(400).json({ error: 'text is required', speech: 'Nothing to save. Say a takeaway or share a link.' });
       return;
     }
     let input: AddNoteInput = { text: text || toReviewText(url!), raw_text: text, via: 'capture', source: url ? { url } : undefined };
@@ -207,6 +210,12 @@ export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer
       .join('. ');
     res.json({ speech: speech ? `Your focus: ${speech}.` : 'Your focus list is empty.', text });
   });
+
+  // Shortcuts show "speech", so even a body that isn't JSON gets a readable answer.
+  router.use(((err, _req, res, next) => {
+    if ((err as { type?: string }).type !== 'entity.parse.failed') return next(err);
+    res.status(400).json({ error: 'invalid JSON', speech: "BJJ Notes couldn't read what the shortcut sent. Check the request body is JSON." });
+  }) as express.ErrorRequestHandler);
 
   return router;
 }
