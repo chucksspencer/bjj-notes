@@ -891,6 +891,16 @@ button.row {
   margin: 8px 0 0;
 }
 
+.error-detail {
+  margin: 16px 0;
+  padding: 12px;
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  font-size: 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Position explorer */
 .gap-list {
   margin: 0;

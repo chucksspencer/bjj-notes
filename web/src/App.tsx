@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router';
 import { queryClient, setUnauthorizedHandler, useNotes, useSession } from './api';
 import { CaptureProvider, useCapture } from './components/Capture';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Icon } from './components/Icon';
 import { ToastProvider } from './components/Toast';
 import { Focus } from './pages/Focus';
@@ -40,11 +41,16 @@ function Gate() {
 
 function Shell() {
   const { pathname } = useLocation();
-  useEffect(() => window.scrollTo(0, 0), [pathname]);
+  useEffect(() => {
+    // Braces matter: Chrome 150+ returns a Promise from scrollTo, and React would call
+    // a returned value as this effect's cleanup on the next navigation and crash.
+    window.scrollTo(0, 0);
+  }, [pathname]);
   return (
     <div className="app">
       <main>
-        <Routes>
+        <ErrorBoundary key={pathname}>
+          <Routes>
           <Route path="/" element={<Focus />} />
           <Route path="/library" element={<Library />} />
           <Route path="/t/:id" element={<Technique />} />
@@ -52,7 +58,8 @@ function Shell() {
           <Route path="/p/:slug" element={<Position />} />
           <Route path="/inbox" element={<Inbox />} />
           <Route path="*" element={<NotFound />} />
-        </Routes>
+          </Routes>
+        </ErrorBoundary>
       </main>
       <TabBar />
     </div>

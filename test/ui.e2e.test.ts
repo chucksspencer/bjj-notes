@@ -93,4 +93,29 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('heading', { name: 'Side control' }).waitFor();
     await page.getByText('Ghost escape').first().waitFor();
   });
+
+  it('navigates on desktop Chrome 150+, where scrollTo returns a Promise', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await ctx.addInitScript(() => {
+      const scrollTo = window.scrollTo.bind(window) as (x: number, y: number) => void;
+      (window as unknown as { scrollTo: (x: number, y: number) => Promise<void> }).scrollTo = (x, y) => {
+        scrollTo(x, y);
+        return Promise.resolve();
+      };
+    });
+    const desktop = await ctx.newPage();
+    desktop.setDefaultTimeout(8000);
+    const errors: string[] = [];
+    desktop.on('pageerror', e => errors.push(String(e)));
+    await desktop.goto(s.base);
+    await desktop.getByLabel('Password').fill(OWNER_PASSWORD);
+    await desktop.getByRole('button', { name: 'Sign in' }).click();
+    await desktop.getByRole('heading', { name: 'Focus' }).waitFor();
+    for (const tab of ['Library', 'Positions', 'Inbox', 'Focus']) {
+      await desktop.getByRole('navigation').getByRole('link', { name: new RegExp(`^${tab}`) }).click();
+      await desktop.getByRole('heading', { name: tab, exact: true }).waitFor();
+    }
+    expect(errors).toEqual([]);
+    await ctx.close();
+  });
 });
