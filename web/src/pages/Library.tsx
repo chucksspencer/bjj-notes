@@ -71,7 +71,7 @@ export function Library() {
         <input
           className="input"
           type="search"
-          placeholder="Search names, aliases and details"
+          placeholder="Search names, details or events"
           aria-label="Search techniques"
           value={text}
           onChange={e => {

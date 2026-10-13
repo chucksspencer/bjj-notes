@@ -269,6 +269,20 @@ describe('JSON API', () => {
     expect((await api('POST', `/api/v1/focus/99999/actions`, { action: 'pause' })).body.message).toBe('No focus item #99999.');
   });
 
+  it('finds techniques and notes by where the notes came from', async () => {
+    const names = async (q: string) =>
+      (await api<TechniqueListItem[]>('GET', `/api/v1/techniques?q=${encodeURIComponent(q)}`)).body.map(t => t.name);
+    // Ghost escape has a note from the Zen camp seminar by Josh Jones (added above).
+    expect(await names('zen camp')).toContain('Ghost escape');
+    expect(await names('josh jon')).toContain('Ghost escape'); // partial words, as you type
+    expect(await names('Jones seminar')).toContain('Ghost escape'); // any order, and the kind of session counts
+    expect(await names('zen wrestling')).not.toContain('Ghost escape'); // every word has to match
+    expect(await names('jo')).not.toContain('Ghost escape'); // too short to search origins
+    await api('POST', '/api/v1/notes', { text: 'Frames first.', techniqueIds: [ghost.id], source: { kind: 'class', title: 'Fight Prime class notes' } });
+    expect(await names('fight prime')).toContain('Ghost escape');
+    expect((await api<NoteView[]>('GET', '/api/v1/notes?q=fight%20pri')).body.map(n => n.body)).toContain('Frames first.');
+  });
+
   it('deletes a selection of techniques or notes as one undoable change', async () => {
     const make = async (name: string) => (await api<TechniqueView>('POST', '/api/v1/techniques', { name, type: 'sweep' })).body;
     const [a, b, c] = [await make('Tornado roll'), await make('Lapel feed'), await make('Wrist ride')];

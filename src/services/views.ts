@@ -24,6 +24,20 @@ const json = <T>(v: unknown): T => (typeof v === 'string' ? (JSON.parse(v) as T)
 
 const TECH_REF_JSON = `json_build_object('id', t.id, 'name', t.name, 'type', t.type, 'role', t.role, 'status', t.status)`;
 
+// ---------- where notes came from ----------
+
+/** A note's origin as searchable text: its session (event, instructor, place, kind) and its source (title, author). */
+const originText = (session: string, source: string) =>
+  `lower(concat_ws(' ', ${session}.name, ${session}.instructor, ${session}.location, replace(${session}.kind, '_', ' '), ${source}.title, ${source}.author))`;
+
+/**
+ * Every word of the query appears somewhere in the text, as a whole or partial word, so "zen ca" already
+ * finds "Zen camp" while typing. Only for queries of 3+ characters, so one or two letters don't match everything.
+ */
+const originMatches = (text: string, param: string) =>
+  `(length(trim(${param})) >= 3 and not exists (
+     select 1 from regexp_split_to_table(lower(trim(${param})), '\\s+') w where position(w in ${text}) = 0))`;
+
 // ---------- notes ----------
 
 interface NoteRow {
@@ -96,7 +110,7 @@ function toNote(r: NoteRow): NoteView {
 export interface NoteQuery {
   inbox?: boolean;
   techniqueId?: number;
-  /** Full-text search over note bodies. */
+  /** Full-text search over note bodies, or words from where the note came from. */
   q?: string;
   limit?: number;
   /** Notes with id lower than this (for paging newest-first). */
@@ -118,9 +132,8 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
   let order = opts.oldestFirst ? 'n.id asc' : 'n.observed_on desc, n.id desc';
   if (opts.q?.trim()) {
     const tq = p(opts.q.trim());
-    // The note's words, or where it came from ("Josh Jones", "Zen camp").
-    where.push(`(n.search @@ websearch_to_tsquery('english', ${tq})
-      or to_tsvector('simple', concat_ws(' ', ss.name, ss.instructor, ss.location)) @@ websearch_to_tsquery('simple', ${tq}))`);
+    // The note's words, or where it came from ("Josh Jones", "Zen camp", "WIMAFC").
+    where.push(`(n.search @@ websearch_to_tsquery('english', ${tq}) or ${originMatches(originText('ss', 's'), tq)})`);
     order = `ts_rank(n.search, websearch_to_tsquery('english', ${tq})) desc, n.observed_on desc, n.id desc`;
   }
   if (opts.beforeId !== undefined) where.push(`n.id < ${p(opts.beforeId)}`);
@@ -237,6 +250,7 @@ export async function techniqueView(q: Queryable, id: number, noteLimit = 20): P
 }
 
 export interface TechniqueQuery {
+  /** Name or alias (fuzzy), words in the card, or words from where its notes came from. */
   q?: string;
   type?: TechniqueType;
   role?: Role;
@@ -288,7 +302,15 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
             or (select max(bjj_name_score(c, $1)) from unnest(array_prepend(t.name, t.aliases)) c) >= 0.45
             or to_tsvector('english', coalesce(t.summary, '') || ' ' || array_to_string(t.key_details, ' ')
                                        || ' ' || array_to_string(t.mistakes, ' '))
-               @@ websearch_to_tsquery('english', $1))
+               @@ websearch_to_tsquery('english', $1)
+            -- or where its notes came from: "Zen camp", "Josh Jones", "WIMAFC", "seminar"
+            or exists (
+              select 1 from note_techniques nt
+              join notes n on n.id = nt.note_id
+              left join sessions ss on ss.id = n.session_id
+              left join sources so on so.id = n.source_id
+              where nt.technique_id = t.id and (n.session_id is not null or n.source_id is not null)
+                and ${originMatches(originText('ss', 'so'), '$1')}))
      order by ${order}
      limit $6`,
     [query, f.type ?? null, f.role ?? null, f.status ?? null, f.positionId ?? null, Math.min(f.limit ?? 200, 500)],
