@@ -80,7 +80,9 @@ export function Inbox() {
                 </button>
               </div>
               <div className="note-body">{n.body}</div>
-              {n.source?.url && <SourceLink url={n.source.url} timestamp={n.sourceTimestamp} title={n.source.title} />}
+              {n.source?.url && (
+                <SourceLink url={n.source.url} timestamp={n.sourceTimestamp} title={n.source.title} author={n.source.author} />
+              )}
               <div className="note-foot">
                 <button type="button" className="btn quiet small" onClick={() => setFiling(n)}>
                   File under a technique

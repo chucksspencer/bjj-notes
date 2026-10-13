@@ -336,7 +336,7 @@ describe('web app hosting', () => {
     expect(await res.text()).toContain('<div id="root">');
     const csp = res.headers.get('content-security-policy')!;
     expect(csp).toContain("script-src 'self'");
-    expect(csp).toContain('frame-src https://www.youtube-nocookie.com');
+    expect(csp).toContain('frame-src https://www.youtube-nocookie.com https://www.instagram.com');
     expect(res.headers.get('x-frame-options')).toBe('DENY');
   });
 

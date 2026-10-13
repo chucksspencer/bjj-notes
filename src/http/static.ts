@@ -15,7 +15,8 @@ const CSP = [
   "style-src 'self'",
   "font-src 'self'",
   "img-src 'self' data: https://i.ytimg.com",
-  'frame-src https://www.youtube-nocookie.com',
+  // Video players load only when tapped.
+  'frame-src https://www.youtube-nocookie.com https://www.instagram.com',
   "connect-src 'self'",
   "manifest-src 'self'",
   "base-uri 'none'",

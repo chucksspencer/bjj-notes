@@ -31,6 +31,32 @@ describe('Siri capture API', () => {
     expect(vague).toMatchObject({ inbox: true, parsed: false, speech: 'Saved to your inbox.' });
   });
 
+  it('saves a shared reel to review, and knows the same reel when it comes back', async () => {
+    s = await startServer();
+    // Shared from Instagram with no takeaway: kept in the inbox to review.
+    const bare = (await (await post(s, { url: 'https://www.instagram.com/reel/DAbc123xyz/?igsh=MTc4MmM1' })).json()) as any;
+    expect(bare).toMatchObject({ inbox: true, speech: 'Saved the reel to your inbox to review.' });
+    // The same reel again, handed over as caption text with the link inside, plus a takeaway.
+    const withTakeaway = (await (
+      await post(s, { text: 'Leg elevation: hook first, then lift.', url: 'So clean 🔥 https://instagram.com/reels/DAbc123xyz' })
+    ).json()) as any;
+    expect(withTakeaway).toMatchObject({ inbox: false, speech: 'Saved to Leg elevation.' });
+    // A link dictated into the note itself becomes the note's source.
+    await post(s, { text: 'Leg elevation, watch this https://youtu.be/abc123?si=XyZ' });
+
+    const rows = (
+      await s.db.query<{ body: string; url: string; kind: string; source_id: number }>(
+        'select n.body, s.url, s.kind, n.source_id from notes n join sources s on s.id = n.source_id order by n.id',
+      )
+    ).rows;
+    expect(rows.map(({ source_id: _, ...r }) => r)).toEqual([
+      { body: 'Instagram reel to review.', url: 'https://www.instagram.com/reel/DAbc123xyz/', kind: 'instagram' },
+      { body: 'Leg elevation: hook first, then lift.', url: 'https://www.instagram.com/reel/DAbc123xyz/', kind: 'instagram' },
+      { body: 'Leg elevation, watch this', url: 'https://youtu.be/abc123', kind: 'youtube' },
+    ]);
+    expect(rows[0]!.source_id).toBe(rows[1]!.source_id);
+  });
+
   it('files a parsed note and reads back the focus list', async () => {
     let seen: { text: string; known: { techniques: string[] } } | undefined;
     const structurer: Structurer = async (text, known) => {

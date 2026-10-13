@@ -156,6 +156,24 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByText('Nothing to file.').waitFor();
   });
 
+  it('plays an Instagram reel in the note only when tapped', async () => {
+    await page.getByRole('button', { name: 'New note' }).click();
+    await page.getByPlaceholder('What did you learn or notice?').fill('Lapel feed into the back take.');
+    await page.getByRole('button', { name: 'Add a video or post link' }).click();
+    await page.getByPlaceholder('https://youtu.be/…').fill('https://www.instagram.com/reel/DAbc123xyz/?igsh=MTc4MmM1');
+    await page.getByRole('button', { name: 'Save note' }).click();
+    await page.getByText('Saved to your inbox').waitFor();
+    await page.getByRole('navigation').getByRole('link', { name: /Inbox/ }).click();
+
+    const open = page.getByRole('link', { name: 'Open in Instagram' });
+    expect(await open.getAttribute('href')).toBe('https://www.instagram.com/reel/DAbc123xyz/');
+    expect(await page.locator('iframe').count()).toBe(0); // nothing from Instagram until tapped
+    await page.getByRole('button', { name: 'Play reel' }).click();
+    const frame = page.locator('iframe[title="Instagram reel"]');
+    await frame.waitFor({ state: 'attached' });
+    expect(await frame.getAttribute('src')).toBe('https://www.instagram.com/p/DAbc123xyz/embed/captioned/');
+  });
+
   it('navigates on desktop Chrome 150+, where scrollTo returns a Promise', async () => {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await ctx.addInitScript(() => {

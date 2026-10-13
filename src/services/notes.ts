@@ -1,4 +1,5 @@
 import type { Queryable } from '../db.js';
+import { cleanUrl, instagramPost } from '../shared/links.js';
 import { resolveTechnique, type Candidate } from '../resolve.js';
 import type { SessionView } from '../shared/api.js';
 import { sessionPhrase } from '../shared/sessions.js';
@@ -83,19 +84,11 @@ export interface AddNoteResult {
   message: string;
 }
 
-/** Only web links are kept as links; anything else (e.g. javascript:) is dropped. */
-function safeUrl(url: string | undefined): string | undefined {
-  if (!url?.trim()) return undefined;
-  try {
-    const u = new URL(url.trim());
-    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 async function upsertSource(q: Queryable, input: SourceInput): Promise<number | null> {
-  const s = { ...input, url: safeUrl(input.url) };
+  // Only web links are kept as links (javascript: and the like are dropped), minus share-tracking.
+  const s = { ...input, url: cleanUrl(input.url) };
+  const handle = s.url ? instagramPost(s.url)?.handle : undefined;
+  if (handle && !s.author) s.author = `@${handle}`;
   const kind = s.kind ?? (s.url ? guessSourceKind(s.url) : undefined);
   if (!kind) return null;
   if (s.url) {

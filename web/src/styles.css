@@ -1061,3 +1061,25 @@ label.row:has(.check:checked) {
 .note-select .note-body {
   display: block;
 }
+
+/* Instagram reels and posts in a note */
+.reel {
+  margin-top: 10px;
+}
+
+.reel-frame {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  margin-bottom: 8px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: var(--surface-2);
+}
+
+.reel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}

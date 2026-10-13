@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import express, { type Router } from 'express';
 import { secretsMatch } from './auth/provider.js';
+import { instagramPost, splitLink, toReviewText } from './shared/links.js';
 import { techniquesMentionedIn } from './resolve.js';
 import type { Ctx } from './services/context.js';
 import { getFocus } from './services/focus.js';
@@ -134,13 +135,22 @@ export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer
   };
 
   router.post('/api/capture', auth, express.json({ limit: '64kb' }), async (req, res) => {
-    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-    const url = typeof req.body?.url === 'string' && req.body.url.trim() ? req.body.url.trim() : undefined;
+    let text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    let url: string | undefined;
+    // A share sheet may hand over a bare link or text with the link inside (a caption and a URL);
+    // a dictated note may contain one too. Either way the link becomes the note's source.
+    for (const candidate of [req.body?.url, text]) {
+      if (url || typeof candidate !== 'string') continue;
+      const found = splitLink(candidate);
+      if (!found.url) continue;
+      url = found.url;
+      if (candidate === text) text = found.rest;
+    }
     if (!text && !url) {
       res.status(400).json({ error: 'text is required' });
       return;
     }
-    let input: AddNoteInput = { text: text || url!, raw_text: text, via: 'capture', source: url ? { url } : undefined };
+    let input: AddNoteInput = { text: text || toReviewText(url!), raw_text: text, via: 'capture', source: url ? { url } : undefined };
     let parsed = false;
     if (structurer && text) {
       try {
@@ -175,7 +185,7 @@ export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer
         linked: result.linked,
         inbox: result.inbox,
         parsed,
-        speech: speechFor(result.linked, result.created, result.inbox),
+        speech: !text && url ? `Saved the ${instagramPost(url) ? 'reel' : 'link'} to your inbox to review.` : speechFor(result.linked, result.created, result.inbox),
       });
     } catch (err) {
       console.error('capture: save failed', err);

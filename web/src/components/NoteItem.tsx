@@ -24,7 +24,9 @@ export function NoteItem({ note, today, hideTechnique }: { note: NoteView; today
         </button>
       </div>
       <div className="note-body">{note.body}</div>
-      {note.source?.url && <SourceLink url={note.source.url} timestamp={note.sourceTimestamp} title={note.source.title} />}
+      {note.source?.url && (
+        <SourceLink url={note.source.url} timestamp={note.sourceTimestamp} title={note.source.title} author={note.source.author} />
+      )}
       {!note.source?.url && (note.source?.author || note.source?.title) && (
         <div className="muted small note-foot">From {[note.source.title, note.source.author].filter(Boolean).join(' by ')}</div>
       )}
