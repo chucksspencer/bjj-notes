@@ -6,12 +6,40 @@
 #           GCP_SERVICE_ACCOUNT (deploy account; gives the project id) or PROJECT_ID,
 #           GCP_WORKLOAD_IDENTITY_PROVIDER (gives the project number) or PROJECT_NUMBER
 # Optional: ANTHROPIC_API_KEY, PUBLIC_URL (custom domain), TIME_ZONE, GCP_REGION, SERVICE
-set -euo pipefail
+set -Eeuo pipefail
 
-: "${IMAGE:?IMAGE is required}"
-: "${DATABASE_URL:?DATABASE_URL secret is missing}"
-: "${OWNER_PASSWORD:?OWNER_PASSWORD secret is missing}"
-: "${API_TOKEN:?API_TOKEN secret is missing}"
+# In GitHub Actions, failures are also reported as an annotation on the run (readable without the logs).
+LOG="$(mktemp)"
+exec > >(tee -a "$LOG") 2>&1
+annotate() { # title, then message on stdin
+  [ -n "${GITHUB_ACTIONS:-}" ] || return 0
+  printf '::error title=%s::%s\n' "$1" "$(head -c 3500 | sed -e 's/%/%25/g' -e 's/\r//g' | awk 'BEGIN{ORS="%0A"} {print}')"
+}
+fail() {
+  echo "$*" >&2
+  echo "$*" | annotate "Deploy stopped"
+  exit 1
+}
+on_err() {
+  local code=$?
+  tail -n 30 "$LOG" | annotate "Deploy failed at line $1 (exit $code)"
+}
+trap 'on_err $LINENO' ERR
+
+trim() { # pasted secrets often carry a stray newline or space, which would break logins
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  printf '%s' "${s%"${s##*[![:space:]]}"}"
+}
+
+missing=()
+for v in IMAGE DATABASE_URL OWNER_PASSWORD API_TOKEN; do
+  [ -n "$(trim "${!v:-}")" ] || missing+=("$v")
+done
+[ ${#missing[@]} -eq 0 ] || fail "Missing GitHub secrets: ${missing[*]} (Settings → Secrets and variables → Actions)"
+[[ "$(trim "$DATABASE_URL")" =~ ^postgres(ql)?:// ]] || fail "DATABASE_URL should start with postgresql:// (the Neon connection string)"
+[ "$(trim "$OWNER_PASSWORD" | wc -c)" -ge 12 ] || fail "OWNER_PASSWORD must be at least 12 characters"
+[ "$(trim "$API_TOKEN" | wc -c)" -ge 32 ] || fail "API_TOKEN must be at least 32 characters"
 
 PROJECT_ID="${PROJECT_ID:-$(sed -E 's/^[^@]+@([^.]+)\.iam\.gserviceaccount\.com$/\1/' <<<"${GCP_SERVICE_ACCOUNT:-}")}"
 PROJECT_NUMBER="${PROJECT_NUMBER:-$(sed -nE 's#^projects/([0-9]+)/.*#\1#p' <<<"${GCP_WORKLOAD_IDENTITY_PROVIDER:-}")}"
@@ -19,14 +47,8 @@ REGION="${GCP_REGION:-us-central1}"
 SERVICE="${SERVICE:-bjj-notes}"
 TIME_ZONE="${TIME_ZONE:-America/Chicago}"
 RUN_SA="bjj-notes-run@$PROJECT_ID.iam.gserviceaccount.com"
-[[ "$PROJECT_ID" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]] || { echo "Can't work out the project id from GCP_SERVICE_ACCOUNT" >&2; exit 1; }
-[[ "$PROJECT_NUMBER" =~ ^[0-9]+$ ]] || { echo "Can't work out the project number from GCP_WORKLOAD_IDENTITY_PROVIDER" >&2; exit 1; }
-
-trim() { # pasted secrets often carry a stray newline or space, which would break logins
-  local s="$1"
-  s="${s#"${s%%[![:space:]]*}"}"
-  printf '%s' "${s%"${s##*[![:space:]]}"}"
-}
+[[ "$PROJECT_ID" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]] || fail "Can't work out the project id from GCP_SERVICE_ACCOUNT"
+[[ "$PROJECT_NUMBER" =~ ^[0-9]+$ ]] || fail "Can't work out the project number from GCP_WORKLOAD_IDENTITY_PROVIDER"
 
 # 1. Copy the image into Artifact Registry (Cloud Run can't pull from GitHub's registry).
 AR_HOST="$REGION-docker.pkg.dev"
