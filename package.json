@@ -3,11 +3,14 @@
   "version": "0.1.0",
   "description": "Personal BJJ notes, technique graph and focus tracker with an MCP server for Claude and a capture API for Siri",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "tsc -p tsconfig.json",
+    "build:web": "vite build --config web/vite.config.ts",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
+    "dev:web": "vite --config web/vite.config.ts",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.check.json"
+    "typecheck": "tsc -p tsconfig.check.json && tsc -p web/tsconfig.json"
   },
   "license": "UNLICENSED",
   "dependencies": {
@@ -20,11 +23,21 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@fontsource-variable/archivo": "^5.3.0",
+    "@tanstack/react-query": "^5.104.2",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.4",
     "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "playwright": "^1.56.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router": "^7.18.4",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
+    "vite": "^8.3.4",
     "vitest": "^5.0.3"
   },
   "private": true,

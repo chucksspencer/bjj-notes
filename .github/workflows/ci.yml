@@ -30,12 +30,20 @@ jobs:
       - run: npm run typecheck
       - name: Lint deploy scripts
         run: shellcheck -S warning infra/*.sh
+      - name: Build
+        run: npm run build
       - name: Tests (embedded PGlite)
         run: npm test
       - name: Tests (Postgres 16, production driver)
         run: npm test
         env:
           TEST_PG_ADMIN_URL: postgres://postgres:postgres@localhost:5432/postgres
+      - name: Install Chromium for the UI tests
+        run: npx playwright install --with-deps chromium
+      - name: UI tests (phone-sized Chromium)
+        run: npx vitest run test/ui.e2e.test.ts
+        env:
+          E2E: '1'
 
   image:
     needs: test

@@ -1,9 +1,11 @@
 import type { Queryable } from '../db.js';
 import { resolveTechnique, type Candidate } from '../resolve.js';
-import { logActivity } from './activity.js';
+import { logActivity, NOTE_SNAPSHOT_SQL, type NoteRowSnapshot } from './activity.js';
 import { today, type Ctx } from './context.js';
 import { createStub } from './techniques.js';
-import { guessSourceKind, isoDate, type NoteKind, type Role, type SourceKind, type TechniqueType } from './vocab.js';
+import { UserError } from './errors.js';
+import { noteList } from './views.js';
+import { guessSourceKind, type NoteKind, type Role, type SourceKind, type TechniqueType } from './vocab.js';
 
 export interface SourceInput {
   kind?: SourceKind;
@@ -23,6 +25,8 @@ export interface NewTechniqueInput {
 export interface AddNoteInput {
   text: string;
   techniques?: string[];
+  /** Exact technique ids (from a picker); linked without fuzzy matching. */
+  technique_ids?: number[];
   /** Techniques to create as new cards before linking (only for names that don't exist yet). */
   new_techniques?: NewTechniqueInput[];
   kind?: NoteKind;
@@ -41,7 +45,19 @@ export interface AddNoteResult {
   message: string;
 }
 
-async function upsertSource(q: Queryable, s: SourceInput): Promise<number | null> {
+/** Only web links are kept as links; anything else (e.g. javascript:) is dropped. */
+function safeUrl(url: string | undefined): string | undefined {
+  if (!url?.trim()) return undefined;
+  try {
+    const u = new URL(url.trim());
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function upsertSource(q: Queryable, input: SourceInput): Promise<number | null> {
+  const s = { ...input, url: safeUrl(input.url) };
   const kind = s.kind ?? (s.url ? guessSourceKind(s.url) : undefined);
   if (!kind) return null;
   if (s.url) {
@@ -64,10 +80,17 @@ async function upsertSource(q: Queryable, s: SourceInput): Promise<number | null
 }
 
 /** Links names to techniques; creates the requested new ones. Returns ids plus what couldn't be matched. */
-async function linkTechniques(q: Queryable, names: string[], newOnes: NewTechniqueInput[]) {
+async function linkTechniques(q: Queryable, names: string[], newOnes: NewTechniqueInput[], exactIds: number[] = []) {
   const ids = new Map<number, string>();
   const created: { id: number; name: string }[] = [];
   const unresolved: { name: string; candidates: Candidate[] }[] = [];
+
+  if (exactIds.length) {
+    const { rows } = await q.query<{ id: number; name: string }>('select id, name from techniques where id = any($1::int[])', [
+      exactIds,
+    ]);
+    for (const r of rows) ids.set(r.id, r.name);
+  }
 
   for (const n of newOnes) {
     const existing = await resolveTechnique(q, n.name);
@@ -91,9 +114,14 @@ async function linkTechniques(q: Queryable, names: string[], newOnes: NewTechniq
 export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteResult> {
   return ctx.db.tx(async q => {
     const text = input.text.trim();
-    if (!text) throw new Error('Note text is empty.');
+    if (!text) throw new UserError('Note text is empty.');
     const date = input.date ?? today(ctx);
-    const { ids, created, unresolved } = await linkTechniques(q, input.techniques ?? [], input.new_techniques ?? []);
+    const { ids, created, unresolved } = await linkTechniques(
+      q,
+      input.techniques ?? [],
+      input.new_techniques ?? [],
+      input.technique_ids ?? [],
+    );
     const sourceId = input.source ? await upsertSource(q, input.source) : null;
     const sessions = (await q.query<{ id: number }>('select id from sessions where date = $1', [date])).rows;
     const sessionId = sessions.length === 1 ? sessions[0]!.id : null;
@@ -147,6 +175,7 @@ export async function fileNote(
   noteId: number,
   techniques: string[],
   newTechniques: NewTechniqueInput[] = [],
+  techniqueIds: number[] = [],
 ): Promise<string> {
   return ctx.db.tx(async q => {
     const note = (await q.query<{ id: number; inbox: boolean }>('select id, inbox from notes where id = $1', [noteId])).rows[0];
@@ -154,7 +183,7 @@ export async function fileNote(
     const before = (
       await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [noteId])
     ).rows.map(r => r.technique_id);
-    const { ids, created, unresolved } = await linkTechniques(q, techniques, newTechniques);
+    const { ids, created, unresolved } = await linkTechniques(q, techniques, newTechniques, techniqueIds);
     for (const id of ids.keys()) {
       await q.query('insert into note_techniques (note_id, technique_id) values ($1, $2) on conflict do nothing', [noteId, id]);
     }
@@ -178,25 +207,66 @@ export async function fileNote(
 }
 
 export async function getInbox(ctx: Ctx, limit = 10): Promise<string> {
-  const rows = (
-    await ctx.db.query<{ id: number; body: string; observed_on: string; techniques: string[] | null }>(
-      `select n.id, n.body, n.observed_on::text as observed_on,
-              array_remove(array_agg(t.name order by t.name), null) as techniques
-       from notes n
-       left join note_techniques nt on nt.note_id = n.id
-       left join techniques t on t.id = nt.technique_id
-       where n.inbox group by n.id order by n.id limit $1`,
-      [limit],
-    )
-  ).rows;
+  const rows = await noteList(ctx.db, { inbox: true, limit, oldestFirst: true });
   if (!rows.length) return 'Inbox is empty.';
   const total = (await ctx.db.query<{ c: number }>('select count(*)::int as c from notes where inbox')).rows[0]!.c;
   return [
     `${total} note${total === 1 ? '' : 's'} in the inbox${total > rows.length ? ` (showing ${rows.length})` : ''}:`,
     ...rows.map(
-      r => `- #${r.id} (${isoDate(r.observed_on)}): ${r.body}${r.techniques?.length ? ` [linked: ${r.techniques.join(', ')}]` : ''}`,
+      r =>
+        `- #${r.id} (${r.observedOn}): ${r.body}${r.techniques.length ? ` [linked: ${r.techniques.map(t => t.name).join(', ')}]` : ''}`,
     ),
   ].join('\n');
+}
+
+export interface UpdateNoteInput {
+  body?: string;
+  kind?: NoteKind;
+  /** YYYY-MM-DD */
+  observed_on?: string;
+  /** Replaces the linked techniques. An empty list sends the note to the inbox. */
+  technique_ids?: number[];
+}
+
+export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): Promise<string> {
+  return ctx.db.tx(async q => {
+    const row = (await q.query<NoteRowSnapshot>(NOTE_SNAPSHOT_SQL, [id])).rows[0];
+    if (!row) return `No note #${id}.`;
+    const before = (
+      await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [id])
+    ).rows.map(r => r.technique_id);
+    const body = input.body !== undefined ? input.body.trim() : row.body;
+    if (!body) throw new UserError('Note text is empty.');
+    await q.query('update notes set body = $2, kind = $3, observed_on = $4 where id = $1', [
+      id,
+      body,
+      input.kind ?? row.kind,
+      input.observed_on ?? row.observed_on,
+    ]);
+    if (input.technique_ids) {
+      await q.query('delete from note_techniques where note_id = $1', [id]);
+      const { rows } = await q.query<{ id: number }>('select id from techniques where id = any($1::int[])', [input.technique_ids]);
+      for (const t of rows) {
+        await q.query('insert into note_techniques (note_id, technique_id) values ($1, $2)', [id, t.id]);
+      }
+      await q.query('update notes set inbox = $2 where id = $1', [id, rows.length === 0]);
+    }
+    await logActivity(q, 'update_note', `edit to note #${id}`, { kind: 'restore_note', row, techniqueIds: before });
+    return `Updated note #${id}.`;
+  });
+}
+
+export async function deleteNote(ctx: Ctx, id: number): Promise<string> {
+  return ctx.db.tx(async q => {
+    const row = (await q.query<NoteRowSnapshot>(NOTE_SNAPSHOT_SQL, [id])).rows[0];
+    if (!row) return `No note #${id}.`;
+    const techniqueIds = (
+      await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [id])
+    ).rows.map(r => r.technique_id);
+    await q.query('delete from notes where id = $1', [id]);
+    await logActivity(q, 'delete_note', `deleting note #${id}`, { kind: 'restore_note', row, techniqueIds });
+    return `Deleted note #${id}.`;
+  });
 }
 
 export interface LogSessionInput {

@@ -105,7 +105,7 @@ function speechFor(linked: string[], created: string[], inbox: boolean): string 
  */
 export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer | null): Router {
   const router = express.Router();
-  router.use('/api', (req, res, next) => {
+  const auth: express.RequestHandler = (req, res, next) => {
     const header = req.get('authorization') ?? '';
     const token = header.replace(/^Bearer\s+/i, '');
     if (!token || !secretsMatch(token, apiToken)) {
@@ -113,9 +113,9 @@ export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer
       return;
     }
     next();
-  });
+  };
 
-  router.post('/api/capture', express.json({ limit: '64kb' }), async (req, res) => {
+  router.post('/api/capture', auth, express.json({ limit: '64kb' }), async (req, res) => {
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     const url = typeof req.body?.url === 'string' && req.body.url.trim() ? req.body.url.trim() : undefined;
     if (!text && !url) {
@@ -164,7 +164,7 @@ export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer
     }
   });
 
-  router.get('/api/focus', async (_req, res) => {
+  router.get('/api/focus', auth, async (_req, res) => {
     const text = await getFocus(ctx);
     // Drop the "last note" detail for speech; keep rank and label.
     const speech = text

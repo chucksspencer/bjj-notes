@@ -44,7 +44,7 @@ async function freshDb(): Promise<{ db: Db; drop: () => Promise<void> }> {
   return { db: pgDb(url.href), drop: () => run(`drop database ${name} with (force)`) };
 }
 
-export async function startServer(structurer: Structurer | null = null): Promise<TestServer> {
+export async function startServer(structurer: Structurer | null = null, webDir?: string): Promise<TestServer> {
   const { db, drop } = await freshDb();
   await migrate(db);
   const http: Server = createServer();
@@ -59,7 +59,7 @@ export async function startServer(structurer: Structurer | null = null): Promise
     TIME_ZONE: 'America/Chicago',
   });
   const ctx: Ctx = { db, timeZone: config.timeZone };
-  http.on('request', buildApp({ ctx, config, structurer }));
+  http.on('request', buildApp({ ctx, config, structurer, webDir: webDir ?? '/nonexistent-web-dir' }));
   return {
     base,
     mcpUrl: `${base}/mcp`,

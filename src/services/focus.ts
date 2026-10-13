@@ -1,55 +1,24 @@
 import type { Queryable } from '../db.js';
 import { describeMiss, resolveFocusItem, resolveTechnique, techniquesMentionedIn } from '../resolve.js';
 import { logActivity, type FocusSnapshot } from './activity.js';
-import { today, type Ctx } from './context.js';
+import type { Ctx } from './context.js';
+import { focusView } from './views.js';
 import { daysAgo, type FocusAction } from './vocab.js';
 
-interface FocusRow {
-  id: number;
-  label: string;
-  goal: string | null;
-  status: string;
-  rank: number | null;
-  techniques: string[] | null;
-  last_note: string | null;
-}
-
-async function loadItems(q: Queryable): Promise<FocusRow[]> {
-  return (
-    await q.query<FocusRow>(
-      `select f.id, f.label, f.goal, f.status, f.rank,
-              array_remove(array_agg(distinct t.name), null) as techniques,
-              (select max(n.observed_on)::text from notes n
-                 join note_techniques nt on nt.note_id = n.id
-                 join focus_item_techniques ft2 on ft2.technique_id = nt.technique_id
-                where ft2.focus_item_id = f.id) as last_note
-       from focus_items f
-       left join focus_item_techniques ft on ft.focus_item_id = f.id
-       left join techniques t on t.id = ft.technique_id
-       where f.status in ('active', 'paused', 'backlog')
-       group by f.id
-       order by f.rank nulls last, f.updated_at desc`,
-    )
-  ).rows;
-}
-
 export async function getFocus(ctx: Ctx): Promise<string> {
-  const items = await loadItems(ctx.db);
-  const active = items.filter(i => i.status === 'active');
-  const now = new Date(`${today(ctx)}T12:00:00Z`);
+  const view = await focusView(ctx);
+  const now = new Date(`${view.today}T12:00:00Z`);
   const lines: string[] = [];
-  if (active.length) {
+  if (view.active.length) {
     lines.push('Active focus:');
-    for (const i of active) {
-      lines.push(`${i.rank}. ${i.label}${i.goal ? ` (goal: ${i.goal})` : ''} — ${daysAgo(i.last_note, now)}`);
+    for (const i of view.active) {
+      lines.push(`${i.rank}. ${i.label}${i.goal ? ` (goal: ${i.goal})` : ''} — ${daysAgo(i.lastNoteOn, now)}`);
     }
   } else {
     lines.push('Nothing on the active focus list.');
   }
-  const paused = items.filter(i => i.status === 'paused');
-  const backlog = items.filter(i => i.status === 'backlog');
-  if (paused.length) lines.push(`Paused: ${paused.map(i => i.label).join('; ')}.`);
-  if (backlog.length) lines.push(`Backlog: ${backlog.map(i => i.label).join('; ')}.`);
+  if (view.paused.length) lines.push(`Paused: ${view.paused.map(i => i.label).join('; ')}.`);
+  if (view.backlog.length) lines.push(`Backlog: ${view.backlog.map(i => i.label).join('; ')}.`);
   return lines.join('\n');
 }
 
@@ -57,6 +26,10 @@ export interface UpdateFocusInput {
   action: FocusAction;
   /** The item's label, or the name of a technique linked to it. For "add", the new label. */
   item: string;
+  /** Exact focus item id (from the web app); skips name matching. */
+  item_id?: number;
+  /** Exact technique ids to link (from the web app). */
+  technique_ids?: number[];
   /** 1 = top of the active list. Used by add, move and resume. */
   position?: number;
   /** Techniques to link to the item. On add, defaults to a technique matching the label. */
@@ -111,7 +84,12 @@ export async function updateFocus(ctx: Ctx, input: UpdateFocusInput): Promise<st
       activeIds.splice(pos - 1, 0, itemId);
       verb = `Added to focus at #${pos}`;
       const toLink: { id: number; name: string }[] = [];
-      if (input.techniques?.length) {
+      if (input.technique_ids?.length) {
+        toLink.push(
+          ...(await q.query<{ id: number; name: string }>('select id, name from techniques where id = any($1::int[])', [input.technique_ids]))
+            .rows,
+        );
+      } else if (input.techniques?.length) {
         for (const n of input.techniques) {
           const r = await resolveTechnique(q, n);
           if (r.match) toLink.push(r.match);
@@ -129,14 +107,24 @@ export async function updateFocus(ctx: Ctx, input: UpdateFocusInput): Promise<st
         );
         if (added[0]) addedLinks.push({ item: itemId, technique: t.id });
       }
-      if (toLink.length && !input.techniques?.length) extra.push(`linked to ${toLink.map(t => t.name).join(', ')}`);
+      if (toLink.length && !input.techniques?.length && !input.technique_ids?.length) {
+        extra.push(`linked to ${toLink.map(t => t.name).join(', ')}`);
+      }
       if (!addedLinks.length) extra.push('not linked to a technique card yet');
     } else {
-      const r = await resolveFocusItem(q, input.item);
-      if (!r.match) return describeMiss('focus item', input.item, r);
-      itemId = r.match.id;
-      label = r.match.name;
-      const cur = snapshot.find(s => s.id === itemId)!;
+      if (input.item_id !== undefined) {
+        const row = (await q.query<{ label: string }>('select label from focus_items where id = $1', [input.item_id])).rows[0];
+        if (!row) return `No focus item #${input.item_id}.`;
+        itemId = input.item_id;
+        label = row.label;
+      } else {
+        const r = await resolveFocusItem(q, input.item);
+        if (!r.match) return describeMiss('focus item', input.item, r);
+        itemId = r.match.id;
+        label = r.match.name;
+      }
+      const cur = snapshot.find(s => s.id === itemId);
+      if (!cur) return `${label} is already ${input.action === 'complete' ? 'done' : 'off the list'}.`;
 
       if (input.action === 'move' || input.action === 'resume') {
         const without = activeIds.filter(id => id !== itemId);
@@ -221,4 +209,17 @@ export async function focusHistory(ctx: Ctx, item?: string, limit = 30): Promise
   ).rows;
   if (!rows.length) return 'No focus history yet.';
   return rows.map(r => `${r.at} ${r.event}${r.to_rank ? ` (#${r.to_rank})` : ''}: ${r.label}`).join('\n');
+}
+
+/** Renames a focus item or changes its goal. */
+export async function editFocusItem(ctx: Ctx, id: number, input: { label?: string; goal?: string | null }): Promise<string> {
+  return ctx.db.tx(async q => {
+    const row = (await q.query<{ label: string; goal: string | null }>('select label, goal from focus_items where id = $1', [id])).rows[0];
+    if (!row) return `No focus item #${id}.`;
+    const label = input.label?.trim() || row.label;
+    const goal = input.goal !== undefined ? input.goal?.trim() || null : row.goal;
+    await q.query('update focus_items set label = $2, goal = $3, updated_at = now() where id = $1', [id, label, goal]);
+    await logActivity(q, 'edit_focus', `edit to "${row.label}"`, { kind: 'restore_focus_label', itemId: id, label: row.label, goal: row.goal });
+    return `Updated ${label}.`;
+  });
 }

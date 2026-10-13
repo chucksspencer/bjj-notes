@@ -8,10 +8,13 @@ import { captureRouter, type Structurer } from './capture.js';
 import type { Config } from './config.js';
 import { buildMcpServer } from './mcp/server.js';
 import type { Ctx } from './services/context.js';
+import { apiRouter } from './http/api.js';
+import { webAuth } from './http/auth.js';
+import { webAppRouter } from './http/static.js';
 
 const SCOPES = ['notes'];
 
-export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structurer | null }): Express {
+export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structurer | null; webDir?: string }): Express {
   const { ctx, config, structurer } = opts;
   const app = express();
   app.set('trust proxy', 1); // Cloud Run terminates TLS in front of us
@@ -68,13 +71,21 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
 
   app.use(captureRouter(ctx, config.apiToken, structurer));
 
+  // The web app: browser sign-in, its JSON API, and the built front end.
+  const web = webAuth({
+    db: ctx.db,
+    ownerPassword: config.ownerPassword,
+    apiToken: config.apiToken,
+    secureCookies: config.publicUrl.protocol === 'https:',
+  });
+  app.use(web.router);
+  app.use(apiRouter(ctx, web.requireAuth));
+
   // Liveness: cheap, does not touch the database (so probes don't keep Neon awake).
   app.get('/healthz', (_req, res) => {
     res.json({ ok: true });
   });
-  app.get('/', (_req, res) => {
-    res.type('text').send('BJJ Notes. Connect Claude to /mcp; Siri Shortcuts use /api/capture and /api/focus.');
-  });
+  app.use(webAppRouter(opts.webDir));
 
   return app;
 }

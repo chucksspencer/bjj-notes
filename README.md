@@ -8,7 +8,7 @@ It is one small Node service with three front doors:
 | --- | --- | --- |
 | `/mcp` | Claude (chat or voice) as a custom connector | OAuth 2.1, your password |
 | `/api/capture`, `/api/focus` | Siri Shortcuts ("Hey Siri, BJJ note") | Bearer token |
-| *(web UI)* | Browsing, editing, the graph view | Next milestone |
+| `/` | The web app: focus list, technique library, notes, positions, inbox | Your password (stays signed in 90 days) |
 
 The database starts with ~30 positions and your working list from 2026-10-09 (Baratoplata through ankle lock adjustments) as the active focus list, each linked to a technique card.
 
@@ -61,7 +61,19 @@ On claude.ai in a browser, add a **custom connector** in settings with the conne
 
 Try: *"What's on my BJJ focus list?"*, *"Add a note to ghost escape: turn to the knees before the hips"*, *"Move body lock passing to the top of my focus"*, *"What do I have from deep half bottom?"*, *"Undo that."*
 
-### 7. Siri Shortcuts
+### 7. The web app on your phone
+
+Open the server's address in Safari and sign in with `OWNER_PASSWORD`. Then **Share → Add to Home Screen** for an app icon that opens full screen.
+
+- **Focus**: your ranked list. Tap an item to open its technique card; the ••• button moves, pauses, completes, renames or removes it.
+- **Library**: every technique, searchable by name, alias or detail (typos are fine), filterable by type and top/bottom. The black bar on each row is its rank bar: one stripe for learning, two for drilling, three for hitting it live, four for reliable.
+- **Technique card**: tap the belt's stripes to change status; positions, key details, common mistakes, related techniques and notes, with YouTube videos that play from the saved timestamp.
+- **+**: a new note from anywhere. Notes without a technique land in the **Inbox** to file later.
+- **Positions**: what you have from each position, top or bottom, the ways in, and the gaps.
+
+Every change shows an **Undo** button, the same undo Claude uses when you say "undo that".
+
+### 8. Siri Shortcuts
 
 Create these in the Shortcuts app. Replace `HOST` with your server address and `TOKEN` with `API_TOKEN`.
 
@@ -105,15 +117,18 @@ The image is also built for Arm, so it runs as-is on a cheap VM with Docker Comp
 ```
 src/
   server.ts          entry point: config, database, migrations, HTTP
-  app.ts             routes: OAuth, /mcp (stateless Streamable HTTP), /api, /healthz
+  app.ts             routes: OAuth, /mcp (stateless Streamable HTTP), /api, the web app, /healthz
+  http/              the web app's sign-in (cookie sessions), JSON API (/api/v1) and static hosting
+  shared/api.ts      types shared by the JSON API and the web app
   mcp/server.ts      the 12 MCP tools and the instructions Claude sees
-  services/          notes, techniques, focus list, search/positions/review, undo log
+  services/          notes, techniques, focus list, search/positions/review, undo log; views.ts is the read side
   resolve.ts         fuzzy name matching tuned for voice transcription
   auth/              single-user OAuth server (dynamic registration, PKCE, rotating refresh tokens)
   capture.ts         Siri endpoints and the optional Claude parser
+web/                 the web app (React, Vite); built into dist/public
 db/migrations/       schema, starter positions, your working list
 infra/               Google Cloud bootstrap (run once) and deploy (run by CI) scripts
-test/                end-to-end tests over HTTP: OAuth flow, every MCP tool, capture API
+test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture, JSON API) and the web app in Chromium
 ```
 
 **Data model.** `positions` (with aliases like "100 kilos") · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, optional source and video timestamp, inbox flag) · `sources` · `sessions` · `focus_items` + `focus_events` (every add, move, pause and completion, for focus over time) · `activity_log` (powers `undo_last`).
@@ -141,14 +156,16 @@ test/                end-to-end tests over HTTP: OAuth flow, every MCP tool, cap
 ```
 npm install
 cp .env.example .env
-npm run dev          # embedded database, http://localhost:8080
+npm run dev          # server with an embedded database, http://localhost:8080
+npm run dev:web      # web app with live reload, http://localhost:5173 (talks to the server above)
 npm test             # embedded database
+npm run build && E2E=1 npx vitest run test/ui.e2e.test.ts   # the web app in Chromium
 TEST_PG_ADMIN_URL=postgres://postgres@localhost:5432/postgres npm test   # against real Postgres
 ```
 
 ## Next
 
-1. Web UI: library, technique pages with embedded videos at timestamps, focus board, inbox triage.
-2. Position graph view and focus timeline.
-3. Semantic search with pgvector embeddings.
-4. Native iOS app with App Intents, a Lock Screen focus widget and offline capture.
+1. Position graph view and focus timeline.
+2. Training sessions and a weekly review screen.
+3. Offline capture in the web app, and semantic search with pgvector embeddings.
+4. Native iOS app with App Intents and a Lock Screen focus widget.

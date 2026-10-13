@@ -1,9 +1,11 @@
-FROM node:22-slim AS build
+# Build once on the build machine's own platform (the output is plain JS), then assemble per target platform.
+FROM --platform=$BUILDPLATFORM node:22-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
+COPY web ./web
 RUN npm run build
 
 FROM node:22-slim
