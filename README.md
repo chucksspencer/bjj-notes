@@ -88,7 +88,7 @@ Create these in the Shortcuts app. Replace `HOST` with your server address and `
 **Save to BJJ Notes** (from the share sheet in Instagram, YouTube or Safari)
 1. In the shortcut's settings, turn on *Show in Share Sheet*; receive **URLs** and **Text**; if there's no input, **Continue**.
 2. *Ask for Input* (Text): "What's the takeaway?" Dictate with the keyboard's mic, or tap Done with nothing to save the link to review later.
-3. *Get Contents of URL* `https://HOST/api/capture`: Method **POST**; Headers `Authorization` = `Bearer TOKEN`; Request Body **JSON** with `text` = *Provided Input* and `url` = *Shortcut Input*
+3. *Get Contents of URL* `https://HOST/api/capture`: Method **POST**; Request Body **JSON** with `text` = *Provided Input*, `url` = *Shortcut Input* and `token` = your `API_TOKEN` (or send it as the header `Authorization` = `Bearer TOKEN` instead of the `token` field)
 4. *Get Dictionary Value* `speech` from *Contents of URL* → *Show Notification*
 
 The server tidies what it's given: share-tracking is stripped (`?igsh=…`, `?si=…`) so the same reel saved twice is one source; a link inside shared text or a dictated note is picked out; a link with no takeaway lands in the inbox as "Instagram reel to review." Reels play in the note when tapped, with *Open in Instagram* beside them.

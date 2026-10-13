@@ -22,6 +22,17 @@ describe('Siri capture API', () => {
     expect((await fetch(`${s.base}/api/focus`)).status).toBe(401);
   });
 
+  it('also takes the token as a JSON field, for Shortcuts without headers', async () => {
+    s = await startServer();
+    const send = (body: unknown) =>
+      fetch(`${s!.base}/api/capture`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    expect((await send({ text: 'Leg elevation: hook first.', token: API_TOKEN })).status).toBe(200);
+    expect((await send({ text: 'hi', token: 'wrong' })).status).toBe(401);
+    expect((await send({ text: 'hi' })).status).toBe(401);
+    const saved = (await s.db.query<{ body: string; raw_text: string }>('select body, raw_text from notes')).rows;
+    expect(JSON.stringify(saved)).not.toContain(API_TOKEN);
+  });
+
   it('without a parser, links techniques named in the text and inboxes the rest', async () => {
     s = await startServer();
     const res = await post(s, { text: 'Leg elevation from deep half: hook first, then lift.' });

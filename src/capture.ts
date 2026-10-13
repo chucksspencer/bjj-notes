@@ -124,9 +124,12 @@ function speechFor(linked: string[], created: string[], inbox: boolean): string 
  */
 export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer | null): Router {
   const router = express.Router();
+  // The token goes in the Authorization header, or (for POSTs) as a "token" field in the JSON body:
+  // headers are fiddly to set in the Shortcuts app, and a body field isn't written to request logs.
   const auth: express.RequestHandler = (req, res, next) => {
     const header = req.get('authorization') ?? '';
-    const token = header.replace(/^Bearer\s+/i, '');
+    const bodyToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    const token = header.replace(/^Bearer\s+/i, '').trim() || bodyToken;
     if (!token || !secretsMatch(token, apiToken)) {
       res.status(401).json({ error: 'unauthorized' });
       return;
@@ -134,7 +137,7 @@ export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer
     next();
   };
 
-  router.post('/api/capture', auth, express.json({ limit: '64kb' }), async (req, res) => {
+  router.post('/api/capture', express.json({ limit: '64kb' }), auth, async (req, res) => {
     let text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     let url: string | undefined;
     // A share sheet may hand over a bare link or text with the link inside (a caption and a URL);
