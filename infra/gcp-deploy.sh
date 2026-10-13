@@ -105,6 +105,9 @@ fi
 
 echo "Claude connector URL: $URL/mcp"
 echo "Siri capture URL:     $URL/api/capture"
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+  echo "::notice title=Deployed::Claude connector URL: $URL/mcp%0ASiri capture URL: $URL/api/capture"
+fi
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
     echo "### Deployed to Cloud Run ($REGION)"
