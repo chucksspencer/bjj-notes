@@ -42,17 +42,29 @@ async function run(fn: () => Promise<string>): Promise<CallToolResult> {
 }
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('YYYY-MM-DD; defaults to today');
+const sessionObject = z.object({
+  kind: z.enum(SESSION_KINDS),
+  name: z.string().optional().describe('Event name, e.g. "Zen camp"'),
+  instructor: z.string().optional(),
+  location: z.string().optional(),
+  date: date.optional().describe("YYYY-MM-DD; defaults to the note's date"),
+});
+// Also accepted as JSON text: a client holding an older copy of a tool's schema sends fields it
+// doesn't know about as strings.
 const sessionInput = z
-  .object({
-    kind: z.enum(SESSION_KINDS),
-    name: z.string().optional().describe('Event name, e.g. "Zen camp"'),
-    instructor: z.string().optional(),
-    location: z.string().optional(),
-    date: date.optional().describe("YYYY-MM-DD; defaults to the note's date"),
-  })
+  .union([sessionObject, z.string()])
   .describe(
     'Where the note came from, e.g. {kind: "class"} or {kind: "seminar", name: "Zen camp", instructor: "Josh Jones", date: "2024-02-03"}. Reuses a matching session on that date.',
   );
+
+function parseSession(v: z.infer<typeof sessionInput> | undefined): z.infer<typeof sessionObject> | undefined {
+  if (typeof v !== 'string') return v;
+  try {
+    return sessionObject.parse(JSON.parse(v));
+  } catch {
+    throw new Error('session should look like {"kind": "class"} or {"kind": "seminar", "name": "Zen camp", "date": "2024-02-03"}.');
+  }
+}
 const newTechnique = z.object({
   name: z.string(),
   type: z.enum(TECHNIQUE_TYPES),
@@ -156,7 +168,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
       },
       annotations: write,
     },
-    args => run(async () => (await addNote(ctx, { ...args, via: 'mcp' })).message),
+    args => run(async () => (await addNote(ctx, { ...args, session: parseSession(args.session), via: 'mcp' })).message),
   );
 
   server.registerTool(
@@ -206,7 +218,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
           body: args.text,
           kind: args.kind,
           observed_on: args.date,
-          session: args.session,
+          session: parseSession(args.session),
           session_id: args.clear_session ? null : undefined,
         }),
       ),

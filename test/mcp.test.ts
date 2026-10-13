@@ -207,6 +207,12 @@ describe('MCP tools over HTTP', () => {
     );
     expect(await call('undo_last')).toBe('Undid: Zen camp seminar by Josh Jones at Austin on 2024-02-03');
 
+    // A client with an older copy of the schema sends the session as JSON text.
+    const asText = await call('add_note', { text: 'Grip fighting first.', date: '2024-02-03', session: '{"kind": "seminar", "name": "Zen camp"}' });
+    expect(asText).toContain('(from Zen camp seminar by Josh Jones on 2024-02-03)');
+    await call('undo_last');
+    await expect(call('add_note', { text: 'x', session: 'class' })).rejects.toThrow(/session should look like/);
+
     expect(await call('update_note', { note_id: id, clear_session: true })).toBe(`Updated note #${id} (no session).`);
     expect(await call('update_note', { note_id: id, session: { kind: 'private', instructor: 'Josh Jones' } })).toBe(
       `Updated note #${id} (from private lesson by Josh Jones on 2024-02-03).`,
