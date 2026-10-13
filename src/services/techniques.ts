@@ -1,5 +1,6 @@
 import type { Queryable } from '../db.js';
 import { describeMiss, resolvePosition, resolveTechnique } from '../resolve.js';
+import { noteOrigin } from '../shared/sessions.js';
 import { logActivity, type EdgeSnapshot, type LinkSnapshot, type TechniqueSnapshot } from './activity.js';
 import type { Ctx } from './context.js';
 import type { Role, TechniqueType } from './vocab.js';
@@ -223,7 +224,8 @@ export async function getTechnique(ctx: Ctx, name: string, noteLimit = 5): Promi
     lines.push(`Notes (${t.notes.length} of ${t.noteCount}, newest first):`);
     for (const n of t.notes) {
       const src = n.source?.url ? ` [${n.source.title ?? n.source.url}${n.sourceTimestamp ? ` @${n.sourceTimestamp}` : ''}]` : '';
-      lines.push(`- ${n.observedOn} ${n.kind} #${n.id}: ${n.body}${src}`);
+      const origin = noteOrigin(n);
+      lines.push(`- ${n.observedOn} ${n.kind}${origin ? ` ${origin}` : ''} #${n.id}: ${n.body}${src}`);
     }
   } else {
     lines.push('No notes yet.');

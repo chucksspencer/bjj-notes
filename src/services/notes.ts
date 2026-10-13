@@ -1,7 +1,10 @@
 import type { Queryable } from '../db.js';
 import { resolveTechnique, type Candidate } from '../resolve.js';
-import { logActivity, NOTE_SNAPSHOT_SQL, type NoteRowSnapshot } from './activity.js';
+import type { SessionView } from '../shared/api.js';
+import { sessionPhrase } from '../shared/sessions.js';
+import { logActivity, NOTE_SNAPSHOT_SQL, type NoteRowSnapshot, type SessionChange } from './activity.js';
 import { today, type Ctx } from './context.js';
+import { findOrCreateSession, sessionById, type SessionDetails } from './sessions.js';
 import { createStub } from './techniques.js';
 import { UserError } from './errors.js';
 import { noteList } from './views.js';
@@ -30,10 +33,45 @@ export interface AddNoteInput {
   /** Techniques to create as new cards before linking (only for names that don't exist yet). */
   new_techniques?: NewTechniqueInput[];
   kind?: NoteKind;
+  /** Defaults to the session's date, then today. */
   date?: string;
   source?: SourceInput;
+  /** Where the note came from: an existing session, or null for none. */
+  session_id?: number | null;
+  /** Where the note came from: a session to find or create. */
+  session?: OriginInput;
   raw_text?: string;
   via?: 'mcp' | 'capture' | 'web';
+}
+
+export interface OriginInput extends SessionDetails {
+  /** Defaults to the note's date. */
+  date?: string;
+}
+
+interface Origin {
+  id: number | null;
+  view: SessionView | null;
+  change: SessionChange;
+}
+
+/**
+ * The session a note should point at, or undefined when the caller didn't say (so nothing changes).
+ * An explicit session wins; null means none.
+ */
+async function resolveOrigin(
+  q: Queryable,
+  noteDate: string,
+  sessionId: number | null | undefined,
+  session: OriginInput | undefined,
+): Promise<Origin | undefined> {
+  if (session) {
+    const found = await findOrCreateSession(q, session.date ?? noteDate, session);
+    return { id: found.id, view: found.view, change: found.created ? { createdId: found.id } : { before: found.before } };
+  }
+  if (sessionId === null) return { id: null, view: null, change: {} };
+  if (sessionId !== undefined) return { id: sessionId, view: await sessionById(q, sessionId), change: {} };
+  return undefined;
 }
 
 export interface AddNoteResult {
@@ -115,7 +153,7 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
   return ctx.db.tx(async q => {
     const text = input.text.trim();
     if (!text) throw new UserError('Note text is empty.');
-    const date = input.date ?? today(ctx);
+    const date = input.date ?? input.session?.date ?? today(ctx);
     const { ids, created, unresolved } = await linkTechniques(
       q,
       input.techniques ?? [],
@@ -123,8 +161,13 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
       input.technique_ids ?? [],
     );
     const sourceId = input.source ? await upsertSource(q, input.source) : null;
-    const sessions = (await q.query<{ id: number }>('select id from sessions where date = $1', [date])).rows;
-    const sessionId = sessions.length === 1 ? sessions[0]!.id : null;
+    const origin = await resolveOrigin(q, date, input.session_id, input.session);
+    let sessionId = origin?.id ?? null;
+    if (!origin) {
+      // Nothing said: a note from a day with exactly one session is from that session.
+      const sessions = (await q.query<{ id: number }>('select id from sessions where date = $1', [date])).rows;
+      sessionId = sessions.length === 1 ? sessions[0]!.id : null;
+    }
     const inbox = ids.size === 0 || unresolved.length > 0;
 
     const { rows } = await q.query<{ id: number }>(
@@ -148,7 +191,8 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
     }
 
     const linked = [...ids.values()];
-    const parts = [linked.length ? `Saved note #${noteId} to ${linked.join(', ')}` : `Saved note #${noteId}`];
+    const from = origin?.view ? ` (from ${sessionPhrase(origin.view)})` : '';
+    const parts = [(linked.length ? `Saved note #${noteId} to ${linked.join(', ')}` : `Saved note #${noteId}`) + from];
     if (created.length) parts.push(`new card${created.length > 1 ? 's' : ''}: ${created.map(c => c.name).join(', ')}`);
     for (const u of unresolved) {
       parts.push(
@@ -164,6 +208,7 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
       kind: 'delete_note',
       noteId,
       createdTechniqueIds: created.map(c => c.id),
+      session: origin?.change,
     });
     return { noteId, linked, created: created.map(c => c.name), unresolved, inbox, message };
   });
@@ -226,6 +271,10 @@ export interface UpdateNoteInput {
   observed_on?: string;
   /** Replaces the linked techniques. An empty list sends the note to the inbox. */
   technique_ids?: number[];
+  /** Where the note came from: an existing session, or null for none. */
+  session_id?: number | null;
+  /** Where the note came from: a session to find or create (dated like the note unless given). */
+  session?: OriginInput;
 }
 
 export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): Promise<string> {
@@ -237,11 +286,14 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
     ).rows.map(r => r.technique_id);
     const body = input.body !== undefined ? input.body.trim() : row.body;
     if (!body) throw new UserError('Note text is empty.');
-    await q.query('update notes set body = $2, kind = $3, observed_on = $4 where id = $1', [
+    const observedOn = input.observed_on ?? row.observed_on;
+    const origin = await resolveOrigin(q, observedOn, input.session_id, input.session);
+    await q.query('update notes set body = $2, kind = $3, observed_on = $4, session_id = $5 where id = $1', [
       id,
       body,
       input.kind ?? row.kind,
-      input.observed_on ?? row.observed_on,
+      observedOn,
+      origin ? origin.id : row.session_id,
     ]);
     if (input.technique_ids) {
       await q.query('delete from note_techniques where note_id = $1', [id]);
@@ -251,8 +303,14 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
       }
       await q.query('update notes set inbox = $2 where id = $1', [id, rows.length === 0]);
     }
-    await logActivity(q, 'update_note', `edit to note #${id}`, { kind: 'restore_note', row, techniqueIds: before });
-    return `Updated note #${id}.`;
+    await logActivity(q, 'update_note', `edit to note #${id}`, {
+      kind: 'restore_note',
+      row,
+      techniqueIds: before,
+      session: origin?.change,
+    });
+    if (origin?.view) return `Updated note #${id} (from ${sessionPhrase(origin.view)}).`;
+    return origin ? `Updated note #${id} (no session).` : `Updated note #${id}.`;
   });
 }
 
@@ -266,34 +324,5 @@ export async function deleteNote(ctx: Ctx, id: number): Promise<string> {
     await q.query('delete from notes where id = $1', [id]);
     await logActivity(q, 'delete_note', `deleting note #${id}`, { kind: 'restore_note', row, techniqueIds });
     return `Deleted note #${id}.`;
-  });
-}
-
-export interface LogSessionInput {
-  date?: string;
-  kind?: 'class' | 'open_mat' | 'private' | 'seminar' | 'competition' | 'drilling' | 'other';
-  gi?: 'gi' | 'nogi' | 'both';
-  instructor?: string;
-  location?: string;
-  summary?: string;
-}
-
-export async function logSession(ctx: Ctx, input: LogSessionInput): Promise<string> {
-  return ctx.db.tx(async q => {
-    const date = input.date ?? today(ctx);
-    const { rows } = await q.query<{ id: number }>(
-      `insert into sessions (date, kind, gi, instructor, location, summary) values ($1, $2, $3, $4, $5, $6) returning id`,
-      [date, input.kind ?? 'class', input.gi ?? null, input.instructor ?? null, input.location ?? null, input.summary ?? null],
-    );
-    const sessionId = rows[0]!.id;
-    const attached = (
-      await q.query<{ id: number }>(
-        'update notes set session_id = $1 where observed_on = $2 and session_id is null returning id',
-        [sessionId, date],
-      )
-    ).rows.map(r => r.id);
-    const kind = (input.kind ?? 'class').replace('_', ' ');
-    await logActivity(q, 'log_session', `${kind} on ${date}`, { kind: 'delete_session', sessionId, attachedNoteIds: attached });
-    return `Logged ${kind} on ${date}${attached.length ? ` and attached ${attached.length} note${attached.length > 1 ? 's' : ''} from that day` : ''}.`;
   });
 }

@@ -7,6 +7,7 @@ import type {
   NoteView,
   PositionListItem,
   PositionView,
+  SessionView,
   TechniqueListItem,
   TechniqueView,
 } from '../shared/api.js';
@@ -21,18 +22,33 @@ import {
   LINK_KINDS,
   NOTE_KINDS,
   ROLES,
+  SESSION_KINDS,
   SOURCE_KINDS,
   STATUSES,
   TECHNIQUE_TYPES,
 } from '../services/vocab.js';
+import { sessionList } from '../services/sessions.js';
 import { focusView, noteList, noteView, positionList, positionView, techniqueList, techniqueView } from '../services/views.js';
-
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const id = z.coerce.number().int().positive();
 const newTechnique = z.object({ name: z.string().trim().min(1).max(120), type: z.enum(TECHNIQUE_TYPES), role: z.enum(ROLES).optional() });
 const strList = z.array(z.string().trim().max(500)).max(100);
 
+const optText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .optional()
+    .transform(v => v || undefined);
+const sessionInput = z.object({
+  kind: z.enum(SESSION_KINDS),
+  name: optText(120),
+  instructor: optText(120),
+  location: optText(120),
+  date: date.optional(),
+});
 const noteCreate = z.object({
   text: z.string().trim().min(1).max(10_000),
   techniqueIds: z.array(z.number().int()).max(20).optional(),
@@ -48,12 +64,16 @@ const noteCreate = z.object({
       timestamp: z.string().trim().max(20).optional(),
     })
     .optional(),
+  sessionId: z.number().int().nullable().optional(),
+  session: sessionInput.optional(),
 });
 const notePatch = z.object({
   body: z.string().trim().min(1).max(10_000).optional(),
   kind: z.enum(NOTE_KINDS).optional(),
   date: date.optional(),
   techniqueIds: z.array(z.number().int()).max(20).optional(),
+  sessionId: z.number().int().nullable().optional(),
+  session: sessionInput.optional(),
 });
 const techniqueCreate = z.object({
   name: z.string().trim().min(1).max(120),
@@ -296,6 +316,8 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
         kind: b.kind,
         date: b.date,
         source: b.source,
+        session_id: b.sessionId,
+        session: b.session,
         via: 'web',
       });
       res.status(201);
@@ -307,7 +329,14 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
     h(async (req): Promise<NoteView> => {
       const noteId = id.parse(req.params.id);
       const b = notePatch.parse(req.body);
-      await updateNote(ctx, noteId, { body: b.body, kind: b.kind, observed_on: b.date, technique_ids: b.techniqueIds });
+      await updateNote(ctx, noteId, {
+        body: b.body,
+        kind: b.kind,
+        observed_on: b.date,
+        technique_ids: b.techniqueIds,
+        session_id: b.sessionId,
+        session: b.session,
+      });
       const note = await noteView(ctx.db, noteId);
       if (!note) throw new NotFound(`No note #${noteId}.`);
       return note;
@@ -327,6 +356,15 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
     }),
   );
   r.delete('/api/v1/notes/:id', h(async (req): Promise<MessageResult> => ({ message: await deleteNote(ctx, id.parse(req.params.id)) })));
+
+  // Sessions: where notes came from
+  r.get(
+    '/api/v1/sessions',
+    h(async (req): Promise<SessionView[]> => {
+      const qs = z.object({ limit: z.coerce.number().int().min(1).max(100).optional(), date: date.optional() }).parse(req.query);
+      return sessionList(ctx.db, { limit: qs.limit ?? 12, date: qs.date });
+    }),
+  );
 
   // Positions
   r.get('/api/v1/positions', h(async (): Promise<PositionListItem[]> => positionList(ctx.db)));

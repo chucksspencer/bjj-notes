@@ -1,4 +1,5 @@
 import { describeMiss, resolvePosition } from '../resolve.js';
+import { noteOrigin } from '../shared/sessions.js';
 import { today, type Ctx } from './context.js';
 import type { Status, TechniqueType } from '../shared/api.js';
 import { noteList, positionView, techniqueList } from './views.js';
@@ -62,7 +63,10 @@ export async function search(ctx: Ctx, input: SearchInput): Promise<string> {
     if (notes.length) {
       lines.push('Notes:');
       for (const n of notes) {
-        lines.push(`- #${n.id} ${n.observedOn}${n.techniques.length ? ` [${n.techniques.map(t => t.name).join(', ')}]` : ''}: ${n.body}`);
+        const origin = noteOrigin(n);
+        lines.push(
+          `- #${n.id} ${n.observedOn}${origin ? ` ${origin}` : ''}${n.techniques.length ? ` [${n.techniques.map(t => t.name).join(', ')}]` : ''}: ${n.body}`,
+        );
       }
     }
   }

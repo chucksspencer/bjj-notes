@@ -111,6 +111,12 @@ export function friendlyDate(iso: string, today: string): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }), timeZone: 'UTC' });
 }
 
+/** A date as it reads after a noun: "today", "yesterday", "on Monday", "on Oct 3, 2025". */
+export function datePhrase(iso: string, today: string): string {
+  const d = friendlyDate(iso, today);
+  return d === 'Today' || d === 'Yesterday' ? d.toLowerCase() : `on ${d}`;
+}
+
 export function lastNoteText(iso: string | null, today: string): string {
   if (!iso) return 'No notes yet';
   const days = Math.round((Date.parse(`${today}T12:00:00Z`) - Date.parse(`${iso}T12:00:00Z`)) / 86_400_000);

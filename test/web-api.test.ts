@@ -2,7 +2,16 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { FocusView, NoteCreateResult, NoteView, PositionListItem, PositionView, TechniqueListItem, TechniqueView } from '../src/shared/api.js';
+import type {
+  FocusView,
+  NoteCreateResult,
+  NoteView,
+  PositionListItem,
+  PositionView,
+  SessionView,
+  TechniqueListItem,
+  TechniqueView,
+} from '../src/shared/api.js';
 import { API_TOKEN, OWNER_PASSWORD, startServer, type TestServer } from './helpers.js';
 
 let s: TestServer;
@@ -170,6 +179,66 @@ describe('JSON API', () => {
     expect((await api('POST', '/api/v1/notes', { text: '   ' })).status).toBe(400);
     const sneaky = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'x', source: { url: 'javascript:alert(1)' } })).body;
     expect(sneaky.note.source).toBeNull();
+  });
+
+  it('records where notes came from, reusing sessions and undoing cleanly', async () => {
+    const note = async (noteId: number) => (await api<NoteView[]>('GET', '/api/v1/notes?limit=200')).body.find(x => x.id === noteId)!;
+    const sessions = async () => (await api<SessionView[]>('GET', '/api/v1/sessions')).body;
+
+    // A named seminar with an instructor; the note takes the seminar's date.
+    const a = (
+      await api<NoteCreateResult>('POST', '/api/v1/notes', {
+        text: 'Hide the near arm before the turn.',
+        techniqueIds: [ghost.id],
+        session: { kind: 'seminar', name: 'Zen camp', instructor: 'Josh Jones', date: '2024-02-03' },
+      })
+    ).body;
+    expect(a.message).toBe(`Saved note #${a.note.id} to Ghost escape (from Zen camp seminar by Josh Jones on 2024-02-03).`);
+    expect(a.note.observedOn).toBe('2024-02-03');
+    expect(a.note.session).toMatchObject({ kind: 'seminar', name: 'Zen camp', instructor: 'Josh Jones', date: '2024-02-03' });
+
+    // The same seminar described differently is reused, and gains the detail it was missing.
+    const b = (
+      await api<NoteCreateResult>('POST', '/api/v1/notes', {
+        text: 'Elbow to knee is everything.',
+        date: '2024-02-03',
+        session: { kind: 'seminar', instructor: 'josh jones', location: 'Austin', name: '' },
+      })
+    ).body;
+    expect(b.note.session).toMatchObject({ id: a.note.session!.id, name: 'Zen camp', location: 'Austin' });
+    // A different seminar the same day is a second session.
+    const other = (
+      await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Wrestling ups.', date: '2024-02-03', session: { kind: 'seminar', name: 'Wrestling day' } })
+    ).body;
+    expect(other.note.session!.id).not.toBe(a.note.session!.id);
+    await api('POST', '/api/v1/undo'); // takes the second seminar with it
+    await api('POST', '/api/v1/undo'); // puts back the missing detail
+    expect((await note(b.note.id)) ?? null).toBeNull();
+    expect((await sessions()).find(x => x.id === a.note.session!.id)!.location).toBeNull();
+
+    // Search finds notes by where they came from.
+    expect((await api<NoteView[]>('GET', '/api/v1/notes?q=Josh Jones')).body.map(x => x.id)).toEqual([a.note.id]);
+
+    // A class on another day; then moving a note between sessions, clearing it, and undo.
+    const c = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Class note.', date: '2026-10-12', session: { kind: 'class' } })).body;
+    expect(c.message).toBe(`Saved note #${c.note.id} (from class on 2026-10-12); left in the inbox to file later.`);
+    expect((await sessions()).map(x => [x.kind, x.date])).toEqual([
+      ['class', '2026-10-12'],
+      ['seminar', '2024-02-03'],
+    ]);
+    expect((await api<NoteView>('PATCH', `/api/v1/notes/${c.note.id}`, { sessionId: a.note.session!.id })).body.session!.name).toBe('Zen camp');
+    expect((await api<NoteView>('PATCH', `/api/v1/notes/${c.note.id}`, { sessionId: null })).body.session).toBeNull();
+    await api('POST', '/api/v1/undo');
+    expect((await note(c.note.id)).session!.name).toBe('Zen camp');
+
+    // A note left alone attaches to the day's only session; an explicit null doesn't.
+    const d = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Later that day.', date: '2026-10-12' })).body;
+    expect(d.note.session).toMatchObject({ kind: 'class', date: '2026-10-12' });
+    const e = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Watched at home.', date: '2026-10-12', sessionId: null })).body;
+    expect(e.note.session).toBeNull();
+
+    expect((await api('POST', '/api/v1/notes', { text: 'x', sessionId: 999_999 })).status).toBe(404);
+    expect((await api('POST', '/api/v1/notes', { text: 'x', session: { kind: 'party' } })).status).toBe(400);
   });
 
   it('runs the focus list by id', async () => {

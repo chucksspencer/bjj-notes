@@ -20,9 +20,25 @@ export interface FocusSnapshot {
   goal: string | null;
 }
 
+/** A session's details, to put back after they were filled in. */
+export interface SessionSnapshot {
+  id: number;
+  name: string | null;
+  instructor: string | null;
+  location: string | null;
+  gi: string | null;
+  summary: string | null;
+}
+
+/** What a write did to sessions while setting a note's origin. */
+export interface SessionChange {
+  createdId?: number;
+  before?: SessionSnapshot | null;
+}
+
 /** Everything needed to reverse one write. */
 export type UndoOp =
-  | { kind: 'delete_note'; noteId: number; createdTechniqueIds: number[] }
+  | { kind: 'delete_note'; noteId: number; createdTechniqueIds: number[]; session?: SessionChange }
   | { kind: 'delete_techniques'; techniqueIds: number[] }
   | {
       kind: 'restore_technique';
@@ -38,10 +54,11 @@ export type UndoOp =
       eventIds: number[];
       addedLinks: { item: number; technique: number }[];
     }
-  | { kind: 'delete_session'; sessionId: number; attachedNoteIds: number[] }
+  /** Undoes log_session: detaches the notes it attached, then deletes the session (if it made it) or restores its details. */
+  | { kind: 'delete_session'; sessionId: number; attachedNoteIds: number[]; created?: boolean; before?: SessionSnapshot | null }
   | { kind: 'refile_note'; noteId: number; inbox: boolean; techniqueIds: number[]; createdTechniqueIds: number[] }
   /** Puts a note back exactly as it was (after an edit or a delete). */
-  | { kind: 'restore_note'; row: NoteRowSnapshot; techniqueIds: number[] }
+  | { kind: 'restore_note'; row: NoteRowSnapshot; techniqueIds: number[]; session?: SessionChange }
   | { kind: 'restore_edge'; edge: EdgeSnapshot }
   | { kind: 'restore_link'; link: LinkSnapshot }
   /** Recreates a deleted technique with everything that pointed at it. */
@@ -119,11 +136,29 @@ async function deleteTechniques(q: Queryable, ids: number[]) {
   if (ids.length) await q.query('delete from techniques where id = any($1::int[])', [ids]);
 }
 
+async function restoreSession(q: Queryable, s: SessionSnapshot) {
+  await q.query('update sessions set name = $2, instructor = $3, location = $4, gi = $5, summary = $6 where id = $1', [
+    s.id,
+    s.name,
+    s.instructor,
+    s.location,
+    s.gi,
+    s.summary,
+  ]);
+}
+
+/** Runs after the note itself is put back, so a session made for it has nothing pointing at it. */
+async function revertSessionChange(q: Queryable, c: SessionChange | undefined) {
+  if (c?.before) await restoreSession(q, c.before);
+  if (c?.createdId) await q.query('delete from sessions where id = $1', [c.createdId]);
+}
+
 async function apply(q: Queryable, op: UndoOp): Promise<void> {
   switch (op.kind) {
     case 'delete_note':
       await q.query('delete from notes where id = $1', [op.noteId]);
       await deleteTechniques(q, op.createdTechniqueIds);
+      await revertSessionChange(q, op.session);
       return;
     case 'delete_techniques':
       await deleteTechniques(q, op.techniqueIds);
@@ -161,7 +196,8 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       if (op.attachedNoteIds.length) {
         await q.query('update notes set session_id = null where id = any($1::int[])', [op.attachedNoteIds]);
       }
-      await q.query('delete from sessions where id = $1', [op.sessionId]);
+      if (op.before) await restoreSession(q, op.before);
+      if (op.created !== false) await q.query('delete from sessions where id = $1', [op.sessionId]);
       return;
     case 'restore_note': {
       const r = op.row;
@@ -177,6 +213,7 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       for (const t of op.techniqueIds) {
         await q.query('insert into note_techniques (note_id, technique_id) values ($1, $2) on conflict do nothing', [r.id, t]);
       }
+      await revertSessionChange(q, op.session);
       return;
     }
     case 'restore_edge':

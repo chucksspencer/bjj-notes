@@ -9,6 +9,7 @@ import type {
   PositionListItem,
   PositionView,
   Role,
+  SessionView,
   SourceKind,
   TechniqueListItem,
   TechniqueRef,
@@ -40,6 +41,12 @@ interface NoteRow {
   s_url: string | null;
   s_title: string | null;
   s_author: string | null;
+  ss_date: string | null;
+  ss_kind: SessionView['kind'] | null;
+  ss_name: string | null;
+  ss_instructor: string | null;
+  ss_location: string | null;
+  ss_gi: SessionView['gi'];
   techniques: unknown;
 }
 
@@ -47,10 +54,14 @@ const NOTE_SELECT = `
   select n.id, n.body, n.raw_text, n.kind, n.observed_on::text as observed_on, n.source_timestamp, n.inbox,
          n.session_id, n.created_via,
          s.id as s_id, s.kind as s_kind, s.url as s_url, s.title as s_title, s.author as s_author,
+         ss.date::text as ss_date, ss.kind as ss_kind, ss.name as ss_name, ss.instructor as ss_instructor,
+         ss.location as ss_location, ss.gi as ss_gi,
          coalesce((select json_agg(${TECH_REF_JSON} order by t.name)
                    from note_techniques nt join techniques t on t.id = nt.technique_id
                    where nt.note_id = n.id), '[]'::json) as techniques
-  from notes n left join sources s on s.id = n.source_id`;
+  from notes n
+  left join sources s on s.id = n.source_id
+  left join sessions ss on ss.id = n.session_id`;
 
 function toNote(r: NoteRow): NoteView {
   return {
@@ -66,6 +77,18 @@ function toNote(r: NoteRow): NoteView {
     techniques: json<TechniqueRef[]>(r.techniques),
     inbox: r.inbox,
     sessionId: r.session_id,
+    session:
+      r.session_id && r.ss_kind
+        ? {
+            id: r.session_id,
+            date: r.ss_date!,
+            kind: r.ss_kind,
+            name: r.ss_name,
+            instructor: r.ss_instructor,
+            location: r.ss_location,
+            gi: r.ss_gi,
+          }
+        : null,
     createdVia: r.created_via,
   };
 }
@@ -95,7 +118,9 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
   let order = opts.oldestFirst ? 'n.id asc' : 'n.observed_on desc, n.id desc';
   if (opts.q?.trim()) {
     const tq = p(opts.q.trim());
-    where.push(`n.search @@ websearch_to_tsquery('english', ${tq})`);
+    // The note's words, or where it came from ("Josh Jones", "Zen camp").
+    where.push(`(n.search @@ websearch_to_tsquery('english', ${tq})
+      or to_tsvector('simple', concat_ws(' ', ss.name, ss.instructor, ss.location)) @@ websearch_to_tsquery('simple', ${tq}))`);
     order = `ts_rank(n.search, websearch_to_tsquery('english', ${tq})) desc, n.observed_on desc, n.id desc`;
   }
   if (opts.beforeId !== undefined) where.push(`n.id < ${p(opts.beforeId)}`);

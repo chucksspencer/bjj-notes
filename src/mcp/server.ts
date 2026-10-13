@@ -5,7 +5,8 @@ import { undoLast } from '../services/activity.js';
 import type { Ctx } from '../services/context.js';
 import { getPosition, review, search } from '../services/explore.js';
 import { focusHistory, getFocus, updateFocus } from '../services/focus.js';
-import { addNote, fileNote, getInbox, logSession } from '../services/notes.js';
+import { addNote, fileNote, getInbox, updateNote } from '../services/notes.js';
+import { logSession } from '../services/sessions.js';
 import { getTechnique, saveTechnique } from '../services/techniques.js';
 import {
   FOCUS_ACTIONS,
@@ -26,6 +27,7 @@ How to use it well:
 - When Chuck describes something he learned or noticed, call add_note with the technique names it's about. Use new_techniques only for genuinely new techniques, with your best guess at type and role.
 - Before creating a technique card, use search to check whether it already exists under another name; add the alternative name as an alias.
 - Model techniques as moves between positions: a sweep goes from a guard (bottom) to top; a pass goes from a guard (top) to a pin; an escape starts from a pin (bottom).
+- Say where a note came from with add_note's session (a class, a seminar with its name and instructor, an open mat): "notes from today's class" is {kind: "class"}; "Zen camp seminar by Josh Jones on 2024-02-03" is {kind: "seminar", name: "Zen camp", instructor: "Josh Jones", date: "2024-02-03"}. The same session is reused, not duplicated.
 - The focus list is ordered; #1 is what he's working on most. "Add X to my focus" puts it at the top unless he says otherwise.
 - Replies are often read aloud, so keep confirmations short. If he says "undo that", call undo_last.`;
 
@@ -40,6 +42,17 @@ async function run(fn: () => Promise<string>): Promise<CallToolResult> {
 }
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('YYYY-MM-DD; defaults to today');
+const sessionInput = z
+  .object({
+    kind: z.enum(SESSION_KINDS),
+    name: z.string().optional().describe('Event name, e.g. "Zen camp"'),
+    instructor: z.string().optional(),
+    location: z.string().optional(),
+    date: date.optional().describe("YYYY-MM-DD; defaults to the note's date"),
+  })
+  .describe(
+    'Where the note came from, e.g. {kind: "class"} or {kind: "seminar", name: "Zen camp", instructor: "Josh Jones", date: "2024-02-03"}. Reuses a matching session on that date.',
+  );
 const newTechnique = z.object({
   name: z.string(),
   type: z.enum(TECHNIQUE_TYPES),
@@ -123,13 +136,14 @@ export function buildMcpServer(ctx: Ctx): McpServer {
     {
       title: 'Add a note',
       description:
-        'Saves a dated note and links it to techniques by name. Notes whose techniques cannot be matched go to the inbox. Use source for videos (url, timestamp) or a named instructor.',
+        'Saves a dated note and links it to techniques by name. Notes whose techniques cannot be matched go to the inbox. Use session for where it came from (a class, a seminar) and source for videos (url, timestamp).',
       inputSchema: {
         text: z.string(),
         techniques: z.array(z.string()).optional(),
         new_techniques: z.array(newTechnique).optional().describe('Create these cards first (only if they do not exist)'),
         kind: z.enum(NOTE_KINDS).optional().describe('instruction = taught/watched; rolling = happened live'),
-        date: date.optional(),
+        date: date.optional().describe("YYYY-MM-DD; defaults to the session's date, else today"),
+        session: sessionInput.optional(),
         source: z
           .object({
             kind: z.enum(SOURCE_KINDS).optional(),
@@ -172,13 +186,42 @@ export function buildMcpServer(ctx: Ctx): McpServer {
   );
 
   server.registerTool(
+    'update_note',
+    {
+      title: 'Edit a note',
+      description: "Changes a note's text, kind, date or where it came from (session). Leave out what shouldn't change.",
+      inputSchema: {
+        note_id: z.number().int(),
+        text: z.string().optional(),
+        kind: z.enum(NOTE_KINDS).optional(),
+        date: date.optional().describe('YYYY-MM-DD'),
+        session: sessionInput.optional(),
+        clear_session: z.boolean().optional().describe("True to say the note didn't come from any session"),
+      },
+      annotations: write,
+    },
+    args =>
+      run(() =>
+        updateNote(ctx, args.note_id, {
+          body: args.text,
+          kind: args.kind,
+          observed_on: args.date,
+          session: args.session,
+          session_id: args.clear_session ? null : undefined,
+        }),
+      ),
+  );
+
+  server.registerTool(
     'log_session',
     {
       title: 'Log a training session',
-      description: "Records a class, open mat, private etc. Notes from the same day are attached to it.",
+      description:
+        'Records a class, seminar, open mat, private etc. Notes from that day without a session are attached to it. If the same kind of session is already logged that day, it is updated instead (give a different name to log a second one).',
       inputSchema: {
         date: date.optional(),
         kind: z.enum(SESSION_KINDS).optional(),
+        name: z.string().optional().describe('Event name, e.g. "Zen camp"'),
         gi: z.enum(GI).optional(),
         instructor: z.string().optional(),
         location: z.string().optional(),

@@ -5,7 +5,7 @@ import { techniquesMentionedIn } from './resolve.js';
 import type { Ctx } from './services/context.js';
 import { getFocus } from './services/focus.js';
 import { addNote, type AddNoteInput } from './services/notes.js';
-import { NOTE_KINDS, ROLES, SOURCE_KINDS, TECHNIQUE_TYPES } from './services/vocab.js';
+import { NOTE_KINDS, ROLES, SESSION_KINDS, SOURCE_KINDS, TECHNIQUE_TYPES } from './services/vocab.js';
 
 /** What the parser extracts from a dictated note. */
 export interface StructuredNote {
@@ -14,6 +14,7 @@ export interface StructuredNote {
   new_techniques: { name: string; type: (typeof TECHNIQUE_TYPES)[number]; role?: (typeof ROLES)[number] }[];
   kind: (typeof NOTE_KINDS)[number];
   source?: { kind?: (typeof SOURCE_KINDS)[number]; url?: string; title?: string; author?: string; timestamp?: string };
+  session?: { kind: (typeof SESSION_KINDS)[number]; name?: string; instructor?: string; date?: string };
 }
 
 export type Structurer = (text: string, known: { techniques: string[]; positions: string[] }) => Promise<StructuredNote>;
@@ -52,9 +53,21 @@ const FILE_NOTE_TOOL = {
         enum: [...NOTE_KINDS],
         description: 'instruction = taught in class or watched; rolling = happened while sparring; drilling; question; idea.',
       },
+      session: {
+        type: 'object',
+        description:
+          'Only if the note says where it was taught or happened: a class, a seminar (with its event name and instructor), an open mat, a private lesson.',
+        properties: {
+          kind: { type: 'string', enum: [...SESSION_KINDS] },
+          name: { type: 'string', description: 'Event name, e.g. "Zen camp"' },
+          instructor: { type: 'string' },
+          date: { type: 'string', description: 'YYYY-MM-DD, only if the note states the date' },
+        },
+        required: ['kind'],
+      },
       source: {
         type: 'object',
-        description: 'Only if the note mentions a video, instructor or other source.',
+        description: 'Only if the note mentions a video, book or other media it came from.',
         properties: {
           kind: { type: 'string', enum: [...SOURCE_KINDS] },
           url: { type: 'string' },
@@ -88,6 +101,11 @@ export function claudeStructurer(apiKey: string, model: string): Structurer {
     if (!block || block.type !== 'tool_use') throw new Error('Parser returned no structured note');
     return block.input as StructuredNote;
   };
+}
+
+/** Drops a date the parser made up in the wrong shape rather than failing the save. */
+function cleanSession(s: NonNullable<StructuredNote['session']>): NonNullable<StructuredNote['session']> {
+  return { ...s, date: s.date && /^\d{4}-\d{2}-\d{2}$/.test(s.date) ? s.date : undefined };
 }
 
 function speechFor(linked: string[], created: string[], inbox: boolean): string {
@@ -137,6 +155,7 @@ export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer
           techniques: s.techniques ?? [],
           new_techniques: s.new_techniques ?? [],
           kind: s.kind,
+          session: s.session?.kind && SESSION_KINDS.includes(s.session.kind) ? cleanSession(s.session) : undefined,
           source: url ? { ...s.source, url } : s.source?.url || s.source?.author || s.source?.title ? s.source : undefined,
           via: 'capture',
         };

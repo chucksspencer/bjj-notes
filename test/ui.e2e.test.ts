@@ -94,6 +94,35 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByText('Ghost escape').first().waitFor();
   });
 
+  it('records where a note came from and offers it again next time', async () => {
+    const sheet = page.getByRole('dialog');
+    await page.getByRole('button', { name: 'New note' }).click();
+    await page.getByPlaceholder('What did you learn or notice?').fill('Hide the near arm before the turn.');
+    await page.getByPlaceholder('Search techniques').fill('ghost');
+    await sheet.getByRole('button', { name: /^Ghost escape/ }).click();
+    await sheet.getByRole('group', { name: 'From' }).getByRole('button', { name: 'New' }).click();
+    await sheet.getByRole('button', { name: 'Seminar', exact: true }).click();
+    await sheet.getByLabel('Event').fill('Zen camp');
+    await sheet.getByLabel('Instructor').fill('Josh Jones');
+    await sheet.getByText('Zen camp seminar by Josh Jones today').waitFor();
+    await page.getByRole('button', { name: 'Save note' }).click();
+    await page.getByText('Saved to Ghost escape').waitFor();
+
+    await page.getByRole('navigation').getByRole('link', { name: 'Library' }).click();
+    await page.getByLabel('Search techniques').fill('ghost');
+    await page.getByRole('link', { name: /Ghost escape/ }).first().click();
+    await page.getByText('From Zen camp seminar by Josh Jones').waitFor();
+
+    // Today has exactly one session now, so a new note starts out from it.
+    await page.getByRole('button', { name: 'New note' }).click();
+    const chip = sheet.getByRole('group', { name: 'From' }).getByRole('button', { name: 'Zen camp seminar today' });
+    await expect.poll(() => chip.getAttribute('aria-pressed')).toBe('true');
+    await sheet.getByRole('group', { name: 'From' }).getByRole('button', { name: 'None' }).click();
+    expect(await chip.getAttribute('aria-pressed')).toBe('false');
+    await page.keyboard.press('Escape');
+    await sheet.waitFor({ state: 'detached' });
+  });
+
   it('navigates on desktop Chrome 150+, where scrollTo returns a Promise', async () => {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await ctx.addInitScript(() => {

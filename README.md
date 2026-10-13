@@ -131,7 +131,7 @@ infra/               Google Cloud bootstrap (run once) and deploy (run by CI) sc
 test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture, JSON API) and the web app in Chromium
 ```
 
-**Data model.** `positions` (with aliases like "100 kilos") · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, optional source and video timestamp, inbox flag) · `sources` · `sessions` · `focus_items` + `focus_events` (every add, move, pause and completion, for focus over time) · `activity_log` (powers `undo_last`).
+**Data model.** `positions` (with aliases like "100 kilos") · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, inbox flag) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `focus_items` + `focus_events` (every add, move, pause and completion, for focus over time) · `activity_log` (powers `undo_last`).
 
 **Name matching.** Voice transcription mangles names, so lookups combine trigram similarity, edit distance and word matching: "barra toe plata" finds Baratoplata, "ghost" finds Ghost escape, but "omoplata" is not mistaken for Baratoplata. Exact names and aliases always win; uncertain matches are reported back rather than guessed.
 
@@ -139,12 +139,13 @@ test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture,
 
 | Tool | Does |
 | --- | --- |
-| `search` | Techniques by fuzzy name / type / role / position / status; notes by full text |
+| `search` | Techniques by fuzzy name / type / role / position / status; notes by full text or where they came from |
 | `get_technique` | A card: positions, details, mistakes, related techniques, focus status, recent notes |
 | `save_technique` | Create or update a card; add positions, aliases, details, links |
-| `add_note` | Save a dated note linked to techniques; unknown techniques go to the inbox |
+| `add_note` | Save a dated note linked to techniques and where it came from ("Zen camp seminar by Josh Jones"); unknown techniques go to the inbox |
+| `update_note` | Change a note's text, kind, date or where it came from |
 | `get_inbox`, `file_note` | Triage notes that couldn't be placed |
-| `log_session` | Record a class/open mat/private; attaches that day's notes |
+| `log_session` | Record a class/seminar/open mat/private; attaches that day's notes; saying the same session twice updates it |
 | `get_focus` | Ranked focus list with time since each item's last note, or its history |
 | `update_focus` | add / move / resume / pause / backlog / complete / drop |
 | `get_position` | What you have from a position, what leads into it, and the gaps |

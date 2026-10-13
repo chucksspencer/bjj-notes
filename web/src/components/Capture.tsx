@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useState, type ReactNode } from
 import type { NoteKind, NoteView, TechniqueRef } from '../../../src/shared/api';
 import { useAddNote, useDeleteNote, useEditNote } from '../api';
 import { localToday, NOTE_KIND_LABEL, NOTE_KINDS } from '../lib/format';
+import { OriginPicker, originPayload, type Origin } from './OriginPicker';
 import { Sheet } from './Sheet';
 import { TechniquePicker, type NewTechnique } from './TechniquePicker';
 import { useToast } from './Toast';
@@ -39,6 +40,9 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
   const [newOnes, setNewOnes] = useState<NewTechnique[]>([]);
   const [kind, setKind] = useState<NoteKind>(editing?.kind ?? 'instruction');
   const [date, setDate] = useState(editing?.observedOn ?? localToday());
+  const [origin, setOrigin] = useState<Origin>(
+    editing ? (editing.session ? { mode: 'existing', session: editing.session } : { mode: 'none' }) : { mode: 'auto' },
+  );
   const [showSource, setShowSource] = useState(false);
   const [url, setUrl] = useState('');
   const [timestamp, setTimestamp] = useState('');
@@ -52,8 +56,9 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
     e.preventDefault();
     if (!text.trim()) return;
     if (editing) {
+      const unchanged = origin.mode === 'existing' ? origin.session.id === editing.sessionId : origin.mode === 'none' && !editing.sessionId;
       editNote.mutate(
-        { id: editing.id, body: text, kind, date, techniqueIds: techniques.map(t => t.id) },
+        { id: editing.id, body: text, kind, date, techniqueIds: techniques.map(t => t.id), ...(unchanged ? {} : originPayload(origin, date)) },
         {
           onSuccess: () => {
             toast.show('Note updated', { undoable: true });
@@ -72,6 +77,7 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
         techniqueIds: techniques.map(t => t.id),
         newTechniques: newOnes,
         source: url.trim() ? { url: url.trim(), timestamp: timestamp.trim() || undefined } : undefined,
+        ...originPayload(origin, date),
       },
       {
         onSuccess: r => {
@@ -116,6 +122,8 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
           <span className="label">Date</span>
           <input className="input" type="date" value={date} max={localToday()} onChange={e => setDate(e.target.value || localToday())} />
         </label>
+
+        <OriginPicker value={origin} onChange={setOrigin} date={date} onPickSession={s => setDate(s.date)} />
 
         {!editing &&
           (showSource ? (

@@ -6,10 +6,12 @@ import type {
   NoteCreateInput,
   NoteCreateResult,
   NoteKind,
+  NotePatch,
   NoteView,
   PositionListItem,
   PositionView,
   Role,
+  SessionView,
   Status,
   TechniqueListItem,
   TechniquePatch,
@@ -69,12 +71,13 @@ export const keys = {
   technique: (id: number) => ['technique', id] as const,
   notes: (f: Record<string, unknown>) => ['notes', f] as const,
   positions: ['positions'] as const,
+  sessions: (date?: string) => ['sessions', date ?? null] as const,
   position: (slug: string, role?: Role) => ['position', slug, role ?? null] as const,
 };
 
 /** Everything that may show changed data after a write. */
 function invalidateAll(qc: ReturnType<typeof useQueryClient>) {
-  for (const k of ['focus', 'techniques', 'technique', 'notes', 'positions', 'position']) {
+  for (const k of ['focus', 'techniques', 'technique', 'notes', 'positions', 'position', 'sessions']) {
     void qc.invalidateQueries({ queryKey: [k] });
   }
 }
@@ -240,8 +243,7 @@ export function useAddNote() {
 export function useEditNote() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { id: number; body?: string; kind?: NoteKind; date?: string; techniqueIds?: number[] }) =>
-      request<NoteView>('PATCH', `/api/v1/notes/${v.id}`, { body: v.body, kind: v.kind, date: v.date, techniqueIds: v.techniqueIds }),
+    mutationFn: ({ id, ...patch }: NotePatch & { id: number }) => request<NoteView>('PATCH', `/api/v1/notes/${id}`, patch),
     onSuccess: () => invalidateAll(qc),
   });
 }
@@ -262,6 +264,17 @@ export function useDeleteNote() {
     onSuccess: () => invalidateAll(qc),
   });
 }
+
+// ---------- sessions (where notes came from) ----------
+
+/** Recent sessions, or the ones on a given date. */
+export const useSessions = (date?: string) =>
+  useQuery({
+    queryKey: keys.sessions(date),
+    queryFn: () => request<SessionView[]>('GET', `/api/v1/sessions${qs({ date, limit: date ? 20 : 8 })}`),
+    staleTime: 60_000,
+    placeholderData: prev => prev,
+  });
 
 // ---------- positions ----------
 

@@ -17,6 +17,7 @@ export type Gi = 'gi' | 'nogi' | 'both';
 export type Status = 'seen' | 'learning' | 'drilling' | 'hitting' | 'reliable';
 export type NoteKind = 'instruction' | 'rolling' | 'drilling' | 'question' | 'idea';
 export type SourceKind = 'class' | 'youtube' | 'instagram' | 'instructional' | 'book' | 'article' | 'other';
+export type SessionKind = 'class' | 'open_mat' | 'private' | 'seminar' | 'competition' | 'drilling' | 'other';
 export type LinkKind = 'chain' | 'counter' | 'variation' | 'setup' | 'related';
 export type FocusStatus = 'active' | 'backlog' | 'paused' | 'done' | 'dropped';
 export type FocusAction = 'move' | 'resume' | 'pause' | 'backlog' | 'complete' | 'drop';
@@ -60,6 +61,29 @@ export interface SourceView {
   author: string | null;
 }
 
+/** A training session: where a note came from ("Zen camp seminar by Josh Jones on 2024-02-03"). */
+export interface SessionView {
+  id: number;
+  /** YYYY-MM-DD */
+  date: string;
+  kind: SessionKind;
+  /** Event name, e.g. "Zen camp". */
+  name: string | null;
+  instructor: string | null;
+  location: string | null;
+  gi: Gi | null;
+}
+
+/** A session to find or create: same date and kind with no conflicting details reuses the existing one. */
+export interface SessionInput {
+  kind: SessionKind;
+  name?: string;
+  instructor?: string;
+  location?: string;
+  /** Defaults to the note's date. */
+  date?: string;
+}
+
 export interface NoteView {
   id: number;
   body: string;
@@ -72,6 +96,8 @@ export interface NoteView {
   techniques: TechniqueRef[];
   inbox: boolean;
   sessionId: number | null;
+  /** Where the note came from. */
+  session: SessionView | null;
   createdVia: 'mcp' | 'capture' | 'web';
 }
 
@@ -144,6 +170,19 @@ export interface NoteCreateInput {
   kind?: NoteKind;
   date?: string;
   source?: { url?: string; title?: string; author?: string; kind?: SourceKind; timestamp?: string };
+  /** An existing session, or null for none. Leave out (with `session`) to attach the day's only session, if there is one. */
+  sessionId?: number | null;
+  /** A session to find or create. */
+  session?: SessionInput;
+}
+
+export interface NotePatch {
+  body?: string;
+  kind?: NoteKind;
+  date?: string;
+  techniqueIds?: number[];
+  sessionId?: number | null;
+  session?: SessionInput;
 }
 
 export interface NoteCreateResult extends MessageResult {

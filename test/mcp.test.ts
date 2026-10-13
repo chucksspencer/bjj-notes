@@ -45,6 +45,7 @@ describe('MCP tools over HTTP', () => {
         'search',
         'undo_last',
         'update_focus',
+        'update_note',
       ].sort(),
     );
     expect(client.getInstructions()).toContain('voice transcription');
@@ -177,12 +178,41 @@ describe('MCP tools over HTTP', () => {
 
   it('logs a session, attaches the day\'s notes and reviews the week', async () => {
     const logged = await call('log_session', { kind: 'class', gi: 'nogi', instructor: 'Coach' });
-    expect(logged).toMatch(/^Logged class on \d{4}-\d{2}-\d{2} and attached 3 notes from that day\.$/);
+    expect(logged).toMatch(/^Logged class by Coach on \d{4}-\d{2}-\d{2} and attached 3 notes from that day\.$/);
+    // Saying it again updates the same class rather than logging a second one.
+    expect(await call('log_session', { kind: 'class', summary: 'Lots of guard work' })).toMatch(/^Updated class by Coach on /);
     const r = await call('review', { days: 7 });
     expect(r).toContain('1 session (1 class), 3 notes.');
     expect(r).toContain('Most noted: Armbar (1), Ghost escape (1), Leg elevation (1).');
     expect(r).toContain('Quiet focus items');
     expect(r).not.toMatch(/Quiet focus items[^\n]*Ghost escape/);
+  });
+
+  it('records where a note came from and shows it on the card', async () => {
+    const saved = await call('add_note', {
+      text: 'Hide the near arm before you turn.',
+      techniques: ['ghost escape'],
+      session: { kind: 'seminar', name: 'Zen camp', instructor: 'Josh Jones', date: '2024-02-03' },
+    });
+    expect(saved).toMatch(/^Saved note #\d+ to Ghost escape \(from Zen camp seminar by Josh Jones on 2024-02-03\)\.$/);
+    const id = Number(saved.match(/#(\d+)/)![1]);
+    expect(await call('get_technique', { name: 'Ghost escape' })).toContain(
+      `- 2024-02-03 instruction from Zen camp seminar by Josh Jones #${id}: Hide the near arm before you turn.`,
+    );
+    expect(await call('search', { query: 'Josh Jones' })).toContain(`#${id} 2024-02-03 from Zen camp seminar by Josh Jones`);
+
+    // Logging the seminar afterwards finds the same session.
+    expect(await call('log_session', { kind: 'seminar', name: 'zen camp', date: '2024-02-03', location: 'Austin' })).toBe(
+      'Updated Zen camp seminar by Josh Jones at Austin on 2024-02-03.',
+    );
+    expect(await call('undo_last')).toBe('Undid: Zen camp seminar by Josh Jones at Austin on 2024-02-03');
+
+    expect(await call('update_note', { note_id: id, clear_session: true })).toBe(`Updated note #${id} (no session).`);
+    expect(await call('update_note', { note_id: id, session: { kind: 'private', instructor: 'Josh Jones' } })).toBe(
+      `Updated note #${id} (from private lesson by Josh Jones on 2024-02-03).`,
+    );
+    expect(await call('undo_last')).toBe(`Undid: edit to note #${id}`);
+    expect(await call('get_technique', { name: 'Ghost escape' })).toContain(`- 2024-02-03 instruction #${id}:`);
   });
 
   it('undoes a technique edit', async () => {
