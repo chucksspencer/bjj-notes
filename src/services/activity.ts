@@ -72,7 +72,9 @@ export type UndoOp =
       /** Notes that went to the inbox because this was their only technique. */
       inboxedNoteIds?: number[];
     }
-  | { kind: 'restore_focus_label'; itemId: number; label: string; goal: string | null };
+  | { kind: 'restore_focus_label'; itemId: number; label: string; goal: string | null }
+  /** Several writes made as one (e.g. deleting a selection); undone together, last first. */
+  | { kind: 'batch'; ops: UndoOp[] };
 
 export interface NoteRowSnapshot {
   id: number;
@@ -242,6 +244,9 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       }
       return;
     }
+    case 'batch':
+      for (const inner of [...op.ops].reverse()) await apply(q, inner);
+      return;
     case 'restore_focus_label':
       await q.query('update focus_items set label = $2, goal = $3, updated_at = now() where id = $1', [op.itemId, op.label, op.goal]);
       return;

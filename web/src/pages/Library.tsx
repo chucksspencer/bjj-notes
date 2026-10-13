@@ -1,9 +1,10 @@
 import { useDeferredValue, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import type { Role, TechniqueType } from '../../../src/shared/api';
-import { useCreateTechnique, useTechniques, type TechniqueFilters } from '../api';
+import { useCreateTechnique, useDeleteTechniques, useTechniques, type TechniqueFilters } from '../api';
 import { RankBar } from '../components/Belt';
 import { Icon } from '../components/Icon';
+import { countOf, SelectionBar, useSelection } from '../components/Selection';
 import { Sheet } from '../components/Sheet';
 import { useToast } from '../components/Toast';
 import { ROLE_LABEL, ROLES, techniqueLine, TYPE_LABEL, TYPE_PLURAL, TYPES } from '../lib/format';
@@ -18,6 +19,22 @@ export function Library() {
   const filters: TechniqueFilters = { q: q || undefined, type, role, sort };
   const list = useTechniques(filters);
   const [creating, setCreating] = useState(false);
+  const selection = useSelection(list.data?.map(t => t.id) ?? []);
+  const del = useDeleteTechniques();
+  const toast = useToast();
+
+  const deleteSelected = () => {
+    const n = selection.ids.length;
+    const which = n === 1 ? 'this one' : 'these';
+    if (!window.confirm(`Delete ${countOf(n, 'technique')}? Notes stay; any that were only about ${which} go to your inbox.`)) return;
+    del.mutate(selection.ids, {
+      onSuccess: r => {
+        toast.show(r.message.replace(/\.$/, ''), { undoable: true });
+        selection.stop();
+      },
+      onError: toast.error,
+    });
+  };
 
   const setParam = (k: string, v: string | undefined) => {
     const next = new URLSearchParams(params);
@@ -27,13 +44,26 @@ export function Library() {
   };
 
   return (
-    <div className="page">
+    <div className={`page${selection.active ? ' selecting' : ''}`}>
       <header className="page-head">
         <h1 className="display page-title">Library</h1>
-        <button type="button" className="btn small" onClick={() => setCreating(true)}>
-          <Icon name="plus" size={18} />
-          New
-        </button>
+        <div className="head-actions">
+          {selection.active ? (
+            <button type="button" className="btn ghost small" onClick={selection.stop}>
+              Done
+            </button>
+          ) : (
+            <>
+              <button type="button" className="btn ghost small" onClick={selection.start} disabled={!list.data?.length}>
+                Select
+              </button>
+              <button type="button" className="btn small" onClick={() => setCreating(true)}>
+                <Icon name="plus" size={18} />
+                New
+              </button>
+            </>
+          )}
+        </div>
       </header>
 
       <div className="search">
@@ -80,16 +110,30 @@ export function Library() {
         {list.data?.length === 0 && (
           <div className="empty">{q || type || role ? 'Nothing matches. Try fewer filters or another spelling.' : 'No techniques yet. Add your first one.'}</div>
         )}
-        {list.data?.map(t => (
-          <Link key={t.id} className="row row-split" to={`/t/${t.id}`}>
-            <span className="grow">
-              <span className="row-title">{t.name}</span>
-              <span className="row-meta">{techniqueLine(t.type, t.role, t.edges[0])}</span>
-            </span>
-            <RankBar status={t.status} />
-          </Link>
-        ))}
+        {list.data?.map(t => {
+          const body = (
+            <>
+              <span className="grow">
+                <span className="row-title">{t.name}</span>
+                <span className="row-meta">{techniqueLine(t.type, t.role, t.edges[0])}</span>
+              </span>
+              <RankBar status={t.status} />
+            </>
+          );
+          return selection.active ? (
+            <label key={t.id} className="row row-split">
+              <input type="checkbox" className="check" checked={selection.has(t.id)} onChange={() => selection.toggle(t.id)} aria-label={t.name} />
+              {body}
+            </label>
+          ) : (
+            <Link key={t.id} className="row row-split" to={`/t/${t.id}`}>
+              {body}
+            </Link>
+          );
+        })}
       </section>
+
+      <SelectionBar selection={selection} noun="techniques" busy={del.isPending} onDelete={deleteSelected} />
 
       {creating && <NewTechniqueSheet initialName={text.trim()} onClose={() => setCreating(false)} />}
     </div>

@@ -222,6 +222,14 @@ export function useDeleteTechnique() {
   });
 }
 
+export function useDeleteTechniques() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: number[]) => request<MessageResult>('POST', '/api/v1/techniques/delete', { ids }),
+    onSuccess: () => invalidateAll(qc),
+  });
+}
+
 // ---------- notes ----------
 
 export const useNotes = (f: { inbox?: boolean; technique?: number; q?: string; limit?: number }, enabled = true) =>
@@ -261,6 +269,14 @@ export function useDeleteNote() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => request<MessageResult>('DELETE', `/api/v1/notes/${id}`),
+    onSuccess: () => invalidateAll(qc),
+  });
+}
+
+export function useDeleteNotes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: number[]) => request<MessageResult>('POST', '/api/v1/notes/delete', { ids }),
     onSuccess: () => invalidateAll(qc),
   });
 }

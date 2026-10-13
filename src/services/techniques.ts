@@ -1,7 +1,7 @@
 import type { Queryable } from '../db.js';
 import { describeMiss, resolvePosition, resolveTechnique } from '../resolve.js';
 import { noteOrigin } from '../shared/sessions.js';
-import { logActivity, type EdgeSnapshot, type LinkSnapshot, type TechniqueSnapshot } from './activity.js';
+import { logActivity, type EdgeSnapshot, type LinkSnapshot, type TechniqueSnapshot, type UndoOp } from './activity.js';
 import type { Ctx } from './context.js';
 import type { Role, TechniqueType } from './vocab.js';
 import { UserError } from './errors.js';
@@ -272,49 +272,73 @@ export async function removeLink(ctx: Ctx, fromId: number, toId: number, kind: s
   });
 }
 
+/** Removes one card and returns how to put it back; null if it doesn't exist. Runs inside the caller's transaction. */
+async function removeTechnique(q: Queryable, id: number): Promise<{ name: string; inboxed: number; undo: UndoOp } | null> {
+  const row = (
+    await q.query<TechniqueSnapshot & { created_at: string; updated_at: string }>(
+      `select ${SNAPSHOT_COLS}, created_at::text as created_at, updated_at::text as updated_at from techniques where id = $1`,
+      [id],
+    )
+  ).rows[0];
+  if (!row) return null;
+  const edges = (
+    await q.query<EdgeSnapshot>(
+      'select id, technique_id, from_position_id, from_role, to_position_id, to_role from technique_edges where technique_id = $1',
+      [id],
+    )
+  ).rows;
+  const links = (
+    await q.query<LinkSnapshot>('select from_id, to_id, kind, note from technique_links where from_id = $1 or to_id = $1', [id])
+  ).rows;
+  const noteIds = (await q.query<{ note_id: number }>('select note_id from note_techniques where technique_id = $1', [id])).rows.map(
+    r => r.note_id,
+  );
+  const focusItemIds = (
+    await q.query<{ focus_item_id: number }>('select focus_item_id from focus_item_techniques where technique_id = $1', [id])
+  ).rows.map(r => r.focus_item_id);
+  const orphaned = (
+    await q.query<{ id: number }>(
+      `select n.id from notes n where n.id = any($1::int[]) and not n.inbox
+         and not exists (select 1 from note_techniques x where x.note_id = n.id and x.technique_id <> $2)`,
+      [noteIds, id],
+    )
+  ).rows.map(r => r.id);
+  await q.query('delete from techniques where id = $1', [id]);
+  if (orphaned.length) await q.query('update notes set inbox = true where id = any($1::int[])', [orphaned]);
+  return {
+    name: row.name,
+    inboxed: orphaned.length,
+    undo: { kind: 'restore_deleted_technique', row, edges, links, noteIds, focusItemIds, inboxedNoteIds: orphaned },
+  };
+}
+
+const movedToInbox = (n: number) => (n ? `; ${n} note${n > 1 ? 's' : ''} moved to the inbox` : '');
+
 /** Deletes a technique card. Its notes stay (and go to the inbox if they're left unlinked); undo restores everything. */
 export async function deleteTechnique(ctx: Ctx, id: number): Promise<string> {
   return ctx.db.tx(async q => {
-    const row = (
-      await q.query<TechniqueSnapshot & { created_at: string; updated_at: string }>(
-        `select ${SNAPSHOT_COLS}, created_at::text as created_at, updated_at::text as updated_at from techniques where id = $1`,
-        [id],
-      )
-    ).rows[0];
-    if (!row) return `No technique #${id}.`;
-    const edges = (
-      await q.query<EdgeSnapshot>(
-        'select id, technique_id, from_position_id, from_role, to_position_id, to_role from technique_edges where technique_id = $1',
-        [id],
-      )
-    ).rows;
-    const links = (
-      await q.query<LinkSnapshot>('select from_id, to_id, kind, note from technique_links where from_id = $1 or to_id = $1', [id])
-    ).rows;
-    const noteIds = (await q.query<{ note_id: number }>('select note_id from note_techniques where technique_id = $1', [id])).rows.map(
-      r => r.note_id,
-    );
-    const focusItemIds = (
-      await q.query<{ focus_item_id: number }>('select focus_item_id from focus_item_techniques where technique_id = $1', [id])
-    ).rows.map(r => r.focus_item_id);
-    const orphaned = (
-      await q.query<{ id: number }>(
-        `select n.id from notes n where n.id = any($1::int[]) and not n.inbox
-           and not exists (select 1 from note_techniques x where x.note_id = n.id and x.technique_id <> $2)`,
-        [noteIds, id],
-      )
-    ).rows.map(r => r.id);
-    await q.query('delete from techniques where id = $1', [id]);
-    if (orphaned.length) await q.query('update notes set inbox = true where id = any($1::int[])', [orphaned]);
-    await logActivity(q, 'delete_technique', `deleted ${row.name}`, {
-      kind: 'restore_deleted_technique',
-      row,
-      edges,
-      links,
-      noteIds,
-      focusItemIds,
-      inboxedNoteIds: orphaned,
-    });
-    return `Deleted ${row.name}${orphaned.length ? `; ${orphaned.length} note${orphaned.length > 1 ? 's' : ''} moved to the inbox` : ''}.`;
+    const removed = await removeTechnique(q, id);
+    if (!removed) return `No technique #${id}.`;
+    await logActivity(q, 'delete_technique', `deleted ${removed.name}`, removed.undo);
+    return `Deleted ${removed.name}${movedToInbox(removed.inboxed)}.`;
+  });
+}
+
+/** Deletes several cards as one change: a single undo brings them all back. */
+export async function deleteTechniques(ctx: Ctx, ids: number[]): Promise<string> {
+  return ctx.db.tx(async q => {
+    const removed = [];
+    for (const id of new Set(ids)) {
+      const r = await removeTechnique(q, id);
+      if (r) removed.push(r);
+    }
+    if (!removed.length) return 'Nothing to delete.';
+    if (removed.length === 1) {
+      await logActivity(q, 'delete_technique', `deleted ${removed[0]!.name}`, removed[0]!.undo);
+      return `Deleted ${removed[0]!.name}${movedToInbox(removed[0]!.inboxed)}.`;
+    }
+    const what = `${removed.length} techniques`;
+    await logActivity(q, 'delete_techniques', `deleting ${what}`, { kind: 'batch', ops: removed.map(r => r.undo) });
+    return `Deleted ${what}${movedToInbox(removed.reduce((n, r) => n + r.inboxed, 0))}.`;
   });
 }

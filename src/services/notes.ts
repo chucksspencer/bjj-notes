@@ -2,7 +2,7 @@ import type { Queryable } from '../db.js';
 import { resolveTechnique, type Candidate } from '../resolve.js';
 import type { SessionView } from '../shared/api.js';
 import { sessionPhrase } from '../shared/sessions.js';
-import { logActivity, NOTE_SNAPSHOT_SQL, type NoteRowSnapshot, type SessionChange } from './activity.js';
+import { logActivity, NOTE_SNAPSHOT_SQL, type NoteRowSnapshot, type SessionChange, type UndoOp } from './activity.js';
 import { today, type Ctx } from './context.js';
 import { findOrCreateSession, sessionById, type SessionDetails } from './sessions.js';
 import { createStub } from './techniques.js';
@@ -321,15 +321,41 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
   });
 }
 
+/** Removes one note and returns how to put it back; null if it doesn't exist. */
+async function removeNote(q: Queryable, id: number): Promise<UndoOp | null> {
+  const row = (await q.query<NoteRowSnapshot>(NOTE_SNAPSHOT_SQL, [id])).rows[0];
+  if (!row) return null;
+  const techniqueIds = (
+    await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [id])
+  ).rows.map(r => r.technique_id);
+  await q.query('delete from notes where id = $1', [id]);
+  return { kind: 'restore_note', row, techniqueIds };
+}
+
 export async function deleteNote(ctx: Ctx, id: number): Promise<string> {
   return ctx.db.tx(async q => {
-    const row = (await q.query<NoteRowSnapshot>(NOTE_SNAPSHOT_SQL, [id])).rows[0];
-    if (!row) return `No note #${id}.`;
-    const techniqueIds = (
-      await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [id])
-    ).rows.map(r => r.technique_id);
-    await q.query('delete from notes where id = $1', [id]);
-    await logActivity(q, 'delete_note', `deleting note #${id}`, { kind: 'restore_note', row, techniqueIds });
+    const undo = await removeNote(q, id);
+    if (!undo) return `No note #${id}.`;
+    await logActivity(q, 'delete_note', `deleting note #${id}`, undo);
     return `Deleted note #${id}.`;
+  });
+}
+
+/** Deletes several notes as one change: a single undo brings them all back. */
+export async function deleteNotes(ctx: Ctx, ids: number[]): Promise<string> {
+  return ctx.db.tx(async q => {
+    const ops: UndoOp[] = [];
+    for (const id of new Set(ids)) {
+      const undo = await removeNote(q, id);
+      if (undo) ops.push(undo);
+    }
+    if (!ops.length) return 'Nothing to delete.';
+    if (ops.length === 1) {
+      const id = (ops[0] as { row: NoteRowSnapshot }).row.id;
+      await logActivity(q, 'delete_note', `deleting note #${id}`, ops[0]!);
+      return `Deleted note #${id}.`;
+    }
+    await logActivity(q, 'delete_notes', `deleting ${ops.length} notes`, { kind: 'batch', ops });
+    return `Deleted ${ops.length} notes.`;
   });
 }

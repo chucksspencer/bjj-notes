@@ -15,6 +15,7 @@
   --tape: #ffffff;
   --tape-off: #2a2a2f;
   --danger: #a3261d;
+  --on-danger: #ffffff;
   --focus-ring: #7b4bb0;
 
   --font: 'Archivo Variable', 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -39,6 +40,7 @@
     --on-belt: #ffffff;
     --tape-off: #2c2c33;
     --danger: #ff8f84;
+    --on-danger: #2a0b08;
     --focus-ring: #b08bdb;
     color-scheme: dark;
   }
@@ -55,6 +57,7 @@
   --belt-wash: #221a30;
   --tape-off: #2c2c33;
   --danger: #ff8f84;
+  --on-danger: #2a0b08;
   --focus-ring: #b08bdb;
   color-scheme: dark;
 }
@@ -953,4 +956,108 @@ button.row {
   color: var(--muted);
   font-feature-settings: 'tnum';
   font-size: 15px;
+}
+
+/* ---------- selecting several techniques or notes ---------- */
+
+.check {
+  appearance: none;
+  flex: none;
+  display: grid;
+  place-content: center;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  border: 2px solid var(--muted);
+  border-radius: 50%;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.check:checked {
+  border-color: var(--belt-fill);
+  background: var(--belt-fill);
+}
+
+.check:checked::after {
+  content: '';
+  width: 11px;
+  height: 6px;
+  margin-top: -3px;
+  border-left: 2.5px solid var(--on-belt);
+  border-bottom: 2.5px solid var(--on-belt);
+  transform: rotate(-45deg);
+}
+
+.check:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+label.row {
+  display: flex;
+  cursor: pointer;
+}
+
+label.row.row-split,
+label.row.note-select {
+  gap: 12px;
+}
+
+label.row.note-select {
+  align-items: flex-start;
+}
+
+label.row:has(.check:checked) {
+  background: var(--belt-wash);
+}
+
+.page.selecting {
+  padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 96px);
+}
+
+.select-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 12px);
+  z-index: 55;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(560px, calc(100vw - 2 * var(--pad)));
+  padding: 8px 8px 8px 16px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--canvas);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.2);
+  animation: fade 0.15s ease-out;
+}
+
+.select-bar .select-count {
+  flex: 1;
+  font-weight: 620;
+}
+
+.select-bar .btn.ghost {
+  color: var(--canvas);
+}
+
+.btn.destroy {
+  background: var(--danger);
+  color: var(--on-danger);
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.note-select .note-head {
+  margin-bottom: 4px;
+}
+
+.note-select .note-body {
+  display: block;
 }

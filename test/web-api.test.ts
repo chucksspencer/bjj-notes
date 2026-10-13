@@ -269,6 +269,37 @@ describe('JSON API', () => {
     expect((await api('POST', `/api/v1/focus/99999/actions`, { action: 'pause' })).body.message).toBe('No focus item #99999.');
   });
 
+  it('deletes a selection of techniques or notes as one undoable change', async () => {
+    const make = async (name: string) => (await api<TechniqueView>('POST', '/api/v1/techniques', { name, type: 'sweep' })).body;
+    const [a, b, c] = [await make('Tornado roll'), await make('Lapel feed'), await make('Wrist ride')];
+    const both = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'About A and B.', techniqueIds: [a.id, b.id] })).body.note;
+    const ac = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'About A and C.', techniqueIds: [a.id, c.id] })).body.note;
+
+    const res = await api('POST', '/api/v1/techniques/delete', { ids: [a.id, b.id, a.id] });
+    expect(res.body.message).toBe('Deleted 2 techniques; 1 note moved to the inbox.');
+    expect((await api('GET', `/api/v1/techniques/${a.id}`)).status).toBe(404);
+    const inbox = (await api<NoteView[]>('GET', '/api/v1/notes?inbox=1&limit=200')).body;
+    expect(inbox.find(n => n.id === both.id)).toBeTruthy();
+    expect(inbox.find(n => n.id === ac.id)).toBeFalsy();
+
+    expect((await api('POST', '/api/v1/undo')).body.message).toBe('Undid: deleting 2 techniques');
+    expect((await api<TechniqueView>('GET', `/api/v1/techniques/${a.id}`)).body.notes.map(n => n.id).sort()).toEqual([both.id, ac.id].sort());
+    expect((await api<TechniqueView>('GET', `/api/v1/techniques/${b.id}`)).body.name).toBe('Lapel feed');
+    expect((await api<NoteView[]>('GET', '/api/v1/notes?inbox=1&limit=200')).body.find(n => n.id === both.id)).toBeFalsy();
+
+    const n1 = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Stray one.' })).body.note;
+    const n2 = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Stray two.' })).body.note;
+    expect((await api('POST', '/api/v1/notes/delete', { ids: [n1.id, n2.id, 999_999] })).body.message).toBe('Deleted 2 notes.');
+    expect((await api<NoteView[]>('GET', '/api/v1/notes?inbox=1&limit=200')).body.some(n => n.id === n1.id || n.id === n2.id)).toBe(false);
+    expect((await api('POST', '/api/v1/undo')).body.message).toBe('Undid: deleting 2 notes');
+    expect((await api<NoteView[]>('GET', '/api/v1/notes?inbox=1&limit=200')).body.filter(n => n.id === n1.id || n.id === n2.id)).toHaveLength(2);
+
+    expect((await api('POST', '/api/v1/notes/delete', { ids: [] })).status).toBe(400);
+    expect((await api('POST', '/api/v1/techniques/delete', { ids: [999_999] })).body.message).toBe('Nothing to delete.');
+    await api('POST', '/api/v1/techniques/delete', { ids: [a.id, b.id, c.id] }); // tidy up for later tests
+    await api('POST', '/api/v1/notes/delete', { ids: [n1.id, n2.id, both.id, ac.id] });
+  });
+
   it('explores positions', async () => {
     const view = (await api<PositionView>('GET', '/api/v1/positions/side-control?role=bottom')).body;
     expect(view.position.name).toBe('Side control');

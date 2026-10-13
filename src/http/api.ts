@@ -15,8 +15,8 @@ import { undoLast } from '../services/activity.js';
 import { NotFoundError as NotFound, UserError } from '../services/errors.js';
 import type { Ctx } from '../services/context.js';
 import { editFocusItem, updateFocus } from '../services/focus.js';
-import { addNote, deleteNote, fileNote, updateNote } from '../services/notes.js';
-import { deleteTechnique, removeEdge, removeLink, saveTechniqueResult } from '../services/techniques.js';
+import { addNote, deleteNote, deleteNotes, fileNote, updateNote } from '../services/notes.js';
+import { deleteTechnique, deleteTechniques, removeEdge, removeLink, saveTechniqueResult } from '../services/techniques.js';
 import {
   GI,
   LINK_KINDS,
@@ -34,6 +34,8 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const id = z.coerce.number().int().positive();
 const newTechnique = z.object({ name: z.string().trim().min(1).max(120), type: z.enum(TECHNIQUE_TYPES), role: z.enum(ROLES).optional() });
 const strList = z.array(z.string().trim().max(500)).max(100);
+/** A selection to act on at once. */
+const idList = z.object({ ids: z.array(z.number().int().positive()).min(1).max(500) });
 
 const optText = (max: number) =>
   z
@@ -231,6 +233,10 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
     h(async (req): Promise<MessageResult> => ({ message: await deleteTechnique(ctx, id.parse(req.params.id)) })),
   );
   r.post(
+    '/api/v1/techniques/delete',
+    h(async (req): Promise<MessageResult> => ({ message: await deleteTechniques(ctx, idList.parse(req.body).ids) })),
+  );
+  r.post(
     '/api/v1/techniques/:id/edges',
     h(async (req): Promise<TechniqueView> => {
       const techniqueId = id.parse(req.params.id);
@@ -354,6 +360,10 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
       if (!note) throw new NotFound(`No note #${noteId}.`);
       return note;
     }),
+  );
+  r.post(
+    '/api/v1/notes/delete',
+    h(async (req): Promise<MessageResult> => ({ message: await deleteNotes(ctx, idList.parse(req.body).ids) })),
   );
   r.delete('/api/v1/notes/:id', h(async (req): Promise<MessageResult> => ({ message: await deleteNote(ctx, id.parse(req.params.id)) })));
 

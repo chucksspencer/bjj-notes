@@ -123,6 +123,39 @@ describe.runIf(run)('web app (end to end)', () => {
     await sheet.waitFor({ state: 'detached' });
   });
 
+  it('deletes several techniques at once, and undoes it in one step', async () => {
+    page.on('dialog', d => void d.accept()); // the "Delete 2 techniques?" confirmation
+    await page.getByRole('navigation').getByRole('link', { name: 'Library' }).click();
+    await page.getByLabel('Search techniques').fill('');
+    await page.getByRole('button', { name: 'Select', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Knee cut pass', exact: true }).check();
+    await page.getByRole('checkbox', { name: 'Baratoplata', exact: true }).check();
+    await page.getByRole('toolbar', { name: 'Selection' }).getByText('2 selected').waitFor();
+    await page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name: 'Delete' }).click();
+    await page.getByText('Deleted 2 techniques; 1 note moved to the inbox').waitFor();
+    expect(await page.getByRole('link', { name: /Knee cut pass/ }).count()).toBe(0);
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.getByText('Undid: deleting 2 techniques').waitFor();
+    await page.getByRole('link', { name: /Knee cut pass/ }).waitFor();
+    await page.getByRole('link', { name: /Baratoplata/ }).waitFor();
+  });
+
+  it('deletes several inbox notes at once', async () => {
+    for (const text of ['Stray thought one.', 'Stray thought two.']) {
+      await page.getByRole('button', { name: 'New note' }).click();
+      await page.getByPlaceholder('What did you learn or notice?').fill(text);
+      await page.getByRole('button', { name: 'Save note' }).click();
+      await page.getByText('Saved to your inbox').waitFor();
+    }
+    await page.getByRole('navigation').getByRole('link', { name: /Inbox/ }).click();
+    await page.getByRole('button', { name: 'Select', exact: true }).click();
+    await page.getByRole('button', { name: 'Select all' }).click();
+    await page.getByRole('toolbar', { name: 'Selection' }).getByText('2 selected').waitFor();
+    await page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name: 'Delete' }).click();
+    await page.getByText('Deleted 2 notes').waitFor();
+    await page.getByText('Nothing to file.').waitFor();
+  });
+
   it('navigates on desktop Chrome 150+, where scrollTo returns a Promise', async () => {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await ctx.addInitScript(() => {
