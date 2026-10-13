@@ -200,6 +200,7 @@ describe('MCP tools over HTTP', () => {
       `- 2024-02-03 instruction from Zen camp seminar by Josh Jones #${id}: Hide the near arm before you turn.`,
     );
     expect(await call('search', { query: 'Josh Jones' })).toContain(`#${id} 2024-02-03 from Zen camp seminar by Josh Jones`);
+    expect(await call('get_technique', { name: 'Ghost escape', note_limit: 0 })).toMatch(/\n\d+ notes \(not shown\)\.$/);
 
     // Logging the seminar afterwards finds the same session.
     expect(await call('log_session', { kind: 'seminar', name: 'zen camp', date: '2024-02-03', location: 'Austin' })).toBe(
