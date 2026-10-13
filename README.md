@@ -46,7 +46,7 @@ In this repo: **Settings → Secrets and variables → Actions → New repositor
    curl -fsSL https://raw.githubusercontent.com/chucksspencer/bjj-notes/main/infra/gcp-bootstrap.sh | bash
    ```
 4. It creates a **BJJ Notes** project, links your billing account, turns on the APIs, and sets up keyless deploys that only GitHub Actions on this repo's `main` branch can use. Re-running it is safe if anything stops halfway.
-5. At the end it prints two values. In this repo, add them under **Settings → Secrets and variables → Actions → Variables** (the *Variables* tab, not Secrets): `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT`.
+5. At the end it prints two values, `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_SERVICE_ACCOUNT`. This repo's are already in `.github/workflows/ci.yml`; for a different project or a fork, replace them there or set repository variables with those names.
 
 ### 5. Deploy
 
