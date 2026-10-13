@@ -110,6 +110,13 @@ async function upsertSource(q: Queryable, input: SourceInput): Promise<number | 
     return rows[0]!.id;
   }
   if (!s.title && !s.author) return null; // a bare "from class" is covered by the session
+  // The same book or set of class notes is one source, however many notes cite it.
+  const same = await q.query<{ id: number }>(
+    `select id from sources where url is null and kind = $1
+       and title is not distinct from $2 and author is not distinct from $3 order by id limit 1`,
+    [kind, s.title ?? null, s.author ?? null],
+  );
+  if (same.rows[0]) return same.rows[0].id;
   const { rows } = await q.query<{ id: number }>(
     'insert into sources (kind, title, author) values ($1, $2, $3) returning id',
     [kind, s.title ?? null, s.author ?? null],

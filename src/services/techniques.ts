@@ -223,7 +223,12 @@ export async function getTechnique(ctx: Ctx, name: string, noteLimit = 5): Promi
   if (t.notes.length) {
     lines.push(`Notes (${t.notes.length} of ${t.noteCount}, newest first):`);
     for (const n of t.notes) {
-      const src = n.source?.url ? ` [${n.source.title ?? n.source.url}${n.sourceTimestamp ? ` @${n.sourceTimestamp}` : ''}]` : '';
+      const named = [n.source?.title, n.source?.author].filter(Boolean).join(' by ');
+      const src = n.source?.url
+        ? ` [${n.source.title ?? n.source.url}${n.sourceTimestamp ? ` @${n.sourceTimestamp}` : ''}]`
+        : named
+          ? ` [from ${named}]`
+          : '';
       const origin = noteOrigin(n);
       lines.push(`- ${n.observedOn} ${n.kind}${origin ? ` ${origin}` : ''} #${n.id}: ${n.body}${src}`);
     }

@@ -179,6 +179,12 @@ describe('JSON API', () => {
     expect((await api('POST', '/api/v1/notes', { text: '   ' })).status).toBe(400);
     const sneaky = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'x', source: { url: 'javascript:alert(1)' } })).body;
     expect(sneaky.note.source).toBeNull();
+    // Notes citing the same class notes or book share one source.
+    const fromNotes = { kind: 'class', title: 'WIMAFC class notes' };
+    const one = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Clock armbar.', source: fromNotes })).body.note;
+    const two = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Flower sweep.', source: fromNotes })).body.note;
+    expect(one.source).toMatchObject({ kind: 'class', title: 'WIMAFC class notes', url: null });
+    expect(two.source!.id).toBe(one.source!.id);
   });
 
   it('records where notes came from, reusing sessions and undoing cleanly', async () => {
