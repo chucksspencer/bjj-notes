@@ -48,6 +48,7 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
   const [timestamp, setTimestamp] = useState('');
   // A video you haven't tried yet waits on the To try list instead of being filed.
   const [toTry, setToTry] = useState(true);
+  const [starred, setStarred] = useState(false);
   const add = useAddNote();
   const editNote = useEditNote();
   const del = useDeleteNote();
@@ -87,6 +88,7 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
         newTechniques: newOnes,
         source: url.trim() ? { url: url.trim(), timestamp: timestamp.trim() || undefined } : undefined,
         toTry: url.trim() ? toTry : undefined,
+        starred: starred || undefined,
         ...originPayload(origin, date),
       },
       {
@@ -169,6 +171,13 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
               Add a video or post link
             </button>
           ))}
+
+        {!editing && (
+          <label className="check-row">
+            <input type="checkbox" className="check" checked={starred} onChange={e => setStarred(e.target.checked)} />
+            <span>Star it, to keep it in the Lab</span>
+          </label>
+        )}
 
         <button className="btn block" type="submit" disabled={busy || !text.trim()}>
           {editing ? 'Save changes' : 'Save note'}

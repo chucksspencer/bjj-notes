@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { NavLink } from 'react-router';
 import type { NoteView, TechniqueRef } from '../../../src/shared/api';
 import { useDeleteNotes, useFileNote, useFocus, useNotes } from '../api';
 import { useCapture } from '../components/Capture';
@@ -47,7 +46,6 @@ export function Inbox() {
           )
         )}
       </header>
-      <InboxTabs />
       <p className="muted">Notes that aren't filed under a technique yet.</p>
       <section className="panel">
         {notes.isError && <div className="empty">Couldn't load the inbox. {notes.error.message}</div>}
@@ -95,23 +93,6 @@ export function Inbox() {
       <SelectionBar selection={selection} noun="notes" busy={del.isPending} onDelete={deleteSelected} />
       {filing && <FileSheet note={filing} onClose={() => setFiling(null)} />}
     </div>
-  );
-}
-
-/** The two waiting lists: notes to file, and videos to try. */
-export function InboxTabs() {
-  const toFile = useNotes({ inbox: true, limit: 100 });
-  const toTry = useNotes({ toTry: true, limit: 200 });
-  const count = (n: number | undefined) => (n ? ` (${n})` : '');
-  return (
-    <nav className="segments inbox-tabs" aria-label="Lists">
-      <NavLink className="segment" to="/inbox" end>
-        To file{count(toFile.data?.length)}
-      </NavLink>
-      <NavLink className="segment" to="/inbox/try">
-        To try{count(toTry.data?.length)}
-      </NavLink>
-    </nav>
   );
 }
 

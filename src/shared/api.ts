@@ -97,6 +97,9 @@ export interface NoteView {
   inbox: boolean;
   /** On the To try list: saved to try out before it's kept (filed) or tossed. */
   toTry: boolean;
+  /** Starred: a recent, pertinent note to keep in front of you. */
+  starred: boolean;
+  starredAt: string | null;
   sessionId: number | null;
   /** Where the note came from. */
   session: SessionView | null;
@@ -122,6 +125,8 @@ export interface TechniqueListItem extends TechniqueRef {
   aliases: string[];
   noteCount: number;
   lastNoteOn: string | null;
+  /** When it first showed up in your notes (not counting videos still to try). */
+  firstNoteOn: string | null;
   edges: { from: string | null; fromRole: Role | null; to: string | null; toRole: Role | null }[];
 }
 
@@ -178,6 +183,7 @@ export interface NoteCreateInput {
   session?: SessionInput;
   /** Put it on the To try list instead of filing it. */
   toTry?: boolean;
+  starred?: boolean;
 }
 
 export interface NotePatch {
@@ -188,6 +194,7 @@ export interface NotePatch {
   sessionId?: number | null;
   session?: SessionInput;
   toTry?: boolean;
+  starred?: boolean;
   newTechniques?: { name: string; type: TechniqueType; role?: Role }[];
 }
 

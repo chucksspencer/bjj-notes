@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { Link } from 'react-router';
 import type { NoteView, TechniqueRef } from '../../../src/shared/api';
 import { isPlaceholder } from '../../../src/shared/links';
 import { useDeleteNote, useDeleteNotes, useEditNote, useFocus, useNotes } from '../api';
@@ -10,22 +11,16 @@ import { TechniquePicker, type NewTechnique } from '../components/TechniquePicke
 import { useToast } from '../components/Toast';
 import { SourceLink } from '../components/Video';
 import { friendlyDate, localToday } from '../lib/format';
-import { InboxTabs } from './Inbox';
 
-/** Videos and ideas saved to try before they earn a place in the library ("silly Instagram bullshit"). */
+/** Videos and ideas saved to try before they earn a place in the library ("silly Instagram bullshit"). Part of the Lab. */
 export function ToTry() {
   const notes = useNotes({ toTry: true, limit: 200 });
   const focus = useFocus();
   const today = focus.data?.today ?? localToday();
-  const [keeping, setKeeping] = useState<NoteView | null>(null);
-  const capture = useCapture();
-  const toss = useDeleteNote();
   const tossMany = useDeleteNotes();
   const selection = useSelection(notes.data?.map(n => n.id) ?? []);
   const toast = useToast();
 
-  const tossOne = (n: NoteView) =>
-    toss.mutate(n.id, { onSuccess: () => toast.show('Tossed it', { undoable: true }), onError: toast.error });
   const tossSelected = () =>
     tossMany.mutate(selection.ids, {
       onSuccess: () => {
@@ -34,12 +29,15 @@ export function ToTry() {
       },
       onError: toast.error,
     });
-  const about = (n: NoteView) => (n.techniques.length ? ` · about ${n.techniques.map(t => t.name).join(', ')}` : '');
 
   return (
     <div className={`page${selection.active ? ' selecting' : ''}`}>
+      <Link className="btn ghost back" to="/">
+        <Icon name="back" size={20} />
+        Lab
+      </Link>
       <header className="page-head">
-        <h1 className="display page-title">Inbox</h1>
+        <h1 className="display page-title">To try</h1>
         {selection.active ? (
           <button type="button" className="btn ghost small" onClick={selection.stop}>
             Done
@@ -52,15 +50,10 @@ export function ToTry() {
           )
         )}
       </header>
-      <InboxTabs />
       <p className="muted">Silly Instagram bullshit: try it out, then keep it or toss it.</p>
       <section className="panel">
         {notes.isError && <div className="empty">Couldn't load the list. {notes.error.message}</div>}
-        {notes.data?.length === 0 && (
-          <div className="empty">
-            Nothing to try. Share a reel to Save to BJJ Notes, or tick "Haven't tried it yet" when you add a link.
-          </div>
-        )}
+        {notes.data?.length === 0 && <div className="empty">{TRY_EMPTY}</div>}
         {notes.data?.map(n =>
           selection.active ? (
             <label key={n.id} className="row note-select">
@@ -80,36 +73,57 @@ export function ToTry() {
               </span>
             </label>
           ) : (
-            <article key={n.id} className="row">
-              <div className="note-head">
-                <span>
-                  {friendlyDate(n.observedOn, today)}
-                  {about(n)}
-                </span>
-                <button type="button" className="btn ghost small" onClick={() => capture.edit(n)}>
-                  Edit
-                </button>
-              </div>
-              {!isPlaceholder(n.body) && <div className="note-body">{n.body}</div>}
-              {n.source?.url && (
-                <SourceLink url={n.source.url} timestamp={n.sourceTimestamp} title={n.source.title} author={n.source.author} />
-              )}
-              <div className="note-foot try-actions">
-                <button type="button" className="btn small" onClick={() => setKeeping(n)}>
-                  <Icon name="check" size={18} />
-                  Keep
-                </button>
-                <button type="button" className="btn quiet small" disabled={toss.isPending} onClick={() => tossOne(n)}>
-                  Toss
-                </button>
-              </div>
-            </article>
+            <TryRow key={n.id} note={n} today={today} />
           ),
         )}
       </section>
       <SelectionBar selection={selection} noun="videos" action="Toss" busy={tossMany.isPending} onDelete={tossSelected} />
-      {keeping && <KeepSheet note={keeping} onClose={() => setKeeping(null)} />}
     </div>
+  );
+}
+
+export const TRY_EMPTY = 'Nothing to try. Share a reel to Save to BJJ Notes, or tick "Haven\'t tried it yet" when you add a link.';
+
+const about = (n: NoteView) => (n.techniques.length ? ` · about ${n.techniques.map(t => t.name).join(', ')}` : '');
+
+/** One thing to try: the video, and Keep (file it under a technique) or Toss. */
+export function TryRow({ note, today }: { note: NoteView; today: string }) {
+  const [keeping, setKeeping] = useState(false);
+  const closeKeep = useCallback(() => setKeeping(false), []);
+  const capture = useCapture();
+  const toss = useDeleteNote();
+  const toast = useToast();
+  return (
+    <article className="row">
+      <div className="note-head">
+        <span>
+          {friendlyDate(note.observedOn, today)}
+          {about(note)}
+        </span>
+        <button type="button" className="btn ghost small" onClick={() => capture.edit(note)}>
+          Edit
+        </button>
+      </div>
+      {!isPlaceholder(note.body) && <div className="note-body">{note.body}</div>}
+      {note.source?.url && (
+        <SourceLink url={note.source.url} timestamp={note.sourceTimestamp} title={note.source.title} author={note.source.author} />
+      )}
+      <div className="note-foot try-actions">
+        <button type="button" className="btn small" onClick={() => setKeeping(true)}>
+          <Icon name="check" size={18} />
+          Keep
+        </button>
+        <button
+          type="button"
+          className="btn quiet small"
+          disabled={toss.isPending}
+          onClick={() => toss.mutate(note.id, { onSuccess: () => toast.show('Tossed it', { undoable: true }), onError: toast.error })}
+        >
+          Toss
+        </button>
+      </div>
+      {keeping && <KeepSheet note={note} onClose={closeKeep} />}
+    </article>
   );
 }
 

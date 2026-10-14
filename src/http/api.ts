@@ -69,6 +69,7 @@ const noteCreate = z.object({
   sessionId: z.number().int().nullable().optional(),
   session: sessionInput.optional(),
   toTry: z.boolean().optional(),
+  starred: z.boolean().optional(),
 });
 const notePatch = z.object({
   body: z.string().trim().min(1).max(10_000).optional(),
@@ -78,6 +79,7 @@ const notePatch = z.object({
   sessionId: z.number().int().nullable().optional(),
   session: sessionInput.optional(),
   toTry: z.boolean().optional(),
+  starred: z.boolean().optional(),
   newTechniques: z.array(newTechnique).max(10).optional(),
 });
 const techniqueCreate = z.object({
@@ -186,7 +188,9 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
           role: z.enum(ROLES).optional(),
           status: z.enum(STATUSES).optional(),
           position: id.optional(),
-          sort: z.enum(['name', 'recent']).optional(),
+          sort: z.enum(['name', 'recent', 'new']).optional(),
+          newSince: date.optional(),
+          limit: z.coerce.number().int().min(1).max(500).optional(),
         })
         .parse(req.query);
       return techniqueList(ctx.db, { ...qs, positionId: qs.position });
@@ -300,6 +304,8 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
         .object({
           inbox: z.enum(['1', '0']).optional(),
           toTry: z.enum(['1', '0']).optional(),
+          starred: z.enum(['1', '0']).optional(),
+          kind: z.enum(NOTE_KINDS).optional(),
           technique: id.optional(),
           q: z.string().max(200).optional(),
           limit: z.coerce.number().int().min(1).max(200).optional(),
@@ -309,6 +315,8 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
       return noteList(ctx.db, {
         inbox: qs.inbox === undefined ? undefined : qs.inbox === '1',
         toTry: qs.toTry === undefined ? undefined : qs.toTry === '1',
+        starred: qs.starred === undefined ? undefined : qs.starred === '1',
+        kind: qs.kind,
         techniqueId: qs.technique,
         q: qs.q,
         limit: qs.limit,
@@ -330,6 +338,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
         session_id: b.sessionId,
         session: b.session,
         to_try: b.toTry,
+        starred: b.starred,
         via: 'web',
       });
       res.status(201);
@@ -349,6 +358,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
         session_id: b.sessionId,
         session: b.session,
         to_try: b.toTry,
+        starred: b.starred,
         new_techniques: b.newTechniques,
       });
       const note = await noteView(ctx.db, noteId);

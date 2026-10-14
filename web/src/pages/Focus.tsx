@@ -7,6 +7,7 @@ import { Sheet } from '../components/Sheet';
 import { TechniquePicker } from '../components/TechniquePicker';
 import { useToast } from '../components/Toast';
 import { isQuiet, lastNoteText } from '../lib/format';
+import { FocusTabs } from './Lab';
 
 export function Focus() {
   const focus = useFocus();
@@ -24,6 +25,8 @@ export function Focus() {
           Add
         </button>
       </header>
+      <FocusTabs />
+      <p className="muted">The long game: what to work on over the coming weeks and months, most important first.</p>
 
       {focus.isError && <div className="panel empty">Couldn't load your focus list. {focus.error.message}</div>}
       {view && (

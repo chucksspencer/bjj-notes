@@ -43,6 +43,8 @@ export interface AddNoteInput {
   session?: OriginInput;
   /** Not tried yet ("silly Instagram bullshit"): kept in the To try list, out of the inbox, until kept or tossed. */
   to_try?: boolean;
+  /** Star it: a recent, pertinent note to keep in front of you (in Lab). */
+  starred?: boolean;
   raw_text?: string;
   via?: 'mcp' | 'capture' | 'web';
 }
@@ -175,8 +177,8 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
     const inbox = !toTry && (ids.size === 0 || unresolved.length > 0);
 
     const { rows } = await q.query<{ id: number }>(
-      `insert into notes (body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id`,
+      `insert into notes (body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via, starred_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, case when $11 then now() end) returning id`,
       [
         text,
         input.raw_text ?? null,
@@ -188,6 +190,7 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
         inbox,
         toTry,
         input.via ?? 'mcp',
+        input.starred === true,
       ],
     );
     const noteId = rows[0]!.id;
@@ -202,7 +205,7 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
       : linked.length
         ? `Saved note #${noteId} to ${linked.join(', ')}`
         : `Saved note #${noteId}`;
-    const parts = [saved + from];
+    const parts = [saved + from + (input.starred ? ', starred' : '')];
     if (created.length) parts.push(`new card${created.length > 1 ? 's' : ''}: ${created.map(c => c.name).join(', ')}`);
     for (const u of unresolved) {
       parts.push(
@@ -298,6 +301,8 @@ export interface UpdateNoteInput {
   session?: OriginInput;
   /** Put it on (true) or take it off (false) the To try list. Off with no techniques means it needs filing. */
   to_try?: boolean;
+  /** Star (true) or unstar (false). */
+  starred?: boolean;
 }
 
 export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): Promise<string> {
@@ -334,14 +339,20 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
       const count = (await q.query<{ c: number }>('select count(*)::int as c from note_techniques where note_id = $1', [id])).rows[0]!.c;
       await q.query('update notes set inbox = $2, to_try = $3 where id = $1', [id, !toTry && count === 0, toTry]);
     }
-    await logActivity(q, 'update_note', `${wasToTry && !toTry ? 'keeping' : 'edit to'} note #${id}`, {
+    const wasStarred = !!row.starred_at;
+    if (input.starred !== undefined && input.starred !== wasStarred) {
+      await q.query('update notes set starred_at = case when $2 then now() end where id = $1', [id, input.starred]);
+    }
+    const starChange = input.starred === undefined || input.starred === wasStarred ? null : input.starred ? 'starred' : 'unstarred';
+    const action = wasToTry && !toTry ? 'keeping' : starChange === 'starred' ? 'starring' : starChange === 'unstarred' ? 'unstarring' : 'edit to';
+    await logActivity(q, 'update_note', `${action} note #${id}`, {
       kind: 'restore_note',
       row,
       techniqueIds: before,
       session: origin?.change,
       createdTechniqueIds: fresh?.created.map(c => c.id),
     });
-    const moved = toTry === wasToTry ? '' : toTry ? ', now on the To try list' : ', off the To try list';
+    const moved = (toTry === wasToTry ? '' : toTry ? ', now on the To try list' : ', off the To try list') + (starChange ? `, ${starChange}` : '');
     if (origin?.view) return `Updated note #${id} (from ${sessionPhrase(origin.view)})${moved}.`;
     return origin ? `Updated note #${id} (no session)${moved}.` : `Updated note #${id}${moved}.`;
   });

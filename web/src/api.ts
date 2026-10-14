@@ -69,7 +69,7 @@ export const keys = {
   focus: ['focus'] as const,
   techniques: (f: TechniqueFilters = {}) => ['techniques', f] as const,
   technique: (id: number) => ['technique', id] as const,
-  notes: (f: Record<string, unknown>) => ['notes', f] as const,
+  notes: (f: NoteFilters) => ['notes', f] as const,
   positions: ['positions'] as const,
   sessions: (date?: string) => ['sessions', date ?? null] as const,
   position: (slug: string, role?: Role) => ['position', slug, role ?? null] as const,
@@ -151,7 +151,11 @@ export interface TechniqueFilters {
   role?: Role;
   status?: Status;
   position?: number;
-  sort?: 'name' | 'recent';
+  /** 'new': newest first by when it first showed up in your notes. */
+  sort?: 'name' | 'recent' | 'new';
+  /** Only techniques first noted on or after this date (YYYY-MM-DD). */
+  newSince?: string;
+  limit?: number;
 }
 
 const qs = (o: object) => {
@@ -234,10 +238,21 @@ export function useDeleteTechniques() {
 
 const flag = (v: boolean | undefined) => (v === undefined ? undefined : v ? '1' : '0');
 
-export const useNotes = (f: { inbox?: boolean; toTry?: boolean; technique?: number; q?: string; limit?: number }, enabled = true) =>
+export interface NoteFilters {
+  inbox?: boolean;
+  toTry?: boolean;
+  starred?: boolean;
+  kind?: NoteKind;
+  technique?: number;
+  q?: string;
+  limit?: number;
+}
+
+export const useNotes = (f: NoteFilters, enabled = true) =>
   useQuery({
     queryKey: keys.notes(f),
-    queryFn: () => request<NoteView[]>('GET', `/api/v1/notes${qs({ ...f, inbox: flag(f.inbox), toTry: flag(f.toTry) })}`),
+    queryFn: () =>
+      request<NoteView[]>('GET', `/api/v1/notes${qs({ ...f, inbox: flag(f.inbox), toTry: flag(f.toTry), starred: flag(f.starred) })}`),
     enabled,
   });
 

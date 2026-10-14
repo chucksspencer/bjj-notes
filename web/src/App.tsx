@@ -1,6 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { useEffect } from 'react';
-import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router';
+import { useEffect, type ReactNode } from 'react';
+import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router';
 import { queryClient, setUnauthorizedHandler, useNotes, useSession } from './api';
 import { CaptureProvider, useCapture } from './components/Capture';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -8,6 +8,7 @@ import { Icon } from './components/Icon';
 import { ToastProvider } from './components/Toast';
 import { Focus } from './pages/Focus';
 import { Inbox } from './pages/Inbox';
+import { Lab } from './pages/Lab';
 import { Library } from './pages/Library';
 import { Login } from './pages/Login';
 import { Position, Positions } from './pages/Positions';
@@ -52,14 +53,16 @@ function Shell() {
       <main>
         <ErrorBoundary key={pathname}>
           <Routes>
-          <Route path="/" element={<Focus />} />
-          <Route path="/library" element={<Library />} />
-          <Route path="/t/:id" element={<Technique />} />
-          <Route path="/positions" element={<Positions />} />
-          <Route path="/p/:slug" element={<Position />} />
-          <Route path="/inbox" element={<Inbox />} />
-          <Route path="/inbox/try" element={<ToTry />} />
-          <Route path="*" element={<NotFound />} />
+            <Route path="/" element={<Lab />} />
+            <Route path="/focus" element={<Focus />} />
+            <Route path="/try" element={<ToTry />} />
+            <Route path="/library" element={<Library />} />
+            <Route path="/t/:id" element={<Technique />} />
+            <Route path="/positions" element={<Positions />} />
+            <Route path="/p/:slug" element={<Position />} />
+            <Route path="/inbox" element={<Inbox />} />
+            <Route path="/inbox/try" element={<Navigate to="/try" replace />} />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </ErrorBoundary>
       </main>
@@ -73,26 +76,25 @@ function TabBar() {
   const inbox = useNotes({ inbox: true, limit: 100 });
   const count = inbox.data?.length ?? 0;
   const { pathname } = useLocation();
-  const inLibrary = pathname.startsWith('/library') || pathname.startsWith('/t/');
-  const inPositions = pathname.startsWith('/positions') || pathname.startsWith('/p/');
+  const under = (...prefixes: string[]) => prefixes.some(p => pathname === p || pathname.startsWith(`${p}/`));
   return (
     <nav className="tabbar" aria-label="Main">
-      <NavLink className="tab" to="/" end>
+      <Tab to="/" active={pathname === '/' || under('/focus', '/try')}>
         <Icon name="focus" />
         Focus
-      </NavLink>
-      <NavLink className="tab" to="/library" aria-current={inLibrary ? 'page' : undefined}>
+      </Tab>
+      <Tab to="/library" active={under('/library', '/t')}>
         <Icon name="library" />
         Library
-      </NavLink>
+      </Tab>
       <button type="button" className="tab-note" aria-label="New note" onClick={() => capture.open()}>
         <Icon name="plus" size={28} />
       </button>
-      <NavLink className="tab" to="/positions" aria-current={inPositions ? 'page' : undefined}>
+      <Tab to="/positions" active={under('/positions', '/p')}>
         <Icon name="positions" />
         Positions
-      </NavLink>
-      <NavLink className="tab" to="/inbox">
+      </Tab>
+      <Tab to="/inbox" active={under('/inbox')}>
         <Icon name="inbox" />
         Inbox
         {count > 0 && (
@@ -100,8 +102,17 @@ function TabBar() {
             {count}
           </span>
         )}
-      </NavLink>
+      </Tab>
     </nav>
+  );
+}
+
+/** A tab that stays lit on the pages under it (a technique card under Library, say). */
+function Tab({ to, active, children }: { to: string; active: boolean; children: ReactNode }) {
+  return (
+    <Link className="tab" to={to} aria-current={active ? 'page' : undefined}>
+      {children}
+    </Link>
   );
 }
 

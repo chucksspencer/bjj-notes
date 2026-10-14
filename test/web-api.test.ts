@@ -336,6 +336,33 @@ describe('JSON API', () => {
     await api('POST', '/api/v1/notes/delete', { ids: [reel.note.id, about.id, fresh.id] }); // tossed
   });
 
+  it('stars notes and lists what is new for the Lab', async () => {
+    const a = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Star me first.', techniqueIds: [ghost.id], starred: true })).body.note;
+    expect(a).toMatchObject({ starred: true });
+    const b = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Star me second.', techniqueIds: [ghost.id] })).body.note;
+    expect(b.starred).toBe(false);
+    expect((await api<NoteView>('PATCH', `/api/v1/notes/${b.id}`, { starred: true })).body.starred).toBe(true);
+    // Most recently starred first.
+    const starred = (await api<NoteView[]>('GET', '/api/v1/notes?starred=1')).body.map(n => n.id);
+    expect(starred.slice(0, 2)).toEqual([b.id, a.id]);
+    expect((await api<NoteView>('PATCH', `/api/v1/notes/${a.id}`, { starred: false })).body.starred).toBe(false);
+    expect((await api<NoteView[]>('GET', '/api/v1/notes?starred=1')).body.map(n => n.id)).not.toContain(a.id);
+    // Questions for the coach.
+    const q = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Ask about frames?', kind: 'question', techniqueIds: [ghost.id] })).body.note;
+    expect((await api<NoteView[]>('GET', '/api/v1/notes?kind=question')).body.map(n => n.id)).toContain(q.id);
+
+    // New in your notes: first noted on or after the date; a card only noted in an untried video doesn't count yet.
+    const fresh = (await api<TechniqueView>('POST', '/api/v1/techniques', { name: 'Gogoplata', type: 'submission' })).body;
+    await api('POST', '/api/v1/notes', { text: 'Gogo from rubber guard.', techniqueIds: [fresh.id], date: '2026-10-01', toTry: true });
+    const newSince = async (d: string) =>
+      (await api<TechniqueListItem[]>('GET', `/api/v1/techniques?sort=new&newSince=${d}`)).body.map(t => [t.name, t.firstNoteOn]);
+    expect((await newSince('2026-09-01')).map(([n]) => n)).not.toContain('Gogoplata');
+    await api('POST', '/api/v1/notes', { text: 'Hit the gogo in rolling.', techniqueIds: [fresh.id], date: '2026-10-02', kind: 'rolling' });
+    expect(await newSince('2026-09-01')).toContainEqual(['Gogoplata', '2026-10-02']);
+    expect((await newSince('2026-10-03')).map(([n]) => n)).not.toContain('Gogoplata');
+    await api('POST', '/api/v1/techniques/delete', { ids: [fresh.id] });
+  });
+
   it('deletes a selection of techniques or notes as one undoable change', async () => {
     const make = async (name: string) => (await api<TechniqueView>('POST', '/api/v1/techniques', { name, type: 'sweep' })).body;
     const [a, b, c] = [await make('Tornado roll'), await make('Lapel feed'), await make('Wrist ride')];

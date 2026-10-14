@@ -3,7 +3,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { undoLast } from '../services/activity.js';
 import type { Ctx } from '../services/context.js';
-import { getPosition, review, search } from '../services/explore.js';
+import { getLab, getPosition, review, search } from '../services/explore.js';
 import { focusHistory, getFocus, updateFocus } from '../services/focus.js';
 import { addNote, fileNote, getInbox, updateNote } from '../services/notes.js';
 import { logSession } from '../services/sessions.js';
@@ -29,6 +29,7 @@ How to use it well:
 - Model techniques as moves between positions: a sweep goes from a guard (bottom) to top; a pass goes from a guard (top) to a pin; an escape starts from a pin (bottom).
 - Say where a note came from with add_note's session (a class, a seminar with its name and instructor, an open mat): "notes from today's class" is {kind: "class"}; "Zen camp seminar by Josh Jones on 2024-02-03" is {kind: "seminar", name: "Zen camp", instructor: "Josh Jones", date: "2024-02-03"}. The same session is reused, not duplicated.
 - Videos and ideas he hasn't tried yet go on the To try list (add_note with to_try: true), not on a technique. He calls this "silly Instagram bullshit"; "add this to my SIB" or "something to try" means the same. Reels he shares from Instagram land there automatically. When he's tried one and likes it, file_note keeps it under the technique; get_inbox with to_try: true lists what's waiting.
+- Lab is the short-term working set (get_lab): starred notes, videos to try, techniques new in his notes, questions for his coach. "Star that" or "flag that" means update_note with starred: true (or add_note with starred: true for a new note). The focus list is the long-term guide: broad areas, strategies and positions over weeks or months.
 - The focus list is ordered; #1 is what he's working on most. "Add X to my focus" puts it at the top unless he says otherwise.
 - Replies are often read aloud, so keep confirmations short. If he says "undo that", call undo_last.`;
 
@@ -163,6 +164,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
         to_try: flag
           .optional()
           .describe('Not tried yet ("silly Instagram bullshit"): goes on the To try list instead of being filed'),
+        starred: flag.optional().describe('Star it: a recent, pertinent note to keep in front of him (shows in Lab)'),
         source: z
           .object({
             kind: z.enum(SOURCE_KINDS).optional(),
@@ -210,7 +212,8 @@ export function buildMcpServer(ctx: Ctx): McpServer {
     'update_note',
     {
       title: 'Edit a note',
-      description: "Changes a note's text, kind, date or where it came from (session). Leave out what shouldn't change.",
+      description:
+        "Changes a note's text, kind, date, where it came from (session), whether it's starred or on the To try list. Leave out what shouldn't change.",
       inputSchema: {
         note_id: z.number().int(),
         text: z.string().optional(),
@@ -219,6 +222,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
         session: sessionInput.optional(),
         clear_session: flag.optional().describe("True to say the note didn't come from any session"),
         to_try: flag.optional().describe('Put the note on (true) or take it off (false) the To try list'),
+        starred: flag.optional().describe('Star (true) or unstar (false) the note'),
       },
       annotations: write,
     },
@@ -231,6 +235,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
           session: parseSession(args.session),
           session_id: args.clear_session ? null : undefined,
           to_try: args.to_try,
+          starred: args.starred,
         }),
       ),
   );
@@ -253,6 +258,18 @@ export function buildMcpServer(ctx: Ctx): McpServer {
       annotations: write,
     },
     args => run(() => logSession(ctx, args)),
+  );
+
+  server.registerTool(
+    'get_lab',
+    {
+      title: 'Get the Lab',
+      description:
+        'The short-term working set: starred notes, videos to try, techniques that are new in his notes, and open questions for his coach. Good before class.',
+      inputSchema: { days: z.number().int().min(1).max(365).optional().describe('How far back counts as new (default 30)') },
+      annotations: readOnly,
+    },
+    args => run(() => getLab(ctx, args.days)),
   );
 
   server.registerTool(

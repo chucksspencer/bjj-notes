@@ -31,6 +31,8 @@ describe.runIf(run)('web app (end to end)', () => {
     await expect.poll(() => page.getByRole('alert').textContent()).toBe('Wrong password.');
     await page.getByLabel('Password').fill(OWNER_PASSWORD);
     await page.getByRole('button', { name: 'Sign in' }).click();
+    await page.getByRole('heading', { name: 'Lab' }).waitFor(); // the Focus tab opens on the Lab
+    await page.getByRole('navigation', { name: 'Views' }).getByRole('link', { name: 'Focus' }).click();
     await page.getByRole('heading', { name: 'Focus' }).waitFor();
     expect(await page.locator('.focus-row').count()).toBe(7);
   });
@@ -58,7 +60,9 @@ describe.runIf(run)('web app (end to end)', () => {
   });
 
   it('reorders the focus list and undoes from the toast', async () => {
-    await page.getByRole('navigation').getByRole('link', { name: 'Focus' }).click();
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Focus' }).click();
+    await page.getByRole('heading', { name: 'Lab' }).waitFor();
+    await page.getByRole('navigation', { name: 'Views' }).getByRole('link', { name: 'Focus' }).click();
     await page.getByRole('button', { name: 'Change Ghost escape' }).click();
     await page.getByRole('button', { name: 'Top', exact: true }).click();
     await page.getByText('Moved to #1: Ghost escape').waitFor();
@@ -165,8 +169,11 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('button', { name: 'Save note' }).click();
     await page.getByText('Added to To try').waitFor();
 
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Inbox/ }).click();
-    await page.getByRole('link', { name: /^To try/ }).click();
+    // To try lives in the Lab, with the whole list a tap away.
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Focus' }).click();
+    await page.getByRole('region', { name: 'To try' }).getByText('Lapel feed into the back take.').waitFor();
+    await page.getByRole('link', { name: 'Open list' }).click();
+    await page.getByRole('heading', { name: 'To try' }).waitFor();
     await page.getByText('Lapel feed into the back take.').waitFor();
     const open = page.getByRole('link', { name: 'Open in Instagram' });
     expect(await open.getAttribute('href')).toBe('https://www.instagram.com/reel/DAbc123xyz/');
@@ -201,6 +208,50 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByText('Flying armbar from standing.').waitFor();
   });
 
+  it('stars notes into the Lab, lists new techniques, and answers a question for coach', async () => {
+    const main = page.getByRole('navigation', { name: 'Main' });
+    await main.getByRole('link', { name: 'Library' }).click();
+    await page.getByLabel('Search techniques').fill('ghost');
+    await page.getByRole('link', { name: /Ghost escape/ }).first().click();
+    const note = page.getByRole('article').filter({ hasText: 'Turn to the knees before the hips.' });
+    await note.getByRole('button', { name: 'Star note' }).click();
+    await page.getByText('Starred. It’s in the Lab').waitFor();
+    await expect.poll(() => note.getByRole('button', { name: 'Unstar note' }).getAttribute('aria-pressed')).toBe('true');
+
+    // A question, starred as it's written.
+    await page.getByRole('button', { name: 'New note' }).click();
+    const sheet = page.getByRole('dialog');
+    await page.getByPlaceholder('What did you learn or notice?').fill('How do I stop the underhook before the ghost escape?');
+    await sheet.getByRole('button', { name: 'Question' }).click();
+    await sheet.getByRole('checkbox', { name: /Star it/ }).check();
+    await page.getByRole('button', { name: 'Save note' }).click();
+    await page.getByText('Saved to your inbox').waitFor();
+
+    await main.getByRole('link', { name: 'Focus' }).click();
+    await page.getByRole('heading', { name: 'Lab' }).waitFor();
+    const starred = page.getByRole('region', { name: 'Starred' });
+    await starred.getByText('Turn to the knees before the hips.').waitFor();
+    await starred.getByText('How do I stop the underhook before the ghost escape?').waitFor();
+    await page.getByRole('region', { name: 'New techniques' }).getByRole('link', { name: /Knee cut pass/ }).waitFor();
+
+    const coach = page.getByRole('region', { name: 'Ask coach' });
+    await coach.getByText('How do I stop the underhook before the ghost escape?').waitFor();
+    await coach.getByRole('button', { name: 'Answered' }).click();
+    await page.getByLabel('What did coach say?').fill('Frame on the hip first, then turn.');
+    await page.getByRole('button', { name: 'Save answer' }).click();
+    await page.getByText('Answer saved').waitFor();
+    await coach.getByText('No open questions.', { exact: false }).waitFor();
+    await starred.getByText(/Answer: Frame on the hip first, then turn\./).waitFor();
+
+    // Unstar both; the Lab empties out.
+    for (let i = 0; i < 2; i++) {
+      await starred.getByRole('button', { name: 'Unstar note' }).first().click();
+      await page.getByText('Unstarred').waitFor();
+      await expect.poll(() => starred.getByRole('article').count()).toBe(1 - i);
+    }
+    await starred.getByText('Nothing starred.', { exact: false }).waitFor();
+  });
+
   it('navigates on desktop Chrome 150+, where scrollTo returns a Promise', async () => {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await ctx.addInitScript(() => {
@@ -217,11 +268,18 @@ describe.runIf(run)('web app (end to end)', () => {
     await desktop.goto(s.base);
     await desktop.getByLabel('Password').fill(OWNER_PASSWORD);
     await desktop.getByRole('button', { name: 'Sign in' }).click();
-    await desktop.getByRole('heading', { name: 'Focus' }).waitFor();
-    for (const tab of ['Library', 'Positions', 'Inbox', 'Focus']) {
-      await desktop.getByRole('navigation').getByRole('link', { name: new RegExp(`^${tab}`) }).click();
-      await desktop.getByRole('heading', { name: tab, exact: true }).waitFor();
+    await desktop.getByRole('heading', { name: 'Lab' }).waitFor();
+    for (const [tab, heading] of [
+      ['Library', 'Library'],
+      ['Positions', 'Positions'],
+      ['Inbox', 'Inbox'],
+      ['Focus', 'Lab'],
+    ] as const) {
+      await desktop.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: new RegExp(`^${tab}`) }).click();
+      await desktop.getByRole('heading', { name: heading, exact: true }).waitFor();
     }
+    await desktop.getByRole('navigation', { name: 'Views' }).getByRole('link', { name: 'Focus' }).click();
+    await desktop.getByRole('heading', { name: 'Focus', exact: true }).waitFor();
     expect(errors).toEqual([]);
     await ctx.close();
   });

@@ -121,3 +121,40 @@ export async function review(ctx: Ctx, days = 7): Promise<string> {
   if (inbox) lines.push(`${inbox} note${inbox === 1 ? '' : 's'} waiting in the inbox.`);
   return lines.join('\n');
 }
+
+/** The date `days` before a YYYY-MM-DD date. */
+function minusDays(date: string, days: number): string {
+  return isoDate(new Date(Date.parse(`${date}T12:00:00Z`) - days * 86_400_000));
+}
+
+/**
+ * Lab: the short-term working set, next to the long-term focus list. Starred notes, videos to try,
+ * techniques new in the notes, and open questions for the coach.
+ */
+export async function getLab(ctx: Ctx, days = 30): Promise<string> {
+  const q = ctx.db;
+  const since = minusDays(today(ctx), days);
+  const [starred, toTry, fresh, questions] = await Promise.all([
+    noteList(q, { starred: true, limit: 25 }),
+    noteList(q, { toTry: true, limit: 10 }),
+    techniqueList(q, { sort: 'new', newSince: since, limit: 15 }),
+    noteList(q, { kind: 'question', toTry: false, limit: 10 }),
+  ]);
+  const toTryTotal = (await q.query<{ c: number }>('select count(*)::int as c from notes where to_try')).rows[0]!.c;
+  const about = (n: { techniques: { name: string }[] }) => (n.techniques.length ? ` [${n.techniques.map(t => t.name).join(', ')}]` : '');
+  const section = (title: string, lines: string[], empty: string) => [title, ...(lines.length ? lines : [`- ${empty}`])];
+  return [
+    ...section(`Starred (${starred.length}):`, starred.map(n => `- #${n.id} ${n.observedOn}${about(n)}: ${n.body}`), 'nothing starred'),
+    ...section(
+      `To try (${toTryTotal}${toTryTotal > toTry.length ? `, newest ${toTry.length} shown` : ''}):`,
+      toTry.map(n => `- #${n.id} ${n.observedOn}${about(n)}: ${n.body}${n.source?.url ? ` <${n.source.url}>` : ''}`),
+      'nothing waiting to be tried',
+    ),
+    ...section(
+      `New in your notes (last ${days} days):`,
+      fresh.map(t => `- ${t.name} (${[t.type, t.role].filter(Boolean).join(', ')}; ${t.status}; first noted ${t.firstNoteOn})`),
+      'no new techniques',
+    ),
+    ...section(`Ask coach (${questions.length}):`, questions.map(n => `- #${n.id} ${n.observedOn}${about(n)}: ${n.body}`), 'no open questions'),
+  ].join('\n');
+}

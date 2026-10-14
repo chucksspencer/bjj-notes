@@ -1,13 +1,26 @@
+import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { NoteView } from '../../../src/shared/api';
 import { isPlaceholder } from '../../../src/shared/links';
 import { noteOrigin } from '../../../src/shared/sessions';
 import { datePhrase, friendlyDate, NOTE_KIND_LABEL } from '../lib/format';
 import { useCapture } from './Capture';
+import { StarButton } from './Star';
 import { SourceLink } from './Video';
 
 /** One note: when, what kind, where it came from, the text, its source, and the techniques it's filed under. */
-export function NoteItem({ note, today, hideTechnique }: { note: NoteView; today: string; hideTechnique?: number }) {
+export function NoteItem({
+  note,
+  today,
+  hideTechnique,
+  actions,
+}: {
+  note: NoteView;
+  today: string;
+  hideTechnique?: number;
+  /** Extra buttons under the note. */
+  actions?: ReactNode;
+}) {
   const capture = useCapture();
   const others = note.techniques.filter(t => t.id !== hideTechnique);
   const origin = noteOrigin(note, d => datePhrase(d, today));
@@ -21,9 +34,12 @@ export function NoteItem({ note, today, hideTechnique }: { note: NoteView; today
           </div>
           {origin && <div className="note-origin">{origin.charAt(0).toUpperCase() + origin.slice(1)}</div>}
         </div>
-        <button type="button" className="btn ghost small" onClick={() => capture.edit(note)}>
-          Edit
-        </button>
+        <div className="note-tools">
+          <StarButton note={note} />
+          <button type="button" className="btn ghost small" onClick={() => capture.edit(note)}>
+            Edit
+          </button>
+        </div>
       </div>
       {!(isPlaceholder(note.body) && note.source?.url) && <div className="note-body">{note.body}</div>}
       {note.source?.url && (
@@ -41,6 +57,7 @@ export function NoteItem({ note, today, hideTechnique }: { note: NoteView; today
           ))}
         </div>
       )}
+      {actions && <div className="note-foot note-actions">{actions}</div>}
     </article>
   );
 }

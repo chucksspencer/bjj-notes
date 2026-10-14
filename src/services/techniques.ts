@@ -230,7 +230,7 @@ export async function getTechnique(ctx: Ctx, name: string, noteLimit = 5): Promi
           ? ` [from ${named}]`
           : '';
       const origin = noteOrigin(n);
-      lines.push(`- ${n.observedOn} ${n.kind}${origin ? ` ${origin}` : ''}${n.toTry ? ' [to try]' : ''} #${n.id}: ${n.body}${src}`);
+      lines.push(`- ${n.observedOn} ${n.kind}${origin ? ` ${origin}` : ''}${n.toTry ? ' [to try]' : ''}${n.starred ? ' [starred]' : ''} #${n.id}: ${n.body}${src}`);
     }
   } else if (t.noteCount) {
     // Asked for the card without its notes (note_limit 0).

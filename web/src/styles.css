@@ -17,6 +17,7 @@
   --danger: #a3261d;
   --on-danger: #ffffff;
   --focus-ring: #7b4bb0;
+  --star: #b7791f;
 
   --font: 'Archivo Variable', 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --radius: 12px;
@@ -42,6 +43,7 @@
     --danger: #ff8f84;
     --on-danger: #2a0b08;
     --focus-ring: #b08bdb;
+    --star: #f2c14e;
     color-scheme: dark;
   }
 }
@@ -59,6 +61,7 @@
   --danger: #ff8f84;
   --on-danger: #2a0b08;
   --focus-ring: #b08bdb;
+  --star: #f2c14e;
   color-scheme: dark;
 }
 
@@ -1084,8 +1087,8 @@ label.row:has(.check:checked) {
   gap: 4px 8px;
 }
 
-/* The inbox's two lists */
-.inbox-tabs {
+/* Lab | Focus, under the Focus tab */
+.view-tabs {
   margin-bottom: 10px;
 }
 
@@ -1124,4 +1127,67 @@ label.row:has(.check:checked) {
   gap: 10px;
   margin: -4px 0 14px;
   cursor: pointer;
+}
+
+/* Stars: recent, pertinent notes kept in the Lab */
+.note-tools {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin: -6px -4px -6px 0;
+}
+
+.btn.star {
+  padding: 0 8px;
+  color: var(--muted);
+}
+
+.btn.star.on {
+  color: var(--star);
+}
+
+.note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Lab sections: title, count, and a link to the full list */
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 28px 0 8px;
+}
+
+.section-head .section-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.section-head .section-title svg {
+  color: var(--star);
+}
+
+.section-count {
+  min-width: 24px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--belt-wash);
+  color: var(--belt);
+  font-size: 14px;
+  font-variation-settings: normal;
+  font-weight: 650;
+  text-align: center;
+}
+
+.section-hint {
+  color: var(--muted);
+  font-size: 14px;
+  font-variation-settings: normal;
+  font-weight: 450;
 }

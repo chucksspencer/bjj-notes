@@ -88,6 +88,7 @@ export interface NoteRowSnapshot {
   inbox: boolean;
   /** Absent in undo entries written before the To try list existed. */
   to_try?: boolean;
+  starred_at?: string | null;
   created_via: string;
   created_at: string;
 }
@@ -109,7 +110,7 @@ export interface LinkSnapshot {
 }
 
 export const NOTE_SNAPSHOT_SQL = `select id, body, raw_text, kind, observed_on::text as observed_on, session_id, source_id,
-  source_timestamp, inbox, to_try, created_via, created_at::text as created_at from notes where id = $1`;
+  source_timestamp, inbox, to_try, starred_at::text as starred_at, created_via, created_at::text as created_at from notes where id = $1`;
 
 export async function logActivity(q: Queryable, action: string, summary: string, undo: UndoOp): Promise<void> {
   await q.query('insert into activity_log (action, summary, undo) values ($1, $2, $3)', [
@@ -206,11 +207,13 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
     case 'restore_note': {
       const r = op.row;
       await q.query(
-        `insert into notes (id, body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via, created_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        `insert into notes (id, body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via, created_at,
+                            starred_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          on conflict (id) do update set body = excluded.body, raw_text = excluded.raw_text, kind = excluded.kind,
            observed_on = excluded.observed_on, session_id = excluded.session_id, source_id = excluded.source_id,
-           source_timestamp = excluded.source_timestamp, inbox = excluded.inbox, to_try = excluded.to_try`,
+           source_timestamp = excluded.source_timestamp, inbox = excluded.inbox, to_try = excluded.to_try,
+           starred_at = excluded.starred_at`,
         [
           r.id,
           r.body,
@@ -224,6 +227,7 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
           r.to_try ?? false,
           r.created_via,
           r.created_at,
+          r.starred_at ?? null,
         ],
       );
       await q.query('delete from note_techniques where note_id = $1', [r.id]);

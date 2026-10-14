@@ -37,6 +37,7 @@ describe('MCP tools over HTTP', () => {
         'file_note',
         'get_focus',
         'get_inbox',
+        'get_lab',
         'get_position',
         'get_technique',
         'log_session',
@@ -244,6 +245,27 @@ describe('MCP tools over HTTP', () => {
     // A client with an older copy of the schema sends yes/no options as text.
     expect(await call('update_note', { note_id: id, to_try: 'true' })).toBe(`Updated note #${id}, now on the To try list.`);
     expect(await call('get_inbox', { to_try: 'true' })).toContain(`#${id}`);
+  });
+
+  it('stars notes and sums up the Lab', async () => {
+    const saved = await call('add_note', { text: 'Keep the elbow tight before the ghost.', techniques: ['Ghost escape'], starred: true });
+    expect(saved).toMatch(/^Saved note #\d+ to Ghost escape, starred\.$/);
+    const id = Number(saved.match(/#(\d+)/)![1]);
+    const question = await call('add_note', { text: 'How early do I underhook the far leg?', techniques: ['Ghost escape'], kind: 'question' });
+    const qid = Number(question.match(/#(\d+)/)![1]);
+
+    const lab = await call('get_lab');
+    expect(lab).toContain(`Starred (1):\n- #${id} `);
+    expect(lab).toContain('[Ghost escape]: Keep the elbow tight before the ghost.');
+    expect(lab).toMatch(/To try \(\d+\):/);
+    expect(lab).toMatch(/New in your notes \(last 30 days\):\n- /);
+    expect(lab).toContain(`#${qid} `);
+    expect(await call('get_technique', { name: 'Ghost escape' })).toContain(`[starred] #${id}:`);
+
+    expect(await call('update_note', { note_id: id, starred: false })).toBe(`Updated note #${id}, unstarred.`);
+    expect(await call('get_lab')).toContain('Starred (0):\n- nothing starred');
+    expect(await call('undo_last')).toBe(`Undid: unstarring note #${id}`);
+    expect(await call('get_lab')).toContain(`Starred (1):\n- #${id} `);
   });
 
   it('undoes a technique edit', async () => {

@@ -49,6 +49,7 @@ interface NoteRow {
   source_timestamp: string | null;
   inbox: boolean;
   to_try: boolean;
+  starred_at: string | null;
   session_id: number | null;
   created_via: NoteView['createdVia'];
   s_id: number | null;
@@ -66,7 +67,7 @@ interface NoteRow {
 }
 
 const NOTE_SELECT = `
-  select n.id, n.body, n.raw_text, n.kind, n.observed_on::text as observed_on, n.source_timestamp, n.inbox, n.to_try,
+  select n.id, n.body, n.raw_text, n.kind, n.observed_on::text as observed_on, n.source_timestamp, n.inbox, n.to_try, n.starred_at::text as starred_at,
          n.session_id, n.created_via,
          s.id as s_id, s.kind as s_kind, s.url as s_url, s.title as s_title, s.author as s_author,
          ss.date::text as ss_date, ss.kind as ss_kind, ss.name as ss_name, ss.instructor as ss_instructor,
@@ -92,6 +93,8 @@ function toNote(r: NoteRow): NoteView {
     techniques: json<TechniqueRef[]>(r.techniques),
     inbox: r.inbox,
     toTry: r.to_try,
+    starred: r.starred_at !== null,
+    starredAt: r.starred_at,
     sessionId: r.session_id,
     session:
       r.session_id && r.ss_kind
@@ -113,6 +116,9 @@ export interface NoteQuery {
   inbox?: boolean;
   /** Only notes on (true) or off (false) the To try list. */
   toTry?: boolean;
+  /** Only starred notes, most recently starred first. */
+  starred?: boolean;
+  kind?: NoteView['kind'];
   techniqueId?: number;
   /** Full-text search over note bodies, or words from where the note came from. */
   q?: string;
@@ -131,10 +137,12 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
   };
   if (opts.inbox !== undefined) where.push(`n.inbox = ${p(opts.inbox)}`);
   if (opts.toTry !== undefined) where.push(`n.to_try = ${p(opts.toTry)}`);
+  if (opts.starred !== undefined) where.push(`n.starred_at is ${opts.starred ? 'not ' : ''}null`);
+  if (opts.kind !== undefined) where.push(`n.kind = ${p(opts.kind)}`);
   if (opts.techniqueId !== undefined) {
     where.push(`exists (select 1 from note_techniques x where x.note_id = n.id and x.technique_id = ${p(opts.techniqueId)})`);
   }
-  let order = opts.oldestFirst ? 'n.id asc' : 'n.observed_on desc, n.id desc';
+  let order = opts.oldestFirst ? 'n.id asc' : opts.starred ? 'n.starred_at desc, n.id desc' : 'n.observed_on desc, n.id desc';
   if (opts.q?.trim()) {
     const tq = p(opts.q.trim());
     // The note's words, or where it came from ("Josh Jones", "Zen camp", "WIMAFC").
@@ -261,9 +269,16 @@ export interface TechniqueQuery {
   role?: Role;
   status?: TechniqueView['status'];
   positionId?: number;
-  sort?: 'name' | 'recent';
+  /** name, last note (recent), or first note (new) */
+  sort?: 'name' | 'recent' | 'new';
   limit?: number;
+  /** Only techniques that first showed up in your notes on or after this date (YYYY-MM-DD). */
+  newSince?: string;
 }
+
+/** When a technique first showed up in your notes (videos still on the To try list don't count yet). */
+const FIRST_NOTE = `select min(n.observed_on) from notes n join note_techniques nt on nt.note_id = n.id
+                    where nt.technique_id = t.id and not n.to_try`;
 
 export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promise<TechniqueListItem[]> {
   const query = f.q?.trim() || null;
@@ -271,7 +286,9 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
     ? 'score desc, t.name'
     : f.sort === 'recent'
       ? 'last_note desc nulls last, t.updated_at desc, t.name'
-      : 'lower(t.name)';
+      : f.sort === 'new'
+        ? 'first_note desc nulls last, t.name'
+        : 'lower(t.name)';
   const { rows } = await q.query<{
     id: number;
     name: string;
@@ -282,6 +299,7 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
     score: number;
     notes: number;
     last_note: string | null;
+    first_note: string | null;
     edges: unknown;
   }>(
     `select t.id, t.name, t.type, t.role, t.status, t.aliases,
@@ -289,6 +307,7 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
             (select count(*)::int from note_techniques nt where nt.technique_id = t.id) as notes,
             (select max(n.observed_on)::text from notes n join note_techniques nt on nt.note_id = n.id
               where nt.technique_id = t.id) as last_note,
+            (${FIRST_NOTE})::text as first_note,
             coalesce((select json_agg(json_build_object('from', pf.name, 'fromRole', e.from_role,
                                                         'to', pt.name, 'toRole', e.to_role) order by e.id)
                       from technique_edges e
@@ -300,6 +319,7 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
        and ($3::text is null or t.role = $3 or exists (
              select 1 from technique_edges e where e.technique_id = t.id and e.from_role = $3))
        and ($4::text is null or t.status = $4)
+       and ($7::date is null or (${FIRST_NOTE}) >= $7)
        and ($5::int is null or exists (
              select 1 from technique_edges e where e.technique_id = t.id
                and (e.from_position_id = $5 or e.to_position_id = $5)))
@@ -318,7 +338,7 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
                 and ${originMatches(originText('ss', 'so'), '$1')}))
      order by ${order}
      limit $6`,
-    [query, f.type ?? null, f.role ?? null, f.status ?? null, f.positionId ?? null, Math.min(f.limit ?? 200, 500)],
+    [query, f.type ?? null, f.role ?? null, f.status ?? null, f.positionId ?? null, Math.min(f.limit ?? 200, 500), f.newSince ?? null],
   );
   return rows.map(r => ({
     id: r.id,
@@ -329,6 +349,7 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
     aliases: r.aliases,
     noteCount: r.notes,
     lastNoteOn: r.last_note,
+    firstNoteOn: r.first_note,
     edges: json<TechniqueListItem['edges']>(r.edges),
   }));
 }
