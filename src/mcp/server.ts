@@ -66,6 +66,9 @@ function parseSession(v: z.infer<typeof sessionInput> | undefined): z.infer<type
     throw new Error('session should look like {"kind": "class"} or {"kind": "seminar", "name": "Zen camp", "date": "2024-02-03"}.');
   }
 }
+// A yes/no option, also accepted as "true"/"false" text for the same reason as the session above.
+const flag = z.union([z.boolean(), z.enum(['true', 'false'])]).transform(v => v === true || v === 'true');
+
 const newTechnique = z.object({
   name: z.string(),
   type: z.enum(TECHNIQUE_TYPES),
@@ -124,7 +127,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
         aliases: z.array(z.string()).optional(),
         key_details: z.array(z.string()).optional(),
         mistakes: z.array(z.string()).optional(),
-        replace_lists: z.boolean().optional(),
+        replace_lists: flag.optional(),
         positions: z
           .array(
             z.object({
@@ -157,8 +160,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
         kind: z.enum(NOTE_KINDS).optional().describe('instruction = taught/watched; rolling = happened live'),
         date: date.optional().describe("YYYY-MM-DD; defaults to the session's date, else today"),
         session: sessionInput.optional(),
-        to_try: z
-          .boolean()
+        to_try: flag
           .optional()
           .describe('Not tried yet ("silly Instagram bullshit"): goes on the To try list instead of being filed'),
         source: z
@@ -182,7 +184,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
       title: 'List inbox notes',
       description:
         'Notes that are not yet linked to a technique. With to_try: true, the To try list instead: videos and ideas saved to try before keeping ("silly Instagram bullshit"), newest first.',
-      inputSchema: { limit: z.number().int().min(1).max(50).optional(), to_try: z.boolean().optional() },
+      inputSchema: { limit: z.number().int().min(1).max(50).optional(), to_try: flag.optional() },
       annotations: readOnly,
     },
     args => run(() => getInbox(ctx, args.limit, args.to_try === true)),
@@ -215,8 +217,8 @@ export function buildMcpServer(ctx: Ctx): McpServer {
         kind: z.enum(NOTE_KINDS).optional(),
         date: date.optional().describe('YYYY-MM-DD'),
         session: sessionInput.optional(),
-        clear_session: z.boolean().optional().describe("True to say the note didn't come from any session"),
-        to_try: z.boolean().optional().describe('Put the note on (true) or take it off (false) the To try list'),
+        clear_session: flag.optional().describe("True to say the note didn't come from any session"),
+        to_try: flag.optional().describe('Put the note on (true) or take it off (false) the To try list'),
       },
       annotations: write,
     },
@@ -259,7 +261,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
       title: 'Get the focus list',
       description:
         'The ranked active focus list with how recently each item got a note, plus paused and backlog items. With history=true, returns the change log instead (optionally for one item).',
-      inputSchema: { history: z.boolean().optional(), item: z.string().optional() },
+      inputSchema: { history: flag.optional(), item: z.string().optional() },
       annotations: readOnly,
     },
     args => run(() => (args.history ? focusHistory(ctx, args.item) : getFocus(ctx))),

@@ -241,6 +241,9 @@ describe('MCP tools over HTTP', () => {
     expect(await call('undo_last')).toBe(`Undid: keeping note #${id}`);
     expect(await call('get_inbox', { to_try: true })).toContain(`#${id}`);
     expect(await call('update_note', { note_id: id, to_try: false })).toBe(`Updated note #${id}, off the To try list.`);
+    // A client with an older copy of the schema sends yes/no options as text.
+    expect(await call('update_note', { note_id: id, to_try: 'true' })).toBe(`Updated note #${id}, now on the To try list.`);
+    expect(await call('get_inbox', { to_try: 'true' })).toContain(`#${id}`);
   });
 
   it('undoes a technique edit', async () => {
