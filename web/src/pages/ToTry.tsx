@@ -151,11 +151,15 @@ export function TryCompactRow({ note, today }: { note: NoteView; today: string }
   const label = sourceLabel(note);
   return (
     <article className="row try-compact">
+      {url && (
+        <a className="thumb-link" href={url} target="_blank" rel="noreferrer noopener" tabIndex={-1} aria-hidden>
+          <Thumb url={url} />
+        </a>
+      )}
       <div className="try-compact-main">
         <div className="try-compact-title">
           {url ? (
             <a href={url} target="_blank" rel="noreferrer noopener">
-              <Icon name="play" size={13} />
               {label}
             </a>
           ) : (
@@ -168,23 +172,42 @@ export function TryCompactRow({ note, today }: { note: NoteView; today: string }
           Saved {datePhrase(note.observedOn, today)}
           {about(note)}
         </div>
-      </div>
-      <div className="try-compact-actions">
-        <button type="button" className="btn quiet small" onClick={() => setKeeping(true)}>
-          <Icon name="check" size={16} />
-          Keep
-        </button>
-        <button
-          type="button"
-          className="btn ghost small"
-          disabled={toss.isPending}
-          onClick={() => toss.mutate(note.id, { onSuccess: () => toast.show('Tossed it', { undoable: true }), onError: toast.error })}
-        >
-          Toss
-        </button>
+        <div className="try-compact-actions">
+          <button type="button" className="btn quiet small" onClick={() => setKeeping(true)}>
+            <Icon name="check" size={16} />
+            Keep
+          </button>
+          <button
+            type="button"
+            className="btn ghost small"
+            disabled={toss.isPending}
+            onClick={() => toss.mutate(note.id, { onSuccess: () => toast.show('Tossed it', { undoable: true }), onError: toast.error })}
+          >
+            Toss
+          </button>
+        </div>
       </div>
       {keeping && <KeepSheet note={note} onClose={closeKeep} />}
     </article>
+  );
+}
+
+/** A small picture of what's waiting: YouTube's thumbnail, or a black tile for a reel or other link. */
+function Thumb({ url }: { url: string }) {
+  const [broken, setBroken] = useState(false);
+  const yt = youTubeId(url);
+  if (yt && !broken) {
+    return (
+      <span className="thumb">
+        <img src={`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`} alt="" loading="lazy" onError={() => setBroken(true)} />
+        <Icon name="play" size={16} />
+      </span>
+    );
+  }
+  return (
+    <span className={`thumb ${instagramPost(url) || yt ? 'thumb-video' : 'thumb-link'}`}>
+      <Icon name={instagramPost(url) || yt ? 'play' : 'link'} size={instagramPost(url) || yt ? 20 : 22} />
+    </span>
   );
 }
 

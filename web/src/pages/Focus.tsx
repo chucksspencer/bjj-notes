@@ -7,7 +7,7 @@ import { Sheet } from '../components/Sheet';
 import { TechniquePicker } from '../components/TechniquePicker';
 import { useToast } from '../components/Toast';
 import { isQuiet, lastNoteText } from '../lib/format';
-import { FocusTabs } from './Lab';
+import { FocusHeader } from './Lab';
 
 export function Focus() {
   const focus = useFocus();
@@ -17,16 +17,17 @@ export function Focus() {
   const view = focus.data;
 
   return (
-    <div className="page">
-      <header className="page-head">
-        <h1 className="display page-title">Focus</h1>
-        <button type="button" className="btn small" onClick={() => setAdding(true)}>
-          <Icon name="plus" size={18} />
-          Add
-        </button>
-      </header>
-      <FocusTabs />
-      <p className="muted">The long game: what to work on over the coming weeks and months, most important first.</p>
+    <div className="page band-page">
+      <FocusHeader
+        title="Focus"
+        summary="The long game: what to work on over the coming weeks and months, most important first."
+        action={
+          <button type="button" className="btn small" onClick={() => setAdding(true)}>
+            <Icon name="plus" size={18} />
+            Add
+          </button>
+        }
+      />
 
       {focus.isError && <div className="panel empty">Couldn't load your focus list. {focus.error.message}</div>}
       {view && (

@@ -15,8 +15,47 @@ import { TRY_EMPTY, TryCompactRow } from './ToTry';
 /** Videos to try shown in the Lab; the rest (and the players) are a tap away. */
 const TRY_SHOWN = 5;
 
+/**
+ * The Focus tab's header, drawn as the end of a purple belt: the weave, then the black rank bar.
+ * Holds the title, the Lab | Focus switch, and a line about what's there.
+ */
+export function FocusHeader({ title, summary, action }: { title: string; summary: ReactNode; action?: ReactNode }) {
+  return (
+    <header className="band">
+      <div className="band-text">
+        <div className="band-top">
+          <h1 className="display page-title">{title}</h1>
+          {action}
+        </div>
+        <FocusTabs />
+        <p className="band-summary">{summary}</p>
+      </div>
+      <div className="band-bar" aria-hidden>
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
+    </header>
+  );
+}
+
+/** "3 starred, 2 to try and 1 question for coach." */
+function labSummary(v: LabView): string {
+  const starred = v.starred.techniques.length + v.starred.notes.length;
+  const parts = [
+    starred ? `${starred} starred` : '',
+    v.toTry.total ? `${v.toTry.total} to try` : '',
+    v.fresh.length ? countOf(v.fresh.length, 'new technique') : '',
+    v.questions.length ? `${countOf(v.questions.length, 'question')} for coach` : '',
+  ].filter(Boolean);
+  if (!parts.length) return 'Nothing waiting. Star what matters this week, or save a video to try.';
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]!;
+  return `${list}.`;
+}
+
 /** The two views behind the Focus tab: the Lab (what you're sorting through now) and the Focus list (the long game). */
-export function FocusTabs() {
+function FocusTabs() {
   return (
     <nav className="segments view-tabs" aria-label="Views">
       <NavLink className="segment" to="/" end>
@@ -42,12 +81,8 @@ export function Lab() {
   const selection = useSelection(allQuestions.map(n => n.id));
 
   return (
-    <div className={`page${selection.active ? ' selecting' : ''}`}>
-      <header className="page-head">
-        <h1 className="display page-title">Lab</h1>
-      </header>
-      <FocusTabs />
-      <p className="muted">What you're working through now. The Focus list is the long game.</p>
+    <div className={`page band-page${selection.active ? ' selecting' : ''}`}>
+      <FocusHeader title="Lab" summary={v ? labSummary(v) : '\u00a0'} />
       {lab.isError && <div className="panel empty">Couldn't load the Lab. {lab.error.message}</div>}
 
       {v && (
@@ -181,6 +216,7 @@ function AskCoachSection({ v, selection }: { v: LabView; selection: Selection })
     <>
       <LabSection
         title="Ask coach"
+        className="coach"
         count={v.questions.length}
         more={
           total > 0 &&
@@ -283,9 +319,11 @@ function LabSection({
   count,
   hint,
   more,
+  className,
   children,
 }: {
   title: ReactNode;
+  className?: string;
   /** Accessible name when the title isn't plain text. */
   label?: string;
   count?: number;
@@ -304,7 +342,7 @@ function LabSection({
         </h2>
         {more}
       </div>
-      <section className="panel" aria-label={name}>
+      <section className={`panel${className ? ` ${className}` : ''}`} aria-label={name}>
         {children}
       </section>
     </>
