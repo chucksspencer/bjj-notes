@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Link } from 'react-router';
 import type { NoteView, TechniqueRef } from '../../../src/shared/api';
-import { isPlaceholder } from '../../../src/shared/links';
+import { instagramPost, isPlaceholder } from '../../../src/shared/links';
 import { useDeleteNote, useDeleteNotes, useEditNote, useFocus, useNotes } from '../api';
 import { useCapture } from '../components/Capture';
 import { Icon } from '../components/Icon';
@@ -10,7 +10,7 @@ import { Sheet } from '../components/Sheet';
 import { TechniquePicker, type NewTechnique } from '../components/TechniquePicker';
 import { useToast } from '../components/Toast';
 import { SourceLink } from '../components/Video';
-import { friendlyDate, localToday } from '../lib/format';
+import { datePhrase, friendlyDate, hostLabel, localToday, youTubeId } from '../lib/format';
 
 /** Videos and ideas saved to try before they earn a place in the library ("silly Instagram bullshit"). Part of the Lab. */
 export function ToTry() {
@@ -77,7 +77,7 @@ export function ToTry() {
           ),
         )}
       </section>
-      <SelectionBar selection={selection} noun="videos" action="Toss" busy={tossMany.isPending} onDelete={tossSelected} />
+      <SelectionBar selection={selection} noun="videos" action="Toss" busy={tossMany.isPending} onAction={tossSelected} />
     </div>
   );
 }
@@ -116,6 +116,67 @@ export function TryRow({ note, today }: { note: NoteView; today: string }) {
         <button
           type="button"
           className="btn quiet small"
+          disabled={toss.isPending}
+          onClick={() => toss.mutate(note.id, { onSuccess: () => toast.show('Tossed it', { undoable: true }), onError: toast.error })}
+        >
+          Toss
+        </button>
+      </div>
+      {keeping && <KeepSheet note={note} onClose={closeKeep} />}
+    </article>
+  );
+}
+
+/** What a saved link is, in a few words: its title, or "Instagram reel", "YouTube video", the site. */
+function sourceLabel(note: NoteView): string {
+  const url = note.source?.url;
+  if (note.source?.title) return note.source.title;
+  if (!url) return 'Idea';
+  const ig = instagramPost(url);
+  if (ig) return `Instagram ${ig.kind === 'reel' ? 'reel' : 'post'}`;
+  if (youTubeId(url)) return 'YouTube video';
+  return hostLabel(url);
+}
+
+/**
+ * One thing to try, in a few lines for the Lab: what it is (opens in its app), your note, and Keep or Toss.
+ * The players are on the full To try list.
+ */
+export function TryCompactRow({ note, today }: { note: NoteView; today: string }) {
+  const [keeping, setKeeping] = useState(false);
+  const closeKeep = useCallback(() => setKeeping(false), []);
+  const toss = useDeleteNote();
+  const toast = useToast();
+  const url = note.source?.url;
+  const label = sourceLabel(note);
+  return (
+    <article className="row try-compact">
+      <div className="try-compact-main">
+        <div className="try-compact-title">
+          {url ? (
+            <a href={url} target="_blank" rel="noreferrer noopener">
+              <Icon name="play" size={13} />
+              {label}
+            </a>
+          ) : (
+            <span>{label}</span>
+          )}
+        </div>
+        {!isPlaceholder(note.body) && <div className="try-compact-body">{note.body}</div>}
+        <div className="row-meta">
+          {note.source?.author ? `${note.source.author} · ` : ''}
+          Saved {datePhrase(note.observedOn, today)}
+          {about(note)}
+        </div>
+      </div>
+      <div className="try-compact-actions">
+        <button type="button" className="btn quiet small" onClick={() => setKeeping(true)}>
+          <Icon name="check" size={16} />
+          Keep
+        </button>
+        <button
+          type="button"
+          className="btn ghost small"
           disabled={toss.isPending}
           onClick={() => toss.mutate(note.id, { onSuccess: () => toast.show('Tossed it', { undoable: true }), onError: toast.error })}
         >

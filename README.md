@@ -149,10 +149,11 @@ test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture,
 | `get_technique` | A card: positions, details, mistakes, related techniques, focus status, recent notes |
 | `save_technique` | Create or update a card; add positions, aliases, details, links; star or unstar it |
 | `add_note` | Save a dated note linked to techniques and where it came from ("Zen camp seminar by Josh Jones"); unknown techniques go to the inbox |
-| `update_note` | Change a note's text, kind, date or where it came from; star or unstar it |
+| `update_note` | Change a note's text, kind, date or where it came from; star or unstar it; mark a question answered |
 | `get_inbox`, `file_note` | Triage notes that couldn't be placed; with `to_try`, the To try list ("silly Instagram bullshit") of videos to try before keeping |
 | `log_session` | Record a class/seminar/open mat/private; attaches that day's notes; saying the same session twice updates it |
-| `get_lab` | The Lab, the short-term working set: starred techniques and notes, the To try list, techniques new in the last N days, open questions for coach |
+| `get_lab` | The Lab, the short-term working set: starred techniques and notes (stars over 4 weeks old fold away), the To try list, techniques new in the last N days, open questions for coach |
+| `clear_stars` | Unstar everything, or only stars older than N days, in one undoable step |
 | `get_focus` | Ranked focus list with time since each item's last note, or its history |
 | `update_focus` | add / move / resume / pause / backlog / complete / drop |
 | `get_position` | What you have from a position, what leads into it, and the gaps |

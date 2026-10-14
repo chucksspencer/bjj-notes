@@ -1,7 +1,7 @@
 import { describeMiss, resolvePosition } from '../resolve.js';
 import { noteOrigin } from '../shared/sessions.js';
 import { today, type Ctx } from './context.js';
-import type { Status, TechniqueListItem, TechniqueType } from '../shared/api.js';
+import type { NoteView, Status, TechniqueListItem, TechniqueType } from '../shared/api.js';
 import { LAB_DAYS, labView, noteList, positionView, techniqueList } from './views.js';
 import { daysAgo, isoDate, type Role } from './vocab.js';
 
@@ -132,21 +132,25 @@ export async function getLab(ctx: Ctx, days = LAB_DAYS): Promise<string> {
   const lab = await labView(ctx, days);
   const about = (n: { techniques: { name: string }[] }) => (n.techniques.length ? ` [${n.techniques.map(t => t.name).join(', ')}]` : '');
   const card = (t: TechniqueListItem) => `${t.name} (${[t.type, t.role].filter(Boolean).join(', ')}; ${t.status})`;
+  const note = (n: NoteView) => `#${n.id} ${n.observedOn}${about(n)}: ${n.body}`;
   const section = (title: string, lines: string[], empty: string, cap = lines.length) => [
     title,
     ...(lines.length ? lines.slice(0, cap) : [`- ${empty}`]),
     ...(lines.length > cap ? [`- and ${lines.length - cap} more`] : []),
   ];
   const { techniques, notes } = lab.starred;
+  const olderStars = lab.olderStarred.techniques.length + lab.olderStarred.notes.length;
+  const olderQuestions = lab.olderQuestions.length;
   return [
     ...section(
       `Starred (${techniques.length + notes.length}):`,
-      [...techniques.map(t => `- ${card(t)}`), ...notes.map(n => `- #${n.id} ${n.observedOn}${about(n)}: ${n.body}`)],
-      'nothing starred',
+      [...techniques.map(t => `- ${card(t)}`), ...notes.map(n => `- ${note(n)}`)],
+      `nothing starred in the last ${lab.starDays / 7} weeks`,
     ),
+    ...(olderStars ? [`- plus ${olderStars} older star${olderStars === 1 ? '' : 's'} (starred over ${lab.starDays / 7} weeks ago)`] : []),
     ...section(
       `To try (${lab.toTry.total}${lab.toTry.total > lab.toTry.notes.length ? `, newest ${lab.toTry.notes.length} shown` : ''}):`,
-      lab.toTry.notes.map(n => `- #${n.id} ${n.observedOn}${about(n)}: ${n.body}${n.source?.url ? ` <${n.source.url}>` : ''}`),
+      lab.toTry.notes.map(n => `- ${note(n)}${n.source?.url ? ` <${n.source.url}>` : ''}`),
       'nothing waiting to be tried',
     ),
     ...section(
@@ -157,9 +161,12 @@ export async function getLab(ctx: Ctx, days = LAB_DAYS): Promise<string> {
     ),
     ...section(
       `Ask coach (${lab.questions.length}):`,
-      lab.questions.map(n => `- #${n.id} ${n.observedOn}${about(n)}: ${n.body}`),
+      lab.questions.map(n => `- ${note(n)}`),
       'no open questions',
       15,
     ),
+    ...(olderQuestions
+      ? [`- plus ${olderQuestions} older open question${olderQuestions === 1 ? '' : 's'} (noted over ${lab.questionDays} days ago)`]
+      : []),
   ].join('\n');
 }

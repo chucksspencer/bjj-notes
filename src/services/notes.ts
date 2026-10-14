@@ -303,6 +303,8 @@ export interface UpdateNoteInput {
   to_try?: boolean;
   /** Star (true) or unstar (false). */
   starred?: boolean;
+  /** Mark a question answered (true) or open again (false). */
+  answered?: boolean;
 }
 
 export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): Promise<string> {
@@ -344,7 +346,23 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
       await q.query('update notes set starred_at = case when $2 then now() end where id = $1', [id, input.starred]);
     }
     const starChange = input.starred === undefined || input.starred === wasStarred ? null : input.starred ? 'starred' : 'unstarred';
-    const action = wasToTry && !toTry ? 'keeping' : starChange === 'starred' ? 'starring' : starChange === 'unstarred' ? 'unstarring' : 'edit to';
+    const wasAnswered = !!row.answered_at;
+    const answerChange = input.answered === undefined || input.answered === wasAnswered ? null : input.answered ? 'answered' : 'open again';
+    if (answerChange) {
+      await q.query('update notes set answered_at = case when $2 then now() end where id = $1', [id, input.answered]);
+    }
+    const action =
+      wasToTry && !toTry
+        ? 'keeping'
+        : answerChange === 'answered'
+          ? 'answering'
+          : answerChange
+            ? 'reopening'
+            : starChange === 'starred'
+              ? 'starring'
+              : starChange === 'unstarred'
+                ? 'unstarring'
+                : 'edit to';
     await logActivity(q, 'update_note', `${action} note #${id}`, {
       kind: 'restore_note',
       row,
@@ -352,7 +370,10 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
       session: origin?.change,
       createdTechniqueIds: fresh?.created.map(c => c.id),
     });
-    const moved = (toTry === wasToTry ? '' : toTry ? ', now on the To try list' : ', off the To try list') + (starChange ? `, ${starChange}` : '');
+    const moved =
+      (toTry === wasToTry ? '' : toTry ? ', now on the To try list' : ', off the To try list') +
+      (starChange ? `, ${starChange}` : '') +
+      (answerChange ? `, ${answerChange === 'answered' ? 'marked answered' : answerChange}` : '');
     if (origin?.view) return `Updated note #${id} (from ${sessionPhrase(origin.view)})${moved}.`;
     return origin ? `Updated note #${id} (no session)${moved}.` : `Updated note #${id}${moved}.`;
   });

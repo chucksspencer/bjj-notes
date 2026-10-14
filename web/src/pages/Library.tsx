@@ -140,7 +140,7 @@ export function Library() {
         })}
       </section>
 
-      <SelectionBar selection={selection} noun="techniques" busy={del.isPending} onDelete={deleteSelected} />
+      <SelectionBar selection={selection} noun="techniques" busy={del.isPending} onAction={deleteSelected} />
 
       {creating && <NewTechniqueSheet initialName={text.trim()} onClose={() => setCreating(false)} />}
     </div>

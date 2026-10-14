@@ -75,6 +75,8 @@ export type UndoOp =
       inboxedNoteIds?: number[];
     }
   | { kind: 'restore_focus_label'; itemId: number; label: string; goal: string | null }
+  /** Puts stars (or answered marks) back as they were after clearing several at once. */
+  | { kind: 'restore_marks'; mark: 'starred' | 'answered'; notes: MarkSnapshot[]; techniques: MarkSnapshot[] }
   /** Several writes made as one (e.g. deleting a selection); undone together, last first. */
   | { kind: 'batch'; ops: UndoOp[] };
 
@@ -91,8 +93,15 @@ export interface NoteRowSnapshot {
   /** Absent in undo entries written before the To try list existed. */
   to_try?: boolean;
   starred_at?: string | null;
+  answered_at?: string | null;
   created_via: string;
   created_at: string;
+}
+
+/** A mark (a star, or a question's answered mark) as it was on one row, to put back. */
+export interface MarkSnapshot {
+  id: number;
+  at: string | null;
 }
 
 export interface EdgeSnapshot {
@@ -112,7 +121,8 @@ export interface LinkSnapshot {
 }
 
 export const NOTE_SNAPSHOT_SQL = `select id, body, raw_text, kind, observed_on::text as observed_on, session_id, source_id,
-  source_timestamp, inbox, to_try, starred_at::text as starred_at, created_via, created_at::text as created_at from notes where id = $1`;
+  source_timestamp, inbox, to_try, starred_at::text as starred_at, answered_at::text as answered_at, created_via,
+  created_at::text as created_at from notes where id = $1`;
 
 export async function logActivity(q: Queryable, action: string, summary: string, undo: UndoOp): Promise<void> {
   await q.query('insert into activity_log (action, summary, undo) values ($1, $2, $3)', [
@@ -212,12 +222,12 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       const r = op.row;
       await q.query(
         `insert into notes (id, body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via, created_at,
-                            starred_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                            starred_at, answered_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          on conflict (id) do update set body = excluded.body, raw_text = excluded.raw_text, kind = excluded.kind,
            observed_on = excluded.observed_on, session_id = excluded.session_id, source_id = excluded.source_id,
            source_timestamp = excluded.source_timestamp, inbox = excluded.inbox, to_try = excluded.to_try,
-           starred_at = excluded.starred_at`,
+           starred_at = excluded.starred_at, answered_at = excluded.answered_at`,
         [
           r.id,
           r.body,
@@ -232,6 +242,7 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
           r.created_via,
           r.created_at,
           r.starred_at ?? null,
+          r.answered_at ?? null,
         ],
       );
       await q.query('delete from note_techniques where note_id = $1', [r.id]);
@@ -271,6 +282,14 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
     case 'batch':
       for (const inner of [...op.ops].reverse()) await apply(q, inner);
       return;
+    case 'restore_marks': {
+      const col = op.mark === 'starred' ? 'starred_at' : 'answered_at';
+      for (const n of op.notes) await q.query(`update notes set ${col} = $2::timestamptz where id = $1`, [n.id, n.at]);
+      if (op.mark === 'starred') {
+        for (const t of op.techniques) await q.query('update techniques set starred_at = $2::timestamptz where id = $1', [t.id, t.at]);
+      }
+      return;
+    }
     case 'restore_focus_label':
       await q.query('update focus_items set label = $2, goal = $3, updated_at = now() where id = $1', [op.itemId, op.label, op.goal]);
       return;

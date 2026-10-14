@@ -5,6 +5,7 @@ import { undoLast } from '../services/activity.js';
 import type { Ctx } from '../services/context.js';
 import { getLab, getPosition, review, search } from '../services/explore.js';
 import { focusHistory, getFocus, updateFocus } from '../services/focus.js';
+import { clearStars } from '../services/marks.js';
 import { addNote, fileNote, getInbox, updateNote } from '../services/notes.js';
 import { logSession } from '../services/sessions.js';
 import { getTechnique, saveTechnique } from '../services/techniques.js';
@@ -29,7 +30,7 @@ How to use it well:
 - Model techniques as moves between positions: a sweep goes from a guard (bottom) to top; a pass goes from a guard (top) to a pin; an escape starts from a pin (bottom).
 - Say where a note came from with add_note's session (a class, a seminar with its name and instructor, an open mat): "notes from today's class" is {kind: "class"}; "Zen camp seminar by Josh Jones on 2024-02-03" is {kind: "seminar", name: "Zen camp", instructor: "Josh Jones", date: "2024-02-03"}. The same session is reused, not duplicated.
 - Videos and ideas he hasn't tried yet go on the To try list (add_note with to_try: true), not on a technique. He calls this "silly Instagram bullshit"; "add this to my SIB" or "something to try" means the same. Reels he shares from Instagram land there automatically. When he's tried one and likes it, file_note keeps it under the technique; get_inbox with to_try: true lists what's waiting.
-- Lab is the short-term working set (get_lab): starred techniques and notes, videos to try, techniques new in his notes, questions for his coach. "Star that" or "flag that" stars whatever "that" is: a note (update_note with starred: true, or add_note with starred: true for a new one) or a technique (save_technique with starred: true). The focus list is the long-term guide: broad areas, strategies and positions over weeks or months.
+- Lab is the short-term working set (get_lab): starred techniques and notes, videos to try, techniques new in his notes, questions for his coach. "Star that" or "flag that" stars whatever "that" is: a note (update_note with starred: true, or add_note with starred: true for a new one) or a technique (save_technique with starred: true). Stars are for what's pertinent now: after 4 weeks they fold away as older stars, and clear_stars unstars old ones (or all). When his coach answers a question, update_note with answered: true and add the answer to the text. The focus list is the long-term guide: broad areas, strategies and positions over weeks or months.
 - The focus list is ordered; #1 is what he's working on most. "Add X to my focus" puts it at the top unless he says otherwise.
 - Replies are often read aloud, so keep confirmations short. If he says "undo that", call undo_last.`;
 
@@ -214,7 +215,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
     {
       title: 'Edit a note',
       description:
-        "Changes a note's text, kind, date, where it came from (session), whether it's starred or on the To try list. Leave out what shouldn't change.",
+        "Changes a note's text, kind, date, where it came from (session), whether it's starred, on the To try list, or (for a question) answered. Leave out what shouldn't change.",
       inputSchema: {
         note_id: z.number().int(),
         text: z.string().optional(),
@@ -224,6 +225,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
         clear_session: flag.optional().describe("True to say the note didn't come from any session"),
         to_try: flag.optional().describe('Put the note on (true) or take it off (false) the To try list'),
         starred: flag.optional().describe('Star (true) or unstar (false) the note'),
+        answered: flag.optional().describe('Mark a question answered (true; it leaves Ask coach) or open again (false)'),
       },
       annotations: write,
     },
@@ -237,8 +239,21 @@ export function buildMcpServer(ctx: Ctx): McpServer {
           session_id: args.clear_session ? null : undefined,
           to_try: args.to_try,
           starred: args.starred,
+          answered: args.answered,
         }),
       ),
+  );
+
+  server.registerTool(
+    'clear_stars',
+    {
+      title: 'Clear stars',
+      description:
+        'Unstars techniques and notes in one step: those starred more than older_than_days days ago, or every star when it is left out. undo_last puts them all back.',
+      inputSchema: { older_than_days: z.number().int().min(1).max(3650).optional() },
+      annotations: write,
+    },
+    args => run(() => clearStars(ctx, args.older_than_days)),
   );
 
   server.registerTool(

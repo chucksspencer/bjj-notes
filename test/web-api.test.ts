@@ -403,6 +403,61 @@ describe('JSON API', () => {
     await api('POST', '/api/v1/techniques/delete', { ids: [a.id, b.id] });
   });
 
+  it('folds old stars and questions away in the Lab, clears stars, and marks questions answered', async () => {
+    const t = (await api<TechniqueView>('POST', '/api/v1/techniques', { name: 'Wrestle up', type: 'transition', role: 'bottom' })).body;
+    await api('PATCH', `/api/v1/techniques/${t.id}`, { starred: true });
+    const fresh = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Fresh star.', techniqueIds: [t.id], starred: true })).body.note;
+    const stale = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Stale star.', techniqueIds: [t.id], starred: true })).body.note;
+    await s.db.query("update notes set starred_at = now() - interval '40 days' where id = $1", [stale.id]);
+    await s.db.query("update techniques set starred_at = now() - interval '30 days' where id = $1", [t.id]);
+
+    let lab = (await api<LabView>('GET', '/api/v1/lab')).body;
+    expect(lab.starDays).toBe(28);
+    expect(lab.starred.notes.map(n => n.id)).toContain(fresh.id);
+    expect(lab.starred.notes.map(n => n.id)).not.toContain(stale.id);
+    expect(lab.olderStarred.notes.map(n => n.id)).toEqual([stale.id]);
+    expect(lab.olderStarred.techniques.map(x => x.id)).toEqual([t.id]);
+    expect(Date.parse(lab.starred.notes.find(n => n.id === fresh.id)!.starredAt!)).toBeGreaterThan(Date.now() - 60_000); // ISO, parseable
+
+    // Unstar just the older ones, then put them back with one undo.
+    expect((await api('POST', '/api/v1/stars/clear', { olderThanDays: 28 })).body.message).toBe('Cleared 2 stars.');
+    lab = (await api<LabView>('GET', '/api/v1/lab')).body;
+    expect(lab.olderStarred).toEqual({ techniques: [], notes: [] });
+    expect(lab.starred.notes.map(n => n.id)).toContain(fresh.id);
+    expect((await api('POST', '/api/v1/undo')).body.message).toBe('Undid: clearing 2 stars');
+    lab = (await api<LabView>('GET', '/api/v1/lab')).body;
+    expect(lab.olderStarred.notes.map(n => n.id)).toEqual([stale.id]);
+    // Clear everything.
+    expect((await api('POST', '/api/v1/stars/clear', {})).body.message).toMatch(/^Cleared \d+ stars?\.$/);
+    lab = (await api<LabView>('GET', '/api/v1/lab')).body;
+    expect(lab.starred.notes.length + lab.starred.techniques.length + lab.olderStarred.notes.length).toBe(0);
+    expect((await api('POST', '/api/v1/stars/clear', {})).body.message).toBe('Nothing is starred.');
+
+    // Questions: recent ones in Ask coach, older ones folded away; answered ones leave and keep their kind.
+    const ask = async (text: string, date?: string) =>
+      (await api<NoteCreateResult>('POST', '/api/v1/notes', { text, kind: 'question', techniqueIds: [t.id], date })).body.note;
+    const recentQ = await ask('Which hand posts first?');
+    const oldQ1 = await ask('Old question one?', '2025-01-10');
+    const oldQ2 = await ask('Old question two?', '2025-02-10');
+    lab = (await api<LabView>('GET', '/api/v1/lab')).body;
+    expect(lab.questions.map(n => n.id)).toContain(recentQ.id);
+    expect(lab.olderQuestions.map(n => n.id)).toEqual(expect.arrayContaining([oldQ1.id, oldQ2.id]));
+    expect(lab.questions.map(n => n.id)).not.toContain(oldQ1.id);
+
+    const answered = (await api<NoteView>('PATCH', `/api/v1/notes/${recentQ.id}`, { body: 'Which hand posts first?\n\nAnswer: the near hand.', answered: true })).body;
+    expect(answered).toMatchObject({ kind: 'question', answered: true });
+    expect((await api('POST', '/api/v1/notes/answered', { ids: [oldQ1.id, oldQ2.id, recentQ.id] })).body.message).toBe('Marked 2 questions answered.');
+    lab = (await api<LabView>('GET', '/api/v1/lab')).body;
+    expect([...lab.questions, ...lab.olderQuestions].map(n => n.id)).not.toEqual(expect.arrayContaining([oldQ1.id]));
+    expect((await api('POST', '/api/v1/undo')).body.message).toBe('Undid: marking 2 questions answered');
+    lab = (await api<LabView>('GET', '/api/v1/lab')).body;
+    expect(lab.olderQuestions.map(n => n.id)).toEqual(expect.arrayContaining([oldQ1.id, oldQ2.id]));
+    expect(lab.questions.map(n => n.id)).not.toContain(recentQ.id); // answered on its own, before the batch
+
+    await api('POST', '/api/v1/notes/delete', { ids: [fresh.id, stale.id, recentQ.id, oldQ1.id, oldQ2.id] });
+    await api('POST', '/api/v1/techniques/delete', { ids: [t.id] });
+  });
+
   it('deletes a selection of techniques or notes as one undoable change', async () => {
     const make = async (name: string) => (await api<TechniqueView>('POST', '/api/v1/techniques', { name, type: 'sweep' })).body;
     const [a, b, c] = [await make('Tornado roll'), await make('Lapel feed'), await make('Wrist ride')];

@@ -14,12 +14,15 @@ export function NoteItem({
   today,
   hideTechnique,
   actions,
+  meta,
 }: {
   note: NoteView;
   today: string;
   hideTechnique?: number;
   /** Extra buttons under the note. */
   actions?: ReactNode;
+  /** An extra line under the date, e.g. when it was starred. */
+  meta?: ReactNode;
 }) {
   const capture = useCapture();
   const others = note.techniques.filter(t => t.id !== hideTechnique);
@@ -31,8 +34,10 @@ export function NoteItem({
           <div>
             {friendlyDate(note.observedOn, today)}, {NOTE_KIND_LABEL[note.kind].toLowerCase()}
             {note.toTry && <span className="tag">Not tried yet</span>}
+            {note.kind === 'question' && note.answered && <span className="tag">Answered</span>}
           </div>
           {origin && <div className="note-origin">{origin.charAt(0).toUpperCase() + origin.slice(1)}</div>}
+          {meta && <div className="note-origin">{meta}</div>}
         </div>
         <div className="note-tools">
           <NoteStar note={note} />

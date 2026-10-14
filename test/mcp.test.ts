@@ -34,6 +34,7 @@ describe('MCP tools over HTTP', () => {
     expect(tools.map(t => t.name).sort()).toEqual(
       [
         'add_note',
+        'clear_stars',
         'file_note',
         'get_focus',
         'get_inbox',
@@ -279,6 +280,31 @@ describe('MCP tools over HTTP', () => {
     expect(await call('save_technique', { name: 'Baratoplata', starred: false, summary: 'Omoplata cousin' })).toBe('Updated Baratoplata, unstarred.');
     expect(await call('undo_last')).toBe('Undid: Updated Baratoplata');
     expect(await call('save_technique', { name: 'Baratoplata', starred: false })).toBe('Unstarred Baratoplata.');
+  });
+
+  it('folds away old stars and questions, clears stars, and marks questions answered', async () => {
+    const old = await call('add_note', { text: 'Old star: frames before hips.', techniques: ['Ghost escape'], starred: true });
+    const oldId = Number(old.match(/#(\d+)/)![1]);
+    await s.db.query("update notes set starred_at = now() - interval '40 days' where id = $1", [oldId]);
+    const lab = await call('get_lab');
+    expect(lab).not.toContain('Old star: frames before hips.');
+    expect(lab).toMatch(/- plus 1 older star \(starred over 4 weeks ago\)/);
+
+    expect(await call('clear_stars', { older_than_days: 28 })).toBe('Cleared 1 star.');
+    expect(await call('get_lab')).not.toContain('older star');
+    expect(await call('undo_last')).toBe('Undid: clearing 1 star');
+    expect(await call('get_lab')).toContain('plus 1 older star');
+    expect(await call('clear_stars', { older_than_days: 28 })).toBe('Cleared 1 star.');
+    expect(await call('clear_stars', { older_than_days: 28 })).toBe('No stars older than 28 days.');
+
+    const q = await call('add_note', { text: 'Do I hide the arm first?', techniques: ['Ghost escape'], kind: 'question', date: '2024-03-01' });
+    const qid = Number(q.match(/#(\d+)/)![1]);
+    expect(await call('get_lab')).toMatch(/- plus \d+ older open questions? \(noted over 60 days ago\)/);
+    expect(await call('update_note', { note_id: qid, answered: 'true' })).toBe(`Updated note #${qid}, marked answered.`);
+    expect(await call('undo_last')).toBe(`Undid: answering note #${qid}`);
+    expect(await call('update_note', { note_id: qid, answered: true, text: 'Do I hide the arm first?\n\nAnswer: yes.' })).toBe(
+      `Updated note #${qid}, marked answered.`,
+    );
   });
 
   it('undoes a technique edit', async () => {

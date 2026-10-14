@@ -268,6 +268,50 @@ describe.runIf(run)('web app (end to end)', () => {
     await starred.getByText('Nothing starred.', { exact: false }).waitFor();
   });
 
+  it('folds old stars and questions away, clears them, and marks several questions answered', async () => {
+    const post = (url: string, data: unknown) =>
+      page.request.post(`${s.base}${url}`, { data, headers: { 'x-bjj-app': '1' } }).then(r => r.json() as Promise<{ note: { id: number } }>);
+    const stale = (await post('/api/v1/notes', { text: 'An old star about frames.', starred: true })).note;
+    await post('/api/v1/notes', { text: 'A star from this week.', starred: true });
+    await s.db.query("update notes set starred_at = now() - interval '40 days' where id = $1", [stale.id]);
+    await post('/api/v1/notes', { text: 'Old question about grips?', kind: 'question', date: '2025-03-01' });
+    await post('/api/v1/notes', { text: 'Another old question about posture?', kind: 'question', date: '2025-04-01' });
+
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Focus' }).click();
+    await page.reload(); // the notes above were made behind the app's back
+    await page.getByRole('heading', { name: 'Lab' }).waitFor();
+    const starred = page.getByRole('region', { name: 'Starred' });
+    await starred.getByText('A star from this week.').waitFor();
+    await starred.getByText('Starred today').waitFor();
+    expect(await starred.getByText('An old star about frames.').count()).toBe(0); // folded away
+
+    const olderStars = starred.getByRole('button', { name: /1 older star/ });
+    await olderStars.click();
+    await starred.getByText('An old star about frames.').waitFor();
+    await starred.getByText('Starred a month ago', { exact: false }).or(starred.getByText(/Starred \d+ weeks ago/)).first().waitFor();
+    await starred.getByRole('button', { name: 'Unstar it' }).click();
+    await page.getByText('Cleared 1 star').waitFor();
+    await olderStars.waitFor({ state: 'detached' });
+    await starred.getByText('A star from this week.').waitFor();
+
+    // Clear the rest.
+    await page.getByRole('button', { name: 'Clear', exact: true }).click(); // confirmed by the dialog handler above
+    await page.getByText(/^Cleared \d+ stars?$/).waitFor();
+    await starred.getByText('Nothing starred.', { exact: false }).waitFor();
+
+    // Old questions wait folded; select them all and mark them answered.
+    const coach = page.getByRole('region', { name: 'Ask coach' });
+    await coach.getByRole('button', { name: /2 older questions/ }).waitFor();
+    await page.getByRole('button', { name: 'Select', exact: true }).click();
+    await page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name: 'Select all' }).click();
+    await page.getByRole('toolbar', { name: 'Selection' }).getByText('2 selected').waitFor();
+    await page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name: 'Mark answered' }).click();
+    await page.getByText('Marked 2 questions answered').waitFor();
+    await coach.getByText('No open questions.', { exact: false }).waitFor();
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await coach.getByRole('button', { name: /2 older questions/ }).waitFor();
+  });
+
   it('navigates on desktop Chrome 150+, where scrollTo returns a Promise', async () => {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await ctx.addInitScript(() => {

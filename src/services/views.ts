@@ -39,6 +39,9 @@ const originMatches = (text: string, param: string) =>
   `(length(trim(${param})) >= 3 and not exists (
      select 1 from regexp_split_to_table(lower(trim(${param})), '\\s+') w where position(w in ${text}) = 0))`;
 
+/** A timestamp column as ISO 8601 text, which browsers parse (the plain ::text form isn't). */
+const iso = (col: string) => `(to_json(${col}) #>> '{}')`;
+
 // ---------- notes ----------
 
 interface NoteRow {
@@ -51,6 +54,7 @@ interface NoteRow {
   inbox: boolean;
   to_try: boolean;
   starred_at: string | null;
+  answered_at: string | null;
   session_id: number | null;
   created_via: NoteView['createdVia'];
   s_id: number | null;
@@ -68,7 +72,8 @@ interface NoteRow {
 }
 
 const NOTE_SELECT = `
-  select n.id, n.body, n.raw_text, n.kind, n.observed_on::text as observed_on, n.source_timestamp, n.inbox, n.to_try, n.starred_at::text as starred_at,
+  select n.id, n.body, n.raw_text, n.kind, n.observed_on::text as observed_on, n.source_timestamp, n.inbox, n.to_try,
+         ${iso('n.starred_at')} as starred_at, ${iso('n.answered_at')} as answered_at,
          n.session_id, n.created_via,
          s.id as s_id, s.kind as s_kind, s.url as s_url, s.title as s_title, s.author as s_author,
          ss.date::text as ss_date, ss.kind as ss_kind, ss.name as ss_name, ss.instructor as ss_instructor,
@@ -96,6 +101,7 @@ function toNote(r: NoteRow): NoteView {
     toTry: r.to_try,
     starred: r.starred_at !== null,
     starredAt: r.starred_at,
+    answered: r.answered_at !== null,
     sessionId: r.session_id,
     session:
       r.session_id && r.ss_kind
@@ -120,6 +126,8 @@ export interface NoteQuery {
   /** Only starred notes, most recently starred first. */
   starred?: boolean;
   kind?: NoteView['kind'];
+  /** Only answered (true) or open (false) notes; meant for questions. */
+  answered?: boolean;
   techniqueId?: number;
   /** Full-text search over note bodies, or words from where the note came from. */
   q?: string;
@@ -140,6 +148,7 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
   if (opts.toTry !== undefined) where.push(`n.to_try = ${p(opts.toTry)}`);
   if (opts.starred !== undefined) where.push(`n.starred_at is ${opts.starred ? 'not ' : ''}null`);
   if (opts.kind !== undefined) where.push(`n.kind = ${p(opts.kind)}`);
+  if (opts.answered !== undefined) where.push(`n.answered_at is ${opts.answered ? 'not ' : ''}null`);
   if (opts.techniqueId !== undefined) {
     where.push(`exists (select 1 from note_techniques x where x.note_id = n.id and x.technique_id = ${p(opts.techniqueId)})`);
   }
@@ -212,7 +221,7 @@ export async function techniqueView(q: Queryable, id: number, noteLimit = 20): P
       updated_at: Date | string;
       starred_at: string | null;
     }>(
-      `select id, name, aliases, type, role, gi, status, summary, key_details, mistakes, updated_at, starred_at::text as starred_at
+      `select id, name, aliases, type, role, gi, status, summary, key_details, mistakes, updated_at, ${iso('starred_at')} as starred_at
        from techniques where id = $1`,
       [id],
     )
@@ -312,10 +321,10 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
     notes: number;
     last_note: string | null;
     first_note: string | null;
-    starred: boolean;
+    starred_at: string | null;
     edges: unknown;
   }>(
-    `select t.id, t.name, t.type, t.role, t.status, t.aliases, t.starred_at is not null as starred,
+    `select t.id, t.name, t.type, t.role, t.status, t.aliases, ${iso('t.starred_at')} as starred_at,
             coalesce((select max(bjj_name_score(c, $1)) from unnest(array_prepend(t.name, t.aliases)) c), 0) as score,
             (select count(*)::int from note_techniques nt where nt.technique_id = t.id) as notes,
             (select max(n.observed_on)::text from notes n join note_techniques nt on nt.note_id = n.id
@@ -370,7 +379,8 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
     role: r.role,
     status: r.status,
     aliases: r.aliases,
-    starred: r.starred,
+    starred: r.starred_at !== null,
+    starredAt: r.starred_at,
     noteCount: r.notes,
     lastNoteOn: r.last_note,
     firstNoteOn: r.first_note,
@@ -423,29 +433,41 @@ export async function focusView(ctx: Ctx, q: Queryable = ctx.db): Promise<FocusV
 
 /** How far back "new in your notes" looks, unless asked otherwise. */
 export const LAB_DAYS = 30;
+/** Stars are for what's pertinent now: after this many days they fold away as older stars. */
+export const STAR_DAYS = 28;
+/** Open questions noted longer ago than this fold away as older questions. */
+export const QUESTION_DAYS = 60;
 
 /**
- * What's in the Lab, for the web app and Claude alike: starred techniques and notes, the newest videos
- * to try, techniques first noted in the last `days` days, and questions waiting for the coach.
+ * What's in the Lab, for the web app and Claude alike: starred techniques and notes (recent ones, and
+ * older ones folded away), the newest videos to try, techniques first noted in the last `days` days,
+ * and open questions for the coach (recent ones, and older ones folded away).
  */
 export async function labView(ctx: Ctx, days = LAB_DAYS, tryLimit = 10): Promise<LabView> {
   const q = ctx.db;
   const now = today(ctx);
   const [techniques, notes, toTry, toTryTotal, fresh, questions] = await Promise.all([
-    techniqueList(q, { starred: true, limit: 100 }),
-    noteList(q, { starred: true, limit: 100 }),
+    techniqueList(q, { starred: true, limit: 200 }),
+    noteList(q, { starred: true, limit: 200 }),
     noteList(q, { toTry: true, limit: tryLimit }),
     q.query<{ c: number }>('select count(*)::int as c from notes where to_try'),
     techniqueList(q, { sort: 'new', newSince: minusDays(now, days), limit: 25 }),
-    noteList(q, { kind: 'question', toTry: false, limit: 50 }),
+    noteList(q, { kind: 'question', toTry: false, answered: false, limit: 200 }),
   ]);
+  const starCutoff = Date.now() - STAR_DAYS * 86_400_000;
+  const recent = (x: { starredAt: string | null }) => x.starredAt !== null && Date.parse(x.starredAt) >= starCutoff;
+  const questionCutoff = minusDays(now, QUESTION_DAYS);
   return {
     today: now,
     days,
-    starred: { techniques, notes },
+    starDays: STAR_DAYS,
+    questionDays: QUESTION_DAYS,
+    starred: { techniques: techniques.filter(recent), notes: notes.filter(recent) },
+    olderStarred: { techniques: techniques.filter(t => !recent(t)), notes: notes.filter(n => !recent(n)) },
     toTry: { total: toTryTotal.rows[0]!.c, notes: toTry },
     fresh,
-    questions,
+    questions: questions.filter(n => n.observedOn >= questionCutoff),
+    olderQuestions: questions.filter(n => n.observedOn < questionCutoff),
   };
 }
 

@@ -1,18 +1,19 @@
 import { useCallback, useState, type ReactNode } from 'react';
 import { Link, NavLink } from 'react-router';
-import type { NoteView, TechniqueListItem } from '../../../src/shared/api';
-import { useEditNote, useLab } from '../api';
+import type { LabView, NoteView, TechniqueListItem } from '../../../src/shared/api';
+import { useClearStars, useEditNote, useLab, useMarkAnswered } from '../api';
 import { RankBar } from '../components/Belt';
 import { Icon } from '../components/Icon';
 import { NoteItem } from '../components/NoteItem';
+import { countOf, SelectionBar, useSelection, type Selection } from '../components/Selection';
 import { Sheet } from '../components/Sheet';
 import { TechniqueStar } from '../components/Star';
 import { useToast } from '../components/Toast';
-import { datePhrase, lastNoteText, localToday, techniqueLine } from '../lib/format';
-import { TRY_EMPTY, TryRow } from './ToTry';
+import { agoText, datePhrase, friendlyDate, localToday, techniqueLine } from '../lib/format';
+import { TRY_EMPTY, TryCompactRow } from './ToTry';
 
-/** Videos to try shown in the Lab; the rest are a tap away. */
-const TRY_SHOWN = 3;
+/** Videos to try shown in the Lab; the rest (and the players) are a tap away. */
+const TRY_SHOWN = 5;
 
 /** The two views behind the Focus tab: the Lab (what you're sorting through now) and the Focus list (the long game). */
 export function FocusTabs() {
@@ -36,13 +37,12 @@ export function FocusTabs() {
 export function Lab() {
   const lab = useLab();
   const v = lab.data;
-  const [answering, setAnswering] = useState<NoteView | null>(null);
-  const closeAnswer = useCallback(() => setAnswering(null), []);
   const today = v?.today ?? localToday();
-  const starredCount = v ? v.starred.techniques.length + v.starred.notes.length : 0;
+  const allQuestions = v ? [...v.questions, ...v.olderQuestions] : [];
+  const selection = useSelection(allQuestions.map(n => n.id));
 
   return (
-    <div className="page">
+    <div className={`page${selection.active ? ' selecting' : ''}`}>
       <header className="page-head">
         <h1 className="display page-title">Lab</h1>
       </header>
@@ -52,26 +52,7 @@ export function Lab() {
 
       {v && (
         <>
-          <LabSection
-            title={
-              <>
-                <Icon name="star" size={19} filled />
-                Starred
-              </>
-            }
-            label="Starred"
-            count={starredCount}
-          >
-            {starredCount === 0 && (
-              <div className="empty">Nothing starred. Tap the star on a technique or a note to keep it here while it matters.</div>
-            )}
-            {v.starred.techniques.map(t => (
-              <TechniqueRow key={t.id} t={t} meta={lowerFirst(lastNoteText(t.lastNoteOn, today))} />
-            ))}
-            {v.starred.notes.map(n => (
-              <NoteItem key={n.id} note={n} today={today} />
-            ))}
-          </LabSection>
+          <StarredSection v={v} />
 
           <LabSection
             title="To try"
@@ -86,7 +67,7 @@ export function Lab() {
           >
             {v.toTry.total === 0 && <div className="empty">{TRY_EMPTY}</div>}
             {v.toTry.notes.slice(0, TRY_SHOWN).map(n => (
-              <TryRow key={n.id} note={n} today={today} />
+              <TryCompactRow key={n.id} note={n} today={today} />
             ))}
           </LabSection>
 
@@ -97,33 +78,190 @@ export function Lab() {
             ))}
           </LabSection>
 
-          <LabSection title="Ask coach" count={v.questions.length}>
-            {v.questions.length === 0 && (
-              <div className="empty">No open questions. Save a note as a Question and it waits here until you get an answer.</div>
-            )}
-            {v.questions.map(n => (
-              <NoteItem
-                key={n.id}
-                note={n}
-                today={today}
-                actions={
-                  <button type="button" className="btn quiet small" onClick={() => setAnswering(n)}>
-                    <Icon name="check" size={18} />
-                    Answered
-                  </button>
-                }
-              />
-            ))}
-          </LabSection>
+          <AskCoachSection v={v} selection={selection} />
         </>
       )}
-
-      {answering && <AnswerSheet note={answering} onClose={closeAnswer} />}
     </div>
   );
 }
 
-const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+/** Starred techniques and notes. Stars older than a few weeks fold away, ready to clear. */
+function StarredSection({ v }: { v: LabView }) {
+  const clear = useClearStars();
+  const toast = useToast();
+  const recent = v.starred.techniques.length + v.starred.notes.length;
+  const older = v.olderStarred.techniques.length + v.olderStarred.notes.length;
+  const weeks = Math.round(v.starDays / 7);
+  const run = (olderThanDays?: number) =>
+    clear.mutate(olderThanDays, { onSuccess: r => toast.show(r.message.replace(/\.$/, ''), { undoable: true }), onError: toast.error });
+
+  return (
+    <LabSection
+      title={
+        <>
+          <Icon name="star" size={19} filled />
+          Starred
+        </>
+      }
+      label="Starred"
+      count={recent}
+      more={
+        recent + older > 0 && (
+          <button
+            type="button"
+            className="btn ghost small"
+            disabled={clear.isPending}
+            onClick={() => {
+              if (window.confirm(`Unstar all ${countOf(recent + older, 'star')}? You can undo it.`)) run();
+            }}
+          >
+            Clear
+          </button>
+        )
+      }
+    >
+      {recent === 0 && (
+        <div className="empty">
+          {older
+            ? `Nothing starred in the last ${weeks} weeks.`
+            : 'Nothing starred. Tap the star on a technique or a note to keep it here while it matters.'}
+        </div>
+      )}
+      <StarredItems starred={v.starred} today={v.today} />
+      {older > 0 && (
+        <Fold label={countOf(older, 'older star')} hint={`Starred over ${weeks} weeks ago`}>
+          <StarredItems starred={v.olderStarred} today={v.today} />
+          <div className="row fold-actions">
+            <button type="button" className="btn quiet small" disabled={clear.isPending} onClick={() => run(v.starDays)}>
+              Unstar {older === 1 ? 'it' : `these ${older}`}
+            </button>
+          </div>
+        </Fold>
+      )}
+    </LabSection>
+  );
+}
+
+function StarredItems({ starred, today }: { starred: LabView['starred']; today: string }) {
+  return (
+    <>
+      {starred.techniques.map(t => (
+        <TechniqueRow key={t.id} t={t} meta={t.starredAt ? `starred ${agoText(t.starredAt)}` : ''} />
+      ))}
+      {starred.notes.map(n => (
+        <NoteItem key={n.id} note={n} today={today} meta={n.starredAt ? `Starred ${agoText(n.starredAt)}` : undefined} />
+      ))}
+    </>
+  );
+}
+
+/** Open questions for coach: recent ones, older ones folded away; select several to mark them answered. */
+function AskCoachSection({ v, selection }: { v: LabView; selection: Selection }) {
+  const [answering, setAnswering] = useState<NoteView | null>(null);
+  const closeAnswer = useCallback(() => setAnswering(null), []);
+  const mark = useMarkAnswered();
+  const toast = useToast();
+  const total = v.questions.length + v.olderQuestions.length;
+  const answeredButton = (n: NoteView) => (
+    <button type="button" className="btn quiet small" onClick={() => setAnswering(n)}>
+      <Icon name="check" size={18} />
+      Answered
+    </button>
+  );
+  const markSelected = () =>
+    mark.mutate(selection.ids, {
+      onSuccess: r => {
+        toast.show(r.message.replace(/\.$/, ''), { undoable: true });
+        selection.stop();
+      },
+      onError: toast.error,
+    });
+
+  return (
+    <>
+      <LabSection
+        title="Ask coach"
+        count={v.questions.length}
+        more={
+          total > 0 &&
+          (selection.active ? (
+            <button type="button" className="btn ghost small" onClick={selection.stop}>
+              Done
+            </button>
+          ) : (
+            <button type="button" className="btn ghost small" onClick={selection.start}>
+              Select
+            </button>
+          ))
+        }
+      >
+        {selection.active ? (
+          [...v.questions, ...v.olderQuestions].map(n => (
+            <label key={n.id} className="row note-select">
+              <input
+                type="checkbox"
+                className="check"
+                checked={selection.has(n.id)}
+                onChange={() => selection.toggle(n.id)}
+                aria-label={`Question: ${n.body.slice(0, 60)}`}
+              />
+              <span className="grow">
+                <span className="note-head">{friendlyDate(n.observedOn, v.today)}</span>
+                <span className="note-body">{n.body}</span>
+              </span>
+            </label>
+          ))
+        ) : (
+          <>
+            {v.questions.length === 0 && (
+              <div className="empty">
+                {v.olderQuestions.length
+                  ? `No questions from the last ${v.questionDays} days.`
+                  : 'No open questions. Save a note as a Question and it waits here until you get an answer.'}
+              </div>
+            )}
+            {v.questions.map(n => (
+              <NoteItem key={n.id} note={n} today={v.today} actions={answeredButton(n)} />
+            ))}
+            {v.olderQuestions.length > 0 && (
+              <Fold label={countOf(v.olderQuestions.length, 'older question')} hint={`Noted over ${v.questionDays} days ago`}>
+                {v.olderQuestions.map(n => (
+                  <NoteItem key={n.id} note={n} today={v.today} actions={answeredButton(n)} />
+                ))}
+              </Fold>
+            )}
+          </>
+        )}
+      </LabSection>
+      <SelectionBar
+        selection={selection}
+        noun="questions"
+        action="Mark answered"
+        tone="primary"
+        busy={mark.isPending}
+        onAction={markSelected}
+      />
+      {answering && <AnswerSheet note={answering} onClose={closeAnswer} />}
+    </>
+  );
+}
+
+/** A folded group at the end of a section: a row that opens to show what's inside. */
+function Fold({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" className="row fold" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="grow">
+          <span className="fold-label">{label}</span>
+          {hint && <span className="row-meta">{hint}</span>}
+        </span>
+        <Icon name="chevron" size={20} />
+      </button>
+      {open && children}
+    </>
+  );
+}
 
 /** A technique in the Lab: opens the card, shows how far along it is, and stars or unstars in place. */
 function TechniqueRow({ t, meta }: { t: TechniqueListItem; meta: string }) {
@@ -173,7 +311,7 @@ function LabSection({
   );
 }
 
-/** Coach answered: add the answer to the note and take it off the Ask coach list. */
+/** Coach answered: add the answer to the question and mark it answered, which takes it off Ask coach. */
 function AnswerSheet({ note, onClose }: { note: NoteView; onClose: () => void }) {
   const [answer, setAnswer] = useState('');
   const edit = useEditNote();
@@ -188,7 +326,7 @@ function AnswerSheet({ note, onClose }: { note: NoteView; onClose: () => void })
         onSubmit={e => {
           e.preventDefault();
           edit.mutate(
-            { id: note.id, kind: 'instruction', ...(text ? { body: `${note.body}\n\nAnswer: ${text}` } : {}) },
+            { id: note.id, answered: true, ...(text ? { body: `${note.body}\n\nAnswer: ${text}` } : {}) },
             {
               onSuccess: () => {
                 toast.show(text ? 'Answer saved' : 'Off the Ask coach list', { undoable: true });

@@ -16,6 +16,7 @@ import { undoLast } from '../services/activity.js';
 import { NotFoundError as NotFound, UserError } from '../services/errors.js';
 import type { Ctx } from '../services/context.js';
 import { editFocusItem, updateFocus } from '../services/focus.js';
+import { clearStars, markAnswered } from '../services/marks.js';
 import { addNote, deleteNote, deleteNotes, fileNote, updateNote } from '../services/notes.js';
 import { deleteTechnique, deleteTechniques, removeEdge, removeLink, saveTechniqueResult } from '../services/techniques.js';
 import {
@@ -81,6 +82,7 @@ const notePatch = z.object({
   session: sessionInput.optional(),
   toTry: z.boolean().optional(),
   starred: z.boolean().optional(),
+  answered: z.boolean().optional(),
   newTechniques: z.array(newTechnique).max(10).optional(),
 });
 const techniqueCreate = z.object({
@@ -185,6 +187,14 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
     h(async (req): Promise<LabView> => {
       const qs = z.object({ days: z.coerce.number().int().min(1).max(365).optional() }).parse(req.query);
       return labView(ctx, qs.days);
+    }),
+  );
+
+  r.post(
+    '/api/v1/stars/clear',
+    h(async (req): Promise<MessageResult> => {
+      const b = z.object({ olderThanDays: z.number().int().min(1).max(3650).optional() }).parse(req.body ?? {});
+      return { message: await clearStars(ctx, b.olderThanDays) };
     }),
   );
 
@@ -372,6 +382,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
         session: b.session,
         to_try: b.toTry,
         starred: b.starred,
+        answered: b.answered,
         new_techniques: b.newTechniques,
       });
       const note = await noteView(ctx.db, noteId);
@@ -391,6 +402,10 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
       if (!note) throw new NotFound(`No note #${noteId}.`);
       return note;
     }),
+  );
+  r.post(
+    '/api/v1/notes/answered',
+    h(async (req): Promise<MessageResult> => ({ message: await markAnswered(ctx, idList.parse(req.body).ids) })),
   );
   r.post(
     '/api/v1/notes/delete',

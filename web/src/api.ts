@@ -150,6 +150,24 @@ export function useEditFocus() {
 /** The Lab in one request: starred techniques and notes, videos to try, new techniques, questions for coach. */
 export const useLab = () => useQuery({ queryKey: keys.lab, queryFn: () => request<LabView>('GET', '/api/v1/lab') });
 
+/** Unstar everything, or only stars older than some number of days. One undo puts them back. */
+export function useClearStars() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (olderThanDays?: number) => request<MessageResult>('POST', '/api/v1/stars/clear', { olderThanDays }),
+    onSuccess: () => invalidateAll(qc),
+  });
+}
+
+/** Mark several questions answered at once. */
+export function useMarkAnswered() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: number[]) => request<MessageResult>('POST', '/api/v1/notes/answered', { ids }),
+    onSuccess: () => invalidateAll(qc),
+  });
+}
+
 // ---------- techniques ----------
 
 export interface TechniqueFilters {

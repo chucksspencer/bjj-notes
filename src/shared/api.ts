@@ -99,7 +99,10 @@ export interface NoteView {
   toTry: boolean;
   /** Starred: a recent, pertinent note to keep in front of you. */
   starred: boolean;
+  /** When it was starred (ISO 8601). */
   starredAt: string | null;
+  /** A question that's been answered (it leaves Ask coach). */
+  answered: boolean;
   sessionId: number | null;
   /** Where the note came from. */
   session: SessionView | null;
@@ -127,6 +130,8 @@ export interface TechniqueView extends TechniqueRef {
 export interface TechniqueListItem extends TechniqueRef {
   aliases: string[];
   starred: boolean;
+  /** When it was starred (ISO 8601). */
+  starredAt: string | null;
   noteCount: number;
   lastNoteOn: string | null;
   /** When it first showed up in your notes (not counting videos still to try). */
@@ -152,20 +157,33 @@ export interface FocusView {
   backlog: FocusItemView[];
 }
 
+export interface Starred {
+  techniques: TechniqueListItem[];
+  notes: NoteView[];
+}
+
 /** The Lab: the short-term working set beside the long-term focus list. */
 export interface LabView {
   /** Today in the server's time zone, YYYY-MM-DD. */
   today: string;
   /** How far back "new in your notes" looks. */
   days: number;
-  /** Most recently starred first. */
-  starred: { techniques: TechniqueListItem[]; notes: NoteView[] };
+  /** Stars older than this many days fold away as older stars. */
+  starDays: number;
+  /** Open questions noted longer ago than this fold away as older questions. */
+  questionDays: number;
+  /** Starred in the last `starDays` days, most recently starred first. */
+  starred: Starred;
+  /** Starred longer ago: still starred, folded out of the way. */
+  olderStarred: Starred;
   /** The newest few videos to try, and how many there are in all. */
   toTry: { total: number; notes: NoteView[] };
   /** Techniques first noted in the last `days` days, newest first. */
   fresh: TechniqueListItem[];
-  /** Open questions for the coach. */
+  /** Open questions for the coach noted in the last `questionDays` days, newest first. */
   questions: NoteView[];
+  /** Open questions noted longer ago. */
+  olderQuestions: NoteView[];
 }
 
 export interface PositionListItem extends PositionRef {
@@ -215,6 +233,8 @@ export interface NotePatch {
   session?: SessionInput;
   toTry?: boolean;
   starred?: boolean;
+  /** Mark a question answered (true) or open again (false). */
+  answered?: boolean;
   newTechniques?: { name: string; type: TechniqueType; role?: Role }[];
 }
 

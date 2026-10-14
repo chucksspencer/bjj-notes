@@ -90,7 +90,7 @@ export function Inbox() {
           ),
         )}
       </section>
-      <SelectionBar selection={selection} noun="notes" busy={del.isPending} onDelete={deleteSelected} />
+      <SelectionBar selection={selection} noun="notes" busy={del.isPending} onAction={deleteSelected} />
       {filing && <FileSheet note={filing} onClose={() => setFiling(null)} />}
     </div>
   );

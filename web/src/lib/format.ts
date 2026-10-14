@@ -128,6 +128,17 @@ export function lastNoteText(iso: string | null, today: string): string {
   return `Last note ${Math.round(days / 30)} months ago`;
 }
 
+/** How long ago a moment was: "today", "yesterday", "3 days ago", "2 weeks ago", "3 months ago". */
+export function agoText(iso: string, now = Date.now()): string {
+  const days = Math.floor((now - Date.parse(iso)) / 86_400_000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  if (days < 14) return 'a week ago';
+  if (days < 60) return `${Math.round(days / 7)} weeks ago`;
+  return `${Math.round(days / 30)} months ago`;
+}
+
 export const isQuiet = (iso: string | null, today: string) =>
   !iso || Date.parse(`${today}T12:00:00Z`) - Date.parse(`${iso}T12:00:00Z`) > 14 * 86_400_000;
 

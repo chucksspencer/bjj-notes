@@ -1233,3 +1233,85 @@ label.row:has(.check:checked) {
   color: var(--star);
   vertical-align: 1px;
 }
+
+/* Folded groups at the end of a Lab section: older stars, older questions */
+button.row.fold {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.fold > .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.fold-label {
+  display: block;
+  font-weight: 620;
+}
+
+.fold svg {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.fold[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+.fold[aria-expanded='true'] ~ .row {
+  background: color-mix(in srgb, var(--surface) 70%, var(--canvas));
+}
+
+.fold-actions {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+/* To try in the Lab: a few lines each; the players are on the full list */
+.try-compact {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.try-compact-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.try-compact-title {
+  font-weight: 620;
+  overflow-wrap: anywhere;
+}
+
+.try-compact-title a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.try-compact-body {
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.try-compact-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-right: -6px;
+}
+
+.empty + .row {
+  border-top: 1px solid var(--rule);
+}
