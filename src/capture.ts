@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import express, { type Router } from 'express';
 import { secretsMatch } from './auth/provider.js';
-import { instagramPost, splitLink, toReviewText } from './shared/links.js';
+import { placeholderFor, splitLink } from './shared/links.js';
 import { techniquesMentionedIn } from './resolve.js';
 import type { Ctx } from './services/context.js';
 import { getFocus } from './services/focus.js';
@@ -156,7 +156,9 @@ export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer
       res.status(400).json({ error: 'text is required', speech: 'Nothing to save. Say a takeaway or share a link.' });
       return;
     }
-    let input: AddNoteInput = { text: text || toReviewText(url!), raw_text: text, via: 'capture', source: url ? { url } : undefined };
+    // Anything shared with a link is something to try out before it earns a place in the library.
+    const toTry = !!url;
+    let input: AddNoteInput = { text: text || placeholderFor(url!), raw_text: text, via: 'capture', source: url ? { url } : undefined, to_try: toTry };
     let parsed = false;
     if (structurer && text) {
       try {
@@ -171,6 +173,7 @@ export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer
           techniques: s.techniques ?? [],
           new_techniques: s.new_techniques ?? [],
           kind: s.kind,
+          to_try: toTry,
           session: s.session?.kind && SESSION_KINDS.includes(s.session.kind) ? cleanSession(s.session) : undefined,
           source: url ? { ...s.source, url } : s.source?.url || s.source?.author || s.source?.title ? s.source : undefined,
           via: 'capture',
@@ -191,7 +194,10 @@ export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer
         linked: result.linked,
         inbox: result.inbox,
         parsed,
-        speech: !text && url ? `Saved the ${instagramPost(url) ? 'reel' : 'link'} to your inbox to review.` : speechFor(result.linked, result.created, result.inbox),
+        to_try: result.toTry,
+        speech: result.toTry
+          ? `Added to your to-try list${result.linked.length ? `, about ${result.linked.join(' and ')}` : ''}.`
+          : speechFor(result.linked, result.created, result.inbox),
       });
     } catch (err) {
       console.error('capture: save failed', err);

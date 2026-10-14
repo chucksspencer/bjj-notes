@@ -232,11 +232,12 @@ export function useDeleteTechniques() {
 
 // ---------- notes ----------
 
-export const useNotes = (f: { inbox?: boolean; technique?: number; q?: string; limit?: number }, enabled = true) =>
+const flag = (v: boolean | undefined) => (v === undefined ? undefined : v ? '1' : '0');
+
+export const useNotes = (f: { inbox?: boolean; toTry?: boolean; technique?: number; q?: string; limit?: number }, enabled = true) =>
   useQuery({
     queryKey: keys.notes(f),
-    queryFn: () =>
-      request<NoteView[]>('GET', `/api/v1/notes${qs({ ...f, inbox: f.inbox === undefined ? undefined : f.inbox ? '1' : '0' })}`),
+    queryFn: () => request<NoteView[]>('GET', `/api/v1/notes${qs({ ...f, inbox: flag(f.inbox), toTry: flag(f.toTry) })}`),
     enabled,
   });
 

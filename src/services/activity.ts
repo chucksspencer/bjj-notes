@@ -56,9 +56,9 @@ export type UndoOp =
     }
   /** Undoes log_session: detaches the notes it attached, then deletes the session (if it made it) or restores its details. */
   | { kind: 'delete_session'; sessionId: number; attachedNoteIds: number[]; created?: boolean; before?: SessionSnapshot | null }
-  | { kind: 'refile_note'; noteId: number; inbox: boolean; techniqueIds: number[]; createdTechniqueIds: number[] }
+  | { kind: 'refile_note'; noteId: number; inbox: boolean; toTry?: boolean; techniqueIds: number[]; createdTechniqueIds: number[] }
   /** Puts a note back exactly as it was (after an edit or a delete). */
-  | { kind: 'restore_note'; row: NoteRowSnapshot; techniqueIds: number[]; session?: SessionChange }
+  | { kind: 'restore_note'; row: NoteRowSnapshot; techniqueIds: number[]; session?: SessionChange; createdTechniqueIds?: number[] }
   | { kind: 'restore_edge'; edge: EdgeSnapshot }
   | { kind: 'restore_link'; link: LinkSnapshot }
   /** Recreates a deleted technique with everything that pointed at it. */
@@ -86,6 +86,8 @@ export interface NoteRowSnapshot {
   source_id: number | null;
   source_timestamp: string | null;
   inbox: boolean;
+  /** Absent in undo entries written before the To try list existed. */
+  to_try?: boolean;
   created_via: string;
   created_at: string;
 }
@@ -107,7 +109,7 @@ export interface LinkSnapshot {
 }
 
 export const NOTE_SNAPSHOT_SQL = `select id, body, raw_text, kind, observed_on::text as observed_on, session_id, source_id,
-  source_timestamp, inbox, created_via, created_at::text as created_at from notes where id = $1`;
+  source_timestamp, inbox, to_try, created_via, created_at::text as created_at from notes where id = $1`;
 
 export async function logActivity(q: Queryable, action: string, summary: string, undo: UndoOp): Promise<void> {
   await q.query('insert into activity_log (action, summary, undo) values ($1, $2, $3)', [
@@ -204,18 +206,32 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
     case 'restore_note': {
       const r = op.row;
       await q.query(
-        `insert into notes (id, body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, created_via, created_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        `insert into notes (id, body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via, created_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          on conflict (id) do update set body = excluded.body, raw_text = excluded.raw_text, kind = excluded.kind,
            observed_on = excluded.observed_on, session_id = excluded.session_id, source_id = excluded.source_id,
-           source_timestamp = excluded.source_timestamp, inbox = excluded.inbox`,
-        [r.id, r.body, r.raw_text, r.kind, r.observed_on, r.session_id, r.source_id, r.source_timestamp, r.inbox, r.created_via, r.created_at],
+           source_timestamp = excluded.source_timestamp, inbox = excluded.inbox, to_try = excluded.to_try`,
+        [
+          r.id,
+          r.body,
+          r.raw_text,
+          r.kind,
+          r.observed_on,
+          r.session_id,
+          r.source_id,
+          r.source_timestamp,
+          r.inbox,
+          r.to_try ?? false,
+          r.created_via,
+          r.created_at,
+        ],
       );
       await q.query('delete from note_techniques where note_id = $1', [r.id]);
       for (const t of op.techniqueIds) {
         await q.query('insert into note_techniques (note_id, technique_id) values ($1, $2) on conflict do nothing', [r.id, t]);
       }
       await revertSessionChange(q, op.session);
+      await deleteTechniques(q, op.createdTechniqueIds ?? []);
       return;
     }
     case 'restore_edge':
@@ -255,7 +271,7 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       for (const t of op.techniqueIds) {
         await q.query('insert into note_techniques (note_id, technique_id) values ($1, $2)', [op.noteId, t]);
       }
-      await q.query('update notes set inbox = $2 where id = $1', [op.noteId, op.inbox]);
+      await q.query('update notes set inbox = $2, to_try = $3 where id = $1', [op.noteId, op.inbox, op.toTry ?? false]);
       await deleteTechniques(q, op.createdTechniqueIds);
       return;
   }

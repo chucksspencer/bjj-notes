@@ -156,15 +156,18 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByText('Nothing to file.').waitFor();
   });
 
-  it('plays an Instagram reel in the note only when tapped', async () => {
+  it('puts a reel on To try, plays it only when tapped, and keeps it under a technique', async () => {
     await page.getByRole('button', { name: 'New note' }).click();
     await page.getByPlaceholder('What did you learn or notice?').fill('Lapel feed into the back take.');
     await page.getByRole('button', { name: 'Add a video or post link' }).click();
     await page.getByPlaceholder('https://youtu.be/…').fill('https://www.instagram.com/reel/DAbc123xyz/?igsh=MTc4MmM1');
+    expect(await page.getByRole('checkbox', { name: /Haven't tried it yet/ }).isChecked()).toBe(true);
     await page.getByRole('button', { name: 'Save note' }).click();
-    await page.getByText('Saved to your inbox').waitFor();
-    await page.getByRole('navigation').getByRole('link', { name: /Inbox/ }).click();
+    await page.getByText('Added to To try').waitFor();
 
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Inbox/ }).click();
+    await page.getByRole('link', { name: /^To try/ }).click();
+    await page.getByText('Lapel feed into the back take.').waitFor();
     const open = page.getByRole('link', { name: 'Open in Instagram' });
     expect(await open.getAttribute('href')).toBe('https://www.instagram.com/reel/DAbc123xyz/');
     expect(await page.locator('iframe').count()).toBe(0); // nothing from Instagram until tapped
@@ -172,6 +175,30 @@ describe.runIf(run)('web app (end to end)', () => {
     const frame = page.locator('iframe[title="Instagram reel"]');
     await frame.waitFor({ state: 'attached' });
     expect(await frame.getAttribute('src')).toBe('https://www.instagram.com/p/DAbc123xyz/embed/captioned/');
+
+    // Tried it, liked it: keep it under a technique.
+    await page.getByRole('button', { name: 'Keep', exact: true }).click();
+    const sheet = page.getByRole('dialog');
+    await sheet.getByPlaceholder('Search techniques').fill('ghost');
+    await sheet.getByRole('button', { name: /^Ghost escape/ }).click();
+    await sheet.getByRole('button', { name: 'Keep it' }).click();
+    await page.getByText('Kept under Ghost escape').waitFor();
+    await page.getByText('Nothing to try.', { exact: false }).waitFor();
+  });
+
+  it('tosses a video it did not like, with undo', async () => {
+    await page.getByRole('button', { name: 'New note' }).click();
+    await page.getByPlaceholder('What did you learn or notice?').fill('Flying armbar from standing.');
+    await page.getByRole('button', { name: 'Add a video or post link' }).click();
+    await page.getByPlaceholder('https://youtu.be/…').fill('https://www.instagram.com/reel/Nope999/');
+    await page.getByRole('button', { name: 'Save note' }).click();
+    await page.getByText('Added to To try').waitFor();
+    await page.getByText('Flying armbar from standing.').waitFor();
+    await page.getByRole('button', { name: 'Toss' }).click();
+    await page.getByText('Tossed it').waitFor();
+    await page.getByText('Nothing to try.', { exact: false }).waitFor();
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.getByText('Flying armbar from standing.').waitFor();
   });
 
   it('navigates on desktop Chrome 150+, where scrollTo returns a Promise', async () => {

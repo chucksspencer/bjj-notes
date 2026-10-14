@@ -222,6 +222,27 @@ describe('MCP tools over HTTP', () => {
     expect(await call('get_technique', { name: 'Ghost escape' })).toContain(`- 2024-02-03 instruction #${id}:`);
   });
 
+  it('keeps "silly Instagram bullshit" on the To try list until it is kept', async () => {
+    const saved = await call('add_note', {
+      text: 'Reverse De La Riva back take. Looks fake but maybe.',
+      techniques: ['ghost escape'],
+      source: { url: 'https://www.instagram.com/reel/SIB12345/' },
+      to_try: true,
+    });
+    expect(saved).toMatch(/^Added note #\d+ to try \(about Ghost escape\)\.$/);
+    const id = Number(saved.match(/#(\d+)/)![1]);
+    const waiting = await call('get_inbox', { to_try: true });
+    expect(waiting).toContain(`#${id}`);
+    expect(waiting).toContain('<https://www.instagram.com/reel/SIB12345/>');
+    expect(await call('get_inbox')).not.toContain(`#${id}`);
+    expect(await call('get_technique', { name: 'Ghost escape' })).toContain(`[to try] #${id}:`);
+    expect(await call('file_note', { note_id: id, techniques: ['Ghost escape'] })).toBe(`Kept note #${id}, filed under Ghost escape.`);
+    expect(await call('get_inbox', { to_try: true })).not.toContain(`#${id}`);
+    expect(await call('undo_last')).toBe(`Undid: keeping note #${id}`);
+    expect(await call('get_inbox', { to_try: true })).toContain(`#${id}`);
+    expect(await call('update_note', { note_id: id, to_try: false })).toBe(`Updated note #${id}, off the To try list.`);
+  });
+
   it('undoes a technique edit', async () => {
     await call('save_technique', { name: 'Baratoplata', status: 'drilling', summary: 'Omoplata variation' });
     expect(await call('get_technique', { name: 'Baratoplata' })).toContain('Status: drilling.');

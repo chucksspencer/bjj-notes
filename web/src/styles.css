@@ -1083,3 +1083,45 @@ label.row:has(.check:checked) {
   align-items: center;
   gap: 4px 8px;
 }
+
+/* The inbox's two lists */
+.inbox-tabs {
+  margin-bottom: 10px;
+}
+
+.segments a.segment {
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.segments a.segment[aria-current='page'] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--canvas);
+}
+
+.try-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--belt-wash);
+  color: var(--belt);
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -4px 0 14px;
+  cursor: pointer;
+}

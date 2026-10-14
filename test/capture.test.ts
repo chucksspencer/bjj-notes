@@ -50,28 +50,30 @@ describe('Siri capture API', () => {
     expect(vague).toMatchObject({ inbox: true, parsed: false, speech: 'Saved to your inbox.' });
   });
 
-  it('saves a shared reel to review, and knows the same reel when it comes back', async () => {
+  it('puts shared reels on the To try list, and knows the same reel when it comes back', async () => {
     s = await startServer();
-    // Shared from Instagram with no takeaway: kept in the inbox to review.
+    // Shared from Instagram with no takeaway.
     const bare = (await (await post(s, { url: 'https://www.instagram.com/reel/DAbc123xyz/?igsh=MTc4MmM1' })).json()) as any;
-    expect(bare).toMatchObject({ inbox: true, speech: 'Saved the reel to your inbox to review.' });
-    // The same reel again, handed over as caption text with the link inside, plus a takeaway.
+    expect(bare).toMatchObject({ inbox: false, to_try: true, speech: 'Added to your to-try list.' });
+    // The same reel again, handed over as caption text with the link inside, plus a takeaway naming a technique.
     const withTakeaway = (await (
       await post(s, { text: 'Leg elevation: hook first, then lift.', url: 'So clean 🔥 https://instagram.com/reels/DAbc123xyz' })
     ).json()) as any;
-    expect(withTakeaway).toMatchObject({ inbox: false, speech: 'Saved to Leg elevation.' });
-    // A link dictated into the note itself becomes the note's source.
+    expect(withTakeaway).toMatchObject({ inbox: false, to_try: true, speech: 'Added to your to-try list, about Leg elevation.' });
+    // A link dictated into the note itself becomes the note's source, and it's something to try too.
     await post(s, { text: 'Leg elevation, watch this https://youtu.be/abc123?si=XyZ' });
+    // No link: a plain dictated note, filed as usual.
+    expect(((await (await post(s, { text: 'Leg elevation: hips first.' })).json()) as any).to_try).toBe(false);
 
     const rows = (
-      await s.db.query<{ body: string; url: string; kind: string; source_id: number }>(
-        'select n.body, s.url, s.kind, n.source_id from notes n join sources s on s.id = n.source_id order by n.id',
+      await s.db.query<{ body: string; url: string; kind: string; source_id: number; to_try: boolean; inbox: boolean }>(
+        'select n.body, s.url, s.kind, n.source_id, n.to_try, n.inbox from notes n join sources s on s.id = n.source_id order by n.id',
       )
     ).rows;
     expect(rows.map(({ source_id: _, ...r }) => r)).toEqual([
-      { body: 'Instagram reel to review.', url: 'https://www.instagram.com/reel/DAbc123xyz/', kind: 'instagram' },
-      { body: 'Leg elevation: hook first, then lift.', url: 'https://www.instagram.com/reel/DAbc123xyz/', kind: 'instagram' },
-      { body: 'Leg elevation, watch this', url: 'https://youtu.be/abc123', kind: 'youtube' },
+      { body: 'Instagram reel to try.', url: 'https://www.instagram.com/reel/DAbc123xyz/', kind: 'instagram', to_try: true, inbox: false },
+      { body: 'Leg elevation: hook first, then lift.', url: 'https://www.instagram.com/reel/DAbc123xyz/', kind: 'instagram', to_try: true, inbox: false },
+      { body: 'Leg elevation, watch this', url: 'https://youtu.be/abc123', kind: 'youtube', to_try: true, inbox: false },
     ]);
     expect(rows[0]!.source_id).toBe(rows[1]!.source_id);
   });

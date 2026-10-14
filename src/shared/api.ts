@@ -95,6 +95,8 @@ export interface NoteView {
   sourceTimestamp: string | null;
   techniques: TechniqueRef[];
   inbox: boolean;
+  /** On the To try list: saved to try out before it's kept (filed) or tossed. */
+  toTry: boolean;
   sessionId: number | null;
   /** Where the note came from. */
   session: SessionView | null;
@@ -174,6 +176,8 @@ export interface NoteCreateInput {
   sessionId?: number | null;
   /** A session to find or create. */
   session?: SessionInput;
+  /** Put it on the To try list instead of filing it. */
+  toTry?: boolean;
 }
 
 export interface NotePatch {
@@ -183,6 +187,8 @@ export interface NotePatch {
   techniqueIds?: number[];
   sessionId?: number | null;
   session?: SessionInput;
+  toTry?: boolean;
+  newTechniques?: { name: string; type: TechniqueType; role?: Role }[];
 }
 
 export interface NoteCreateResult extends MessageResult {

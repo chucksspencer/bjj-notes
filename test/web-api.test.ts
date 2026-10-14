@@ -283,6 +283,59 @@ describe('JSON API', () => {
     expect((await api<NoteView[]>('GET', '/api/v1/notes?q=fight%20pri')).body.map(n => n.body)).toContain('Frames first.');
   });
 
+  it('keeps videos on the To try list until they are kept or tossed', async () => {
+    const list = async (q: string) => (await api<NoteView[]>('GET', `/api/v1/notes?${q}&limit=200`)).body.map(n => n.id);
+    const reel = (
+      await api<NoteCreateResult>('POST', '/api/v1/notes', {
+        text: 'Instagram reel to try.',
+        source: { url: 'https://www.instagram.com/reel/TryMe123/?igsh=x' },
+        toTry: true,
+      })
+    ).body;
+    expect(reel.message).toBe(`Added note #${reel.note.id} to try.`);
+    expect(reel.note).toMatchObject({ toTry: true, inbox: false });
+    expect(await list('toTry=1')).toContain(reel.note.id);
+    expect(await list('inbox=1')).not.toContain(reel.note.id); // not cluttering the inbox
+
+    // One about a technique already: still waits on the list, and shows on the card marked as untried.
+    const about = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Ghost to darce.', techniqueIds: [ghost.id], toTry: true })).body
+      .note;
+    expect((await api<TechniqueView>('GET', `/api/v1/techniques/${ghost.id}`)).body.notes.find(n => n.id === about.id)?.toTry).toBe(true);
+
+    // Kept: filed under a technique with a real takeaway, off the list.
+    const kept = (
+      await api<NoteView>('PATCH', `/api/v1/notes/${reel.note.id}`, { body: 'Hide the near arm.', techniqueIds: [ghost.id], toTry: false })
+    ).body;
+    expect(kept).toMatchObject({ toTry: false, inbox: false, body: 'Hide the near arm.' });
+    expect(await list('toTry=1')).not.toContain(reel.note.id);
+    // Undo puts it back on the list as it was.
+    await api('POST', '/api/v1/undo');
+    expect((await api<NoteView[]>('GET', '/api/v1/notes?toTry=1&limit=200')).body.find(n => n.id === reel.note.id)).toMatchObject({
+      toTry: true,
+      body: 'Instagram reel to try.',
+      techniques: [],
+    });
+    // Taken off the list with nothing to file it under: it needs filing, so it goes to the inbox.
+    expect((await api<NoteView>('PATCH', `/api/v1/notes/${reel.note.id}`, { toTry: false })).body).toMatchObject({ toTry: false, inbox: true });
+    // Filing also keeps a to-try note.
+    const filed = (await api<NoteView>('POST', `/api/v1/notes/${about.id}/file`, { techniqueIds: [ghost.id] })).body;
+    expect(filed).toMatchObject({ toTry: false, inbox: false });
+    // Kept under a technique that doesn't exist yet; undo takes the new card away again.
+    const fresh = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Chair sit gift wrap.', toTry: true })).body.note;
+    const keptNew = (
+      await api<NoteView>('PATCH', `/api/v1/notes/${fresh.id}`, {
+        toTry: false,
+        newTechniques: [{ name: 'Chair sit gift wrap', type: 'control', role: 'top' }],
+      })
+    ).body;
+    expect(keptNew).toMatchObject({ toTry: false, inbox: false, techniques: [expect.objectContaining({ name: 'Chair sit gift wrap' })] });
+    expect((await api('POST', '/api/v1/undo')).body.message).toBe(`Undid: keeping note #${fresh.id}`);
+    expect((await api<TechniqueListItem[]>('GET', '/api/v1/techniques?q=chair%20sit%20gift')).body.map(t => t.name)).not.toContain(
+      'Chair sit gift wrap',
+    );
+    await api('POST', '/api/v1/notes/delete', { ids: [reel.note.id, about.id, fresh.id] }); // tossed
+  });
+
   it('deletes a selection of techniques or notes as one undoable change', async () => {
     const make = async (name: string) => (await api<TechniqueView>('POST', '/api/v1/techniques', { name, type: 'sweep' })).body;
     const [a, b, c] = [await make('Tornado roll'), await make('Lapel feed'), await make('Wrist ride')];

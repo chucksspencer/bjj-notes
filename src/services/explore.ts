@@ -65,7 +65,7 @@ export async function search(ctx: Ctx, input: SearchInput): Promise<string> {
       for (const n of notes) {
         const origin = noteOrigin(n);
         lines.push(
-          `- #${n.id} ${n.observedOn}${origin ? ` ${origin}` : ''}${n.techniques.length ? ` [${n.techniques.map(t => t.name).join(', ')}]` : ''}: ${n.body}`,
+          `- #${n.id} ${n.observedOn}${origin ? ` ${origin}` : ''}${n.toTry ? ' [to try]' : ''}${n.techniques.length ? ` [${n.techniques.map(t => t.name).join(', ')}]` : ''}: ${n.body}`,
         );
       }
     }

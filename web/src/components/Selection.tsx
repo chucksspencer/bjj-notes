@@ -59,7 +59,20 @@ export function useSelection(visibleIds: number[]): Selection {
 }
 
 /** Floating bar above the tabs while selecting: how many are picked, select all, delete. */
-export function SelectionBar({ selection, noun, busy, onDelete }: { selection: Selection; noun: string; busy?: boolean; onDelete: () => void }) {
+export function SelectionBar({
+  selection,
+  noun,
+  busy,
+  onDelete,
+  action = 'Delete',
+}: {
+  selection: Selection;
+  noun: string;
+  busy?: boolean;
+  onDelete: () => void;
+  /** The button's label, e.g. "Toss". */
+  action?: string;
+}) {
   if (!selection.active) return null;
   const n = selection.ids.length;
   return (
@@ -71,7 +84,7 @@ export function SelectionBar({ selection, noun, busy, onDelete }: { selection: S
         {selection.all ? 'Select none' : 'Select all'}
       </button>
       <button type="button" className="btn small destroy" disabled={!n || busy} onClick={onDelete}>
-        Delete
+        {action}
       </button>
     </div>
   );

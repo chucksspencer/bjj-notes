@@ -57,11 +57,16 @@ export function splitLink(text: string): { url?: string; rest: string } {
   return { url, rest: /^[\s.,;:!?-]*$/.test(rest) ? '' : rest };
 }
 
-/** What to call a link that was saved without a note, so it reads sensibly in the inbox. */
-export function toReviewText(url: string): string {
-  if (instagramPost(url)) return 'Instagram reel to review.';
-  if (/(^|\.)(youtube\.com|youtu\.be)$/i.test(safeHost(url))) return 'Video to review.';
-  return 'Link to review.';
+/** What to call a link saved without a takeaway, so it reads sensibly on the To try list. */
+export function placeholderFor(url: string): string {
+  if (instagramPost(url)) return 'Instagram reel to try.';
+  if (/(^|\.)(youtube\.com|youtu\.be)$/i.test(safeHost(url))) return 'Video to try.';
+  return 'Link to try.';
+}
+
+/** Whether a note's text is only that placeholder (so there's no takeaway to show or edit yet). */
+export function isPlaceholder(body: string): boolean {
+  return /^(Instagram reel|Video|Link) to (try|review)\.$/.test(body.trim());
 }
 
 function safeHost(url: string): string {

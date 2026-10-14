@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanUrl, instagramPost, splitLink, toReviewText } from '../src/shared/links.js';
+import { cleanUrl, instagramPost, isPlaceholder, placeholderFor, splitLink } from '../src/shared/links.js';
 
 describe('shared links', () => {
   it('gives every form of a reel link one address', () => {
@@ -46,9 +46,12 @@ describe('shared links', () => {
     expect(splitLink('no link here')).toEqual({ rest: 'no link here' });
   });
 
-  it('names links saved without a note', () => {
-    expect(toReviewText('https://www.instagram.com/reel/DAbc/')).toBe('Instagram reel to review.');
-    expect(toReviewText('https://youtu.be/abc')).toBe('Video to review.');
-    expect(toReviewText('https://example.com/article')).toBe('Link to review.');
+  it('names links saved without a takeaway', () => {
+    expect(placeholderFor('https://www.instagram.com/reel/DAbc/')).toBe('Instagram reel to try.');
+    expect(placeholderFor('https://youtu.be/abc')).toBe('Video to try.');
+    expect(placeholderFor('https://example.com/article')).toBe('Link to try.');
+    expect(isPlaceholder('Instagram reel to try.')).toBe(true);
+    expect(isPlaceholder('Instagram reel to review.')).toBe(true); // saved before the To try list
+    expect(isPlaceholder('Hide the near arm.')).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
 import type { NoteView } from '../../../src/shared/api';
+import { isPlaceholder } from '../../../src/shared/links';
 import { noteOrigin } from '../../../src/shared/sessions';
 import { datePhrase, friendlyDate, NOTE_KIND_LABEL } from '../lib/format';
 import { useCapture } from './Capture';
@@ -16,6 +17,7 @@ export function NoteItem({ note, today, hideTechnique }: { note: NoteView; today
         <div>
           <div>
             {friendlyDate(note.observedOn, today)}, {NOTE_KIND_LABEL[note.kind].toLowerCase()}
+            {note.toTry && <span className="tag">Not tried yet</span>}
           </div>
           {origin && <div className="note-origin">{origin.charAt(0).toUpperCase() + origin.slice(1)}</div>}
         </div>
@@ -23,7 +25,7 @@ export function NoteItem({ note, today, hideTechnique }: { note: NoteView; today
           Edit
         </button>
       </div>
-      <div className="note-body">{note.body}</div>
+      {!(isPlaceholder(note.body) && note.source?.url) && <div className="note-body">{note.body}</div>}
       {note.source?.url && (
         <SourceLink url={note.source.url} timestamp={note.sourceTimestamp} title={note.source.title} author={note.source.author} />
       )}

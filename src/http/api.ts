@@ -68,6 +68,7 @@ const noteCreate = z.object({
     .optional(),
   sessionId: z.number().int().nullable().optional(),
   session: sessionInput.optional(),
+  toTry: z.boolean().optional(),
 });
 const notePatch = z.object({
   body: z.string().trim().min(1).max(10_000).optional(),
@@ -76,6 +77,8 @@ const notePatch = z.object({
   techniqueIds: z.array(z.number().int()).max(20).optional(),
   sessionId: z.number().int().nullable().optional(),
   session: sessionInput.optional(),
+  toTry: z.boolean().optional(),
+  newTechniques: z.array(newTechnique).max(10).optional(),
 });
 const techniqueCreate = z.object({
   name: z.string().trim().min(1).max(120),
@@ -296,6 +299,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
       const qs = z
         .object({
           inbox: z.enum(['1', '0']).optional(),
+          toTry: z.enum(['1', '0']).optional(),
           technique: id.optional(),
           q: z.string().max(200).optional(),
           limit: z.coerce.number().int().min(1).max(200).optional(),
@@ -304,6 +308,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
         .parse(req.query);
       return noteList(ctx.db, {
         inbox: qs.inbox === undefined ? undefined : qs.inbox === '1',
+        toTry: qs.toTry === undefined ? undefined : qs.toTry === '1',
         techniqueId: qs.technique,
         q: qs.q,
         limit: qs.limit,
@@ -324,6 +329,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
         source: b.source,
         session_id: b.sessionId,
         session: b.session,
+        to_try: b.toTry,
         via: 'web',
       });
       res.status(201);
@@ -342,6 +348,8 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
         technique_ids: b.techniqueIds,
         session_id: b.sessionId,
         session: b.session,
+        to_try: b.toTry,
+        new_techniques: b.newTechniques,
       });
       const note = await noteView(ctx.db, noteId);
       if (!note) throw new NotFound(`No note #${noteId}.`);

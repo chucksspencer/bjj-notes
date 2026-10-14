@@ -41,6 +41,8 @@ export interface AddNoteInput {
   session_id?: number | null;
   /** Where the note came from: a session to find or create. */
   session?: OriginInput;
+  /** Not tried yet ("silly Instagram bullshit"): kept in the To try list, out of the inbox, until kept or tossed. */
+  to_try?: boolean;
   raw_text?: string;
   via?: 'mcp' | 'capture' | 'web';
 }
@@ -81,6 +83,7 @@ export interface AddNoteResult {
   created: string[];
   unresolved: { name: string; candidates: Candidate[] }[];
   inbox: boolean;
+  toTry: boolean;
   message: string;
 }
 
@@ -168,11 +171,12 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
       const sessions = (await q.query<{ id: number }>('select id from sessions where date = $1', [date])).rows;
       sessionId = sessions.length === 1 ? sessions[0]!.id : null;
     }
-    const inbox = ids.size === 0 || unresolved.length > 0;
+    const toTry = input.to_try === true;
+    const inbox = !toTry && (ids.size === 0 || unresolved.length > 0);
 
     const { rows } = await q.query<{ id: number }>(
-      `insert into notes (body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, created_via)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
+      `insert into notes (body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id`,
       [
         text,
         input.raw_text ?? null,
@@ -182,6 +186,7 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
         sourceId,
         input.source?.timestamp ?? null,
         inbox,
+        toTry,
         input.via ?? 'mcp',
       ],
     );
@@ -192,7 +197,12 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
 
     const linked = [...ids.values()];
     const from = origin?.view ? ` (from ${sessionPhrase(origin.view)})` : '';
-    const parts = [(linked.length ? `Saved note #${noteId} to ${linked.join(', ')}` : `Saved note #${noteId}`) + from];
+    const saved = toTry
+      ? `Added note #${noteId} to try${linked.length ? ` (about ${linked.join(', ')})` : ''}`
+      : linked.length
+        ? `Saved note #${noteId} to ${linked.join(', ')}`
+        : `Saved note #${noteId}`;
+    const parts = [saved + from];
     if (created.length) parts.push(`new card${created.length > 1 ? 's' : ''}: ${created.map(c => c.name).join(', ')}`);
     for (const u of unresolved) {
       parts.push(
@@ -210,11 +220,11 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
       createdTechniqueIds: created.map(c => c.id),
       session: origin?.change,
     });
-    return { noteId, linked, created: created.map(c => c.name), unresolved, inbox, message };
+    return { noteId, linked, created: created.map(c => c.name), unresolved, inbox, toTry, message };
   });
 }
 
-/** Links an inbox note to techniques and takes it out of the inbox. */
+/** Links a note to techniques and takes it out of the inbox, or off the To try list (keeping it). */
 export async function fileNote(
   ctx: Ctx,
   noteId: number,
@@ -223,7 +233,9 @@ export async function fileNote(
   techniqueIds: number[] = [],
 ): Promise<string> {
   return ctx.db.tx(async q => {
-    const note = (await q.query<{ id: number; inbox: boolean }>('select id, inbox from notes where id = $1', [noteId])).rows[0];
+    const note = (
+      await q.query<{ id: number; inbox: boolean; to_try: boolean }>('select id, inbox, to_try from notes where id = $1', [noteId])
+    ).rows[0];
     if (!note) return `No note #${noteId}.`;
     const before = (
       await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [noteId])
@@ -234,15 +246,16 @@ export async function fileNote(
     }
     const total = new Set([...before, ...ids.keys()]).size;
     const inbox = total === 0 || unresolved.length > 0;
-    await q.query('update notes set inbox = $2 where id = $1', [noteId, inbox]);
-    await logActivity(q, 'file_note', `filing note #${noteId}`, {
+    await q.query('update notes set inbox = $2, to_try = false where id = $1', [noteId, inbox]);
+    await logActivity(q, 'file_note', `${note.to_try ? 'keeping' : 'filing'} note #${noteId}`, {
       kind: 'refile_note',
       noteId,
       inbox: note.inbox,
+      toTry: note.to_try,
       techniqueIds: before,
       createdTechniqueIds: created.map(c => c.id),
     });
-    const parts = [`Filed note #${noteId} under ${[...ids.values()].join(', ') || 'nothing new'}`];
+    const parts = [`${note.to_try ? 'Kept' : 'Filed'} note #${noteId}${note.to_try ? ', filed' : ''} under ${[...ids.values()].join(', ') || 'nothing new'}`];
     for (const u of unresolved) {
       parts.push(`couldn't place "${u.name}"${u.candidates.length ? ` (closest: ${u.candidates.map(c => c.name).join(', ')})` : ''}`);
     }
@@ -251,16 +264,22 @@ export async function fileNote(
   });
 }
 
-export async function getInbox(ctx: Ctx, limit = 10): Promise<string> {
-  const rows = await noteList(ctx.db, { inbox: true, limit, oldestFirst: true });
-  if (!rows.length) return 'Inbox is empty.';
-  const total = (await ctx.db.query<{ c: number }>('select count(*)::int as c from notes where inbox')).rows[0]!.c;
+export async function getInbox(ctx: Ctx, limit = 10, toTry = false): Promise<string> {
+  const rows = toTry
+    ? await noteList(ctx.db, { toTry: true, limit })
+    : await noteList(ctx.db, { inbox: true, limit, oldestFirst: true });
+  if (!rows.length) return toTry ? 'Nothing waiting to be tried.' : 'Inbox is empty.';
+  const total = (await ctx.db.query<{ c: number }>(`select count(*)::int as c from notes where ${toTry ? 'to_try' : 'inbox'}`)).rows[0]!.c;
+  const heading = toTry
+    ? `${total} to try (newest first)${total > rows.length ? `, showing ${rows.length}` : ''}:`
+    : `${total} note${total === 1 ? '' : 's'} in the inbox${total > rows.length ? ` (showing ${rows.length})` : ''}:`;
   return [
-    `${total} note${total === 1 ? '' : 's'} in the inbox${total > rows.length ? ` (showing ${rows.length})` : ''}:`,
-    ...rows.map(
-      r =>
-        `- #${r.id} (${r.observedOn}): ${r.body}${r.techniques.length ? ` [linked: ${r.techniques.map(t => t.name).join(', ')}]` : ''}`,
-    ),
+    heading,
+    ...rows.map(r => {
+      const about = r.techniques.length ? ` [${toTry ? 'about' : 'linked'}: ${r.techniques.map(t => t.name).join(', ')}]` : '';
+      const link = r.source?.url ? ` <${r.source.url}>` : '';
+      return `- #${r.id} (${r.observedOn}): ${r.body}${about}${link}`;
+    }),
   ].join('\n');
 }
 
@@ -271,10 +290,14 @@ export interface UpdateNoteInput {
   observed_on?: string;
   /** Replaces the linked techniques. An empty list sends the note to the inbox. */
   technique_ids?: number[];
+  /** New cards to create and link as well (with technique_ids, or added to the current ones). */
+  new_techniques?: NewTechniqueInput[];
   /** Where the note came from: an existing session, or null for none. */
   session_id?: number | null;
   /** Where the note came from: a session to find or create (dated like the note unless given). */
   session?: OriginInput;
+  /** Put it on (true) or take it off (false) the To try list. Off with no techniques means it needs filing. */
+  to_try?: boolean;
 }
 
 export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): Promise<string> {
@@ -295,22 +318,32 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
       observedOn,
       origin ? origin.id : row.session_id,
     ]);
-    if (input.technique_ids) {
+    const fresh = input.new_techniques?.length ? await linkTechniques(q, [], input.new_techniques) : null;
+    if (input.technique_ids || fresh) {
+      const ids = new Set([...(input.technique_ids ?? before), ...(fresh ? fresh.ids.keys() : [])]);
       await q.query('delete from note_techniques where note_id = $1', [id]);
-      const { rows } = await q.query<{ id: number }>('select id from techniques where id = any($1::int[])', [input.technique_ids]);
+      const { rows } = await q.query<{ id: number }>('select id from techniques where id = any($1::int[])', [[...ids]]);
       for (const t of rows) {
         await q.query('insert into note_techniques (note_id, technique_id) values ($1, $2)', [id, t.id]);
       }
-      await q.query('update notes set inbox = $2 where id = $1', [id, rows.length === 0]);
     }
-    await logActivity(q, 'update_note', `edit to note #${id}`, {
+    // A to-try note waits out of the inbox; otherwise a note with no techniques needs filing.
+    const wasToTry = row.to_try ?? false;
+    const toTry = input.to_try ?? wasToTry;
+    if (input.technique_ids || fresh || toTry !== wasToTry) {
+      const count = (await q.query<{ c: number }>('select count(*)::int as c from note_techniques where note_id = $1', [id])).rows[0]!.c;
+      await q.query('update notes set inbox = $2, to_try = $3 where id = $1', [id, !toTry && count === 0, toTry]);
+    }
+    await logActivity(q, 'update_note', `${wasToTry && !toTry ? 'keeping' : 'edit to'} note #${id}`, {
       kind: 'restore_note',
       row,
       techniqueIds: before,
       session: origin?.change,
+      createdTechniqueIds: fresh?.created.map(c => c.id),
     });
-    if (origin?.view) return `Updated note #${id} (from ${sessionPhrase(origin.view)}).`;
-    return origin ? `Updated note #${id} (no session).` : `Updated note #${id}.`;
+    const moved = toTry === wasToTry ? '' : toTry ? ', now on the To try list' : ', off the To try list';
+    if (origin?.view) return `Updated note #${id} (from ${sessionPhrase(origin.view)})${moved}.`;
+    return origin ? `Updated note #${id} (no session)${moved}.` : `Updated note #${id}${moved}.`;
   });
 }
 

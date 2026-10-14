@@ -12,6 +12,7 @@ import { Library } from './pages/Library';
 import { Login } from './pages/Login';
 import { Position, Positions } from './pages/Positions';
 import { Technique } from './pages/Technique';
+import { ToTry } from './pages/ToTry';
 
 export function App() {
   return (
@@ -57,6 +58,7 @@ function Shell() {
           <Route path="/positions" element={<Positions />} />
           <Route path="/p/:slug" element={<Position />} />
           <Route path="/inbox" element={<Inbox />} />
+          <Route path="/inbox/try" element={<ToTry />} />
           <Route path="*" element={<NotFound />} />
           </Routes>
         </ErrorBoundary>

@@ -48,6 +48,7 @@ interface NoteRow {
   observed_on: string;
   source_timestamp: string | null;
   inbox: boolean;
+  to_try: boolean;
   session_id: number | null;
   created_via: NoteView['createdVia'];
   s_id: number | null;
@@ -65,7 +66,7 @@ interface NoteRow {
 }
 
 const NOTE_SELECT = `
-  select n.id, n.body, n.raw_text, n.kind, n.observed_on::text as observed_on, n.source_timestamp, n.inbox,
+  select n.id, n.body, n.raw_text, n.kind, n.observed_on::text as observed_on, n.source_timestamp, n.inbox, n.to_try,
          n.session_id, n.created_via,
          s.id as s_id, s.kind as s_kind, s.url as s_url, s.title as s_title, s.author as s_author,
          ss.date::text as ss_date, ss.kind as ss_kind, ss.name as ss_name, ss.instructor as ss_instructor,
@@ -90,6 +91,7 @@ function toNote(r: NoteRow): NoteView {
     sourceTimestamp: r.source_timestamp,
     techniques: json<TechniqueRef[]>(r.techniques),
     inbox: r.inbox,
+    toTry: r.to_try,
     sessionId: r.session_id,
     session:
       r.session_id && r.ss_kind
@@ -109,6 +111,8 @@ function toNote(r: NoteRow): NoteView {
 
 export interface NoteQuery {
   inbox?: boolean;
+  /** Only notes on (true) or off (false) the To try list. */
+  toTry?: boolean;
   techniqueId?: number;
   /** Full-text search over note bodies, or words from where the note came from. */
   q?: string;
@@ -126,6 +130,7 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
     return `$${params.length}`;
   };
   if (opts.inbox !== undefined) where.push(`n.inbox = ${p(opts.inbox)}`);
+  if (opts.toTry !== undefined) where.push(`n.to_try = ${p(opts.toTry)}`);
   if (opts.techniqueId !== undefined) {
     where.push(`exists (select 1 from note_techniques x where x.note_id = n.id and x.technique_id = ${p(opts.techniqueId)})`);
   }

@@ -46,6 +46,8 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
   const [showSource, setShowSource] = useState(false);
   const [url, setUrl] = useState('');
   const [timestamp, setTimestamp] = useState('');
+  // A video you haven't tried yet waits on the To try list instead of being filed.
+  const [toTry, setToTry] = useState(true);
   const add = useAddNote();
   const editNote = useEditNote();
   const del = useDeleteNote();
@@ -58,7 +60,14 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
     if (editing) {
       const unchanged = origin.mode === 'existing' ? origin.session.id === editing.sessionId : origin.mode === 'none' && !editing.sessionId;
       editNote.mutate(
-        { id: editing.id, body: text, kind, date, techniqueIds: techniques.map(t => t.id), ...(unchanged ? {} : originPayload(origin, date)) },
+        {
+          id: editing.id,
+          body: text,
+          kind,
+          date,
+          techniqueIds: techniques.map(t => t.id),
+          ...(unchanged ? {} : originPayload(origin, date)),
+        },
         {
           onSuccess: () => {
             toast.show('Note updated', { undoable: true });
@@ -77,12 +86,15 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
         techniqueIds: techniques.map(t => t.id),
         newTechniques: newOnes,
         source: url.trim() ? { url: url.trim(), timestamp: timestamp.trim() || undefined } : undefined,
+        toTry: url.trim() ? toTry : undefined,
         ...originPayload(origin, date),
       },
       {
         onSuccess: r => {
           const names = r.note.techniques.map(t => t.name);
-          toast.show(names.length ? `Saved to ${names.join(', ')}` : 'Saved to your inbox', { undoable: true });
+          toast.show(r.note.toTry ? 'Added to To try' : names.length ? `Saved to ${names.join(', ')}` : 'Saved to your inbox', {
+            undoable: true,
+          });
           onClose();
         },
         onError: toast.error,
@@ -127,23 +139,31 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
 
         {!editing &&
           (showSource ? (
-            <div className="row-split" style={{ alignItems: 'flex-start' }}>
-              <label className="field grow">
-                <span className="label">Video or post link</span>
-                <input
-                  className="input"
-                  type="url"
-                  inputMode="url"
-                  placeholder="https://youtu.be/…"
-                  value={url}
-                  onChange={e => setUrl(e.target.value)}
-                />
-              </label>
-              <label className="field" style={{ width: 96 }}>
-                <span className="label">At</span>
-                <input className="input" placeholder="4:32" value={timestamp} onChange={e => setTimestamp(e.target.value)} />
-              </label>
-            </div>
+            <>
+              <div className="row-split" style={{ alignItems: 'flex-start' }}>
+                <label className="field grow">
+                  <span className="label">Video or post link</span>
+                  <input
+                    className="input"
+                    type="url"
+                    inputMode="url"
+                    placeholder="https://youtu.be/…"
+                    value={url}
+                    onChange={e => setUrl(e.target.value)}
+                  />
+                </label>
+                <label className="field" style={{ width: 96 }}>
+                  <span className="label">At</span>
+                  <input className="input" placeholder="4:32" value={timestamp} onChange={e => setTimestamp(e.target.value)} />
+                </label>
+              </div>
+              {url.trim() && (
+                <label className="check-row">
+                  <input type="checkbox" className="check" checked={toTry} onChange={e => setToTry(e.target.checked)} />
+                  <span>Haven't tried it yet — put it on To try</span>
+                </label>
+              )}
+            </>
           ) : (
             <button type="button" className="btn ghost" style={{ marginBottom: 14, marginLeft: -8 }} onClick={() => setShowSource(true)}>
               Add a video or post link
@@ -172,7 +192,7 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
             Delete note
           </button>
         )}
-        {!editing && techniques.length === 0 && newOnes.length === 0 && (
+        {!editing && techniques.length === 0 && newOnes.length === 0 && !(url.trim() && toTry) && (
           <p className="muted small" style={{ marginTop: 8 }}>
             Notes without a technique go to your inbox to file later.
           </p>

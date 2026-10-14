@@ -28,6 +28,7 @@ How to use it well:
 - Before creating a technique card, use search to check whether it already exists under another name; add the alternative name as an alias.
 - Model techniques as moves between positions: a sweep goes from a guard (bottom) to top; a pass goes from a guard (top) to a pin; an escape starts from a pin (bottom).
 - Say where a note came from with add_note's session (a class, a seminar with its name and instructor, an open mat): "notes from today's class" is {kind: "class"}; "Zen camp seminar by Josh Jones on 2024-02-03" is {kind: "seminar", name: "Zen camp", instructor: "Josh Jones", date: "2024-02-03"}. The same session is reused, not duplicated.
+- Videos and ideas he hasn't tried yet go on the To try list (add_note with to_try: true), not on a technique. He calls this "silly Instagram bullshit"; "add this to my SIB" or "something to try" means the same. Reels he shares from Instagram land there automatically. When he's tried one and likes it, file_note keeps it under the technique; get_inbox with to_try: true lists what's waiting.
 - The focus list is ordered; #1 is what he's working on most. "Add X to my focus" puts it at the top unless he says otherwise.
 - Replies are often read aloud, so keep confirmations short. If he says "undo that", call undo_last.`;
 
@@ -156,6 +157,10 @@ export function buildMcpServer(ctx: Ctx): McpServer {
         kind: z.enum(NOTE_KINDS).optional().describe('instruction = taught/watched; rolling = happened live'),
         date: date.optional().describe("YYYY-MM-DD; defaults to the session's date, else today"),
         session: sessionInput.optional(),
+        to_try: z
+          .boolean()
+          .optional()
+          .describe('Not tried yet ("silly Instagram bullshit"): goes on the To try list instead of being filed'),
         source: z
           .object({
             kind: z.enum(SOURCE_KINDS).optional(),
@@ -175,18 +180,20 @@ export function buildMcpServer(ctx: Ctx): McpServer {
     'get_inbox',
     {
       title: 'List inbox notes',
-      description: 'Notes that are not yet linked to a technique.',
-      inputSchema: { limit: z.number().int().min(1).max(50).optional() },
+      description:
+        'Notes that are not yet linked to a technique. With to_try: true, the To try list instead: videos and ideas saved to try before keeping ("silly Instagram bullshit"), newest first.',
+      inputSchema: { limit: z.number().int().min(1).max(50).optional(), to_try: z.boolean().optional() },
       annotations: readOnly,
     },
-    args => run(() => getInbox(ctx, args.limit)),
+    args => run(() => getInbox(ctx, args.limit, args.to_try === true)),
   );
 
   server.registerTool(
     'file_note',
     {
       title: 'File an inbox note',
-      description: 'Links an existing note to techniques and removes it from the inbox once everything is placed.',
+      description:
+        'Links an existing note to techniques and removes it from the inbox once everything is placed. For a To try note, this keeps it: it comes off the To try list.',
       inputSchema: {
         note_id: z.number().int(),
         techniques: z.array(z.string()),
@@ -209,6 +216,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
         date: date.optional().describe('YYYY-MM-DD'),
         session: sessionInput.optional(),
         clear_session: z.boolean().optional().describe("True to say the note didn't come from any session"),
+        to_try: z.boolean().optional().describe('Put the note on (true) or take it off (false) the To try list'),
       },
       annotations: write,
     },
@@ -220,6 +228,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
           observed_on: args.date,
           session: parseSession(args.session),
           session_id: args.clear_session ? null : undefined,
+          to_try: args.to_try,
         }),
       ),
   );

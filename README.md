@@ -91,7 +91,7 @@ Create these in the Shortcuts app. Replace `HOST` with your server address and `
 3. *Get Contents of URL* `https://HOST/api/capture`: Method **POST**; Request Body **JSON** with `text` = *Provided Input*, `url` = *Shortcut Input* and `token` = your `API_TOKEN` (or send it as the header `Authorization` = `Bearer TOKEN` instead of the `token` field)
 4. *Get Dictionary Value* `speech` from *Contents of URL* → *Show Notification*
 
-The server tidies what it's given: share-tracking is stripped (`?igsh=…`, `?si=…`) so the same reel saved twice is one source; a link inside shared text or a dictated note is picked out; a link with no takeaway lands in the inbox as "Instagram reel to review." Reels play in the note when tapped, with *Open in Instagram* beside them.
+The server tidies what it's given: share-tracking is stripped (`?igsh=…`, `?si=…`) so the same reel saved twice is one source; a link inside shared text or a dictated note is picked out. Anything shared with a link goes on the **To try** list (Inbox → To try), out of the way until you've tried it: **Keep** files it under a technique, **Toss** deletes it. Reels play in the note when tapped, with *Open in Instagram* beside them.
 
 Shortcuts also run on Apple Watch.
 
@@ -150,7 +150,7 @@ test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture,
 | `save_technique` | Create or update a card; add positions, aliases, details, links |
 | `add_note` | Save a dated note linked to techniques and where it came from ("Zen camp seminar by Josh Jones"); unknown techniques go to the inbox |
 | `update_note` | Change a note's text, kind, date or where it came from |
-| `get_inbox`, `file_note` | Triage notes that couldn't be placed |
+| `get_inbox`, `file_note` | Triage notes that couldn't be placed; with `to_try`, the To try list ("silly Instagram bullshit") of videos to try before keeping |
 | `log_session` | Record a class/seminar/open mat/private; attaches that day's notes; saying the same session twice updates it |
 | `get_focus` | Ranked focus list with time since each item's last note, or its history |
 | `update_focus` | add / move / resume / pause / backlog / complete / drop |
