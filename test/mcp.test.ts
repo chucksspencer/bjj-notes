@@ -268,6 +268,19 @@ describe('MCP tools over HTTP', () => {
     expect(await call('get_lab')).toContain(`Starred (1):\n- #${id} `);
   });
 
+  it('stars techniques for the Lab', async () => {
+    expect(await call('save_technique', { name: 'Baratoplata', starred: 'true' })).toBe('Starred Baratoplata.');
+    expect(await call('save_technique', { name: 'Baratoplata', starred: true })).toBe('Baratoplata is already starred.');
+    expect(await call('get_technique', { name: 'Baratoplata', note_limit: 0 })).toMatch(/Status: \w+\. Starred\./);
+    expect(await call('get_lab')).toMatch(/Starred \(\d+\):\n- Baratoplata \(submission/);
+    expect(await call('search', { query: 'baratoplata' })).toMatch(/Baratoplata \([^)]*; starred\)/);
+    expect(await call('save_technique', { name: 'Baratoplata', starred: false })).toBe('Unstarred Baratoplata.');
+    expect(await call('undo_last')).toBe('Undid: unstarring Baratoplata');
+    expect(await call('save_technique', { name: 'Baratoplata', starred: false, summary: 'Omoplata cousin' })).toBe('Updated Baratoplata, unstarred.');
+    expect(await call('undo_last')).toBe('Undid: Updated Baratoplata');
+    expect(await call('save_technique', { name: 'Baratoplata', starred: false })).toBe('Unstarred Baratoplata.');
+  });
+
   it('undoes a technique edit', async () => {
     await call('save_technique', { name: 'Baratoplata', status: 'drilling', summary: 'Omoplata variation' });
     expect(await call('get_technique', { name: 'Baratoplata' })).toContain('Status: drilling.');

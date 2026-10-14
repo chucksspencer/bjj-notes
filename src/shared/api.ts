@@ -119,10 +119,14 @@ export interface TechniqueView extends TechniqueRef {
   notes: NoteView[];
   noteCount: number;
   lastNoteOn: string | null;
+  /** Starred: a technique to keep in front of you for now (it shows in the Lab). */
+  starred: boolean;
+  starredAt: string | null;
 }
 
 export interface TechniqueListItem extends TechniqueRef {
   aliases: string[];
+  starred: boolean;
   noteCount: number;
   lastNoteOn: string | null;
   /** When it first showed up in your notes (not counting videos still to try). */
@@ -146,6 +150,22 @@ export interface FocusView {
   active: FocusItemView[];
   paused: FocusItemView[];
   backlog: FocusItemView[];
+}
+
+/** The Lab: the short-term working set beside the long-term focus list. */
+export interface LabView {
+  /** Today in the server's time zone, YYYY-MM-DD. */
+  today: string;
+  /** How far back "new in your notes" looks. */
+  days: number;
+  /** Most recently starred first. */
+  starred: { techniques: TechniqueListItem[]; notes: NoteView[] };
+  /** The newest few videos to try, and how many there are in all. */
+  toTry: { total: number; notes: NoteView[] };
+  /** Techniques first noted in the last `days` days, newest first. */
+  fresh: TechniqueListItem[];
+  /** Open questions for the coach. */
+  questions: NoteView[];
 }
 
 export interface PositionListItem extends PositionRef {
@@ -212,4 +232,5 @@ export interface TechniquePatch {
   aliases?: string[];
   keyDetails?: string[];
   mistakes?: string[];
+  starred?: boolean;
 }

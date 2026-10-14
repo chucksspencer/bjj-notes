@@ -2,6 +2,7 @@ import { QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/re
 import type {
   FocusAction,
   FocusView,
+  LabView,
   MessageResult,
   NoteCreateInput,
   NoteCreateResult,
@@ -67,6 +68,7 @@ export const queryClient = new QueryClient({
 export const keys = {
   session: ['session'] as const,
   focus: ['focus'] as const,
+  lab: ['lab'] as const,
   techniques: (f: TechniqueFilters = {}) => ['techniques', f] as const,
   technique: (id: number) => ['technique', id] as const,
   notes: (f: NoteFilters) => ['notes', f] as const,
@@ -77,7 +79,7 @@ export const keys = {
 
 /** Everything that may show changed data after a write. */
 function invalidateAll(qc: ReturnType<typeof useQueryClient>) {
-  for (const k of ['focus', 'techniques', 'technique', 'notes', 'positions', 'position', 'sessions']) {
+  for (const k of ['focus', 'lab', 'techniques', 'technique', 'notes', 'positions', 'position', 'sessions']) {
     void qc.invalidateQueries({ queryKey: [k] });
   }
 }
@@ -143,6 +145,11 @@ export function useEditFocus() {
   });
 }
 
+// ---------- lab ----------
+
+/** The Lab in one request: starred techniques and notes, videos to try, new techniques, questions for coach. */
+export const useLab = () => useQuery({ queryKey: keys.lab, queryFn: () => request<LabView>('GET', '/api/v1/lab') });
+
 // ---------- techniques ----------
 
 export interface TechniqueFilters {
@@ -151,11 +158,7 @@ export interface TechniqueFilters {
   role?: Role;
   status?: Status;
   position?: number;
-  /** 'new': newest first by when it first showed up in your notes. */
-  sort?: 'name' | 'recent' | 'new';
-  /** Only techniques first noted on or after this date (YYYY-MM-DD). */
-  newSince?: string;
-  limit?: number;
+  sort?: 'name' | 'recent';
 }
 
 const qs = (o: object) => {
@@ -241,8 +244,6 @@ const flag = (v: boolean | undefined) => (v === undefined ? undefined : v ? '1' 
 export interface NoteFilters {
   inbox?: boolean;
   toTry?: boolean;
-  starred?: boolean;
-  kind?: NoteKind;
   technique?: number;
   q?: string;
   limit?: number;
@@ -252,7 +253,7 @@ export const useNotes = (f: NoteFilters, enabled = true) =>
   useQuery({
     queryKey: keys.notes(f),
     queryFn: () =>
-      request<NoteView[]>('GET', `/api/v1/notes${qs({ ...f, inbox: flag(f.inbox), toTry: flag(f.toTry), starred: flag(f.starred) })}`),
+      request<NoteView[]>('GET', `/api/v1/notes${qs({ ...f, inbox: flag(f.inbox), toTry: flag(f.toTry) })}`),
     enabled,
   });
 

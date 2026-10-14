@@ -114,7 +114,14 @@ export function Library() {
           const body = (
             <>
               <span className="grow">
-                <span className="row-title">{t.name}</span>
+                <span className="row-title">
+                  {t.name}
+                  {t.starred && (
+                    <span className="star-mark">
+                      <Icon name="star" size={15} filled label="Starred" />
+                    </span>
+                  )}
+                </span>
                 <span className="row-meta">{techniqueLine(t.type, t.role, t.edges[0])}</span>
               </span>
               <RankBar status={t.status} />

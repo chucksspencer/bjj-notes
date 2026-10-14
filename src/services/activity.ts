@@ -11,6 +11,8 @@ export interface TechniqueSnapshot {
   summary: string | null;
   key_details: string[];
   mistakes: string[];
+  /** Absent in undo entries written before techniques could be starred. */
+  starred_at?: string | null;
 }
 
 export interface FocusSnapshot {
@@ -172,8 +174,10 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       const b = op.before;
       await q.query(
         `update techniques set name = $2, aliases = $3, type = $4, role = $5, gi = $6, status = $7,
-           summary = $8, key_details = $9, mistakes = $10, updated_at = now() where id = $1`,
-        [b.id, b.name, b.aliases, b.type, b.role, b.gi, b.status, b.summary, b.key_details, b.mistakes],
+           summary = $8, key_details = $9, mistakes = $10, updated_at = now(),
+           starred_at = case when $12 then $11::timestamptz else starred_at end
+         where id = $1`,
+        [b.id, b.name, b.aliases, b.type, b.role, b.gi, b.status, b.summary, b.key_details, b.mistakes, b.starred_at ?? null, b.starred_at !== undefined],
       );
       if (op.addedEdgeIds.length) await q.query('delete from technique_edges where id = any($1::int[])', [op.addedEdgeIds]);
       for (const l of op.addedLinks) {
@@ -247,9 +251,9 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
     case 'restore_deleted_technique': {
       const r = op.row;
       await q.query(
-        `insert into techniques (id, name, aliases, type, role, gi, status, summary, key_details, mistakes, created_at, updated_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-        [r.id, r.name, r.aliases, r.type, r.role, r.gi, r.status, r.summary, r.key_details, r.mistakes, r.created_at, r.updated_at],
+        `insert into techniques (id, name, aliases, type, role, gi, status, summary, key_details, mistakes, created_at, updated_at, starred_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [r.id, r.name, r.aliases, r.type, r.role, r.gi, r.status, r.summary, r.key_details, r.mistakes, r.created_at, r.updated_at, r.starred_at ?? null],
       );
       for (const e of op.edges) await insertEdge(q, e);
       for (const l of op.links) await insertLink(q, l);

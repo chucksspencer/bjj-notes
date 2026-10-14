@@ -17,6 +17,7 @@ import { useCapture } from '../components/Capture';
 import { Icon } from '../components/Icon';
 import { NoteItem } from '../components/NoteItem';
 import { Sheet } from '../components/Sheet';
+import { TechniqueStar } from '../components/Star';
 import { TechniquePicker } from '../components/TechniquePicker';
 import { useToast } from '../components/Toast';
 import {
@@ -87,7 +88,10 @@ function TechniqueBody({ v, today, onEdit }: { v: TechniqueView; today: string; 
 
   return (
     <>
-      <h1 className="display tech-name">{v.name}</h1>
+      <div className="tech-head">
+        <h1 className="display tech-name">{v.name}</h1>
+        <TechniqueStar technique={v} size={26} />
+      </div>
       <p className="tech-meta">
         {techniqueMeta(v.type, v.role)}
         {v.gi !== 'both' ? `, ${v.gi === 'nogi' ? 'no-gi only' : 'gi only'}` : ''}
@@ -105,7 +109,7 @@ function TechniqueBody({ v, today, onEdit }: { v: TechniqueView; today: string; 
 
       {activeFocus && (
         <p className="small" style={{ marginTop: 14 }}>
-          <Link to="/">Number {activeFocus.rank} on your focus list</Link>
+          <Link to="/focus">Number {activeFocus.rank} on your focus list</Link>
         </p>
       )}
 

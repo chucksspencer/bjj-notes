@@ -29,7 +29,7 @@ How to use it well:
 - Model techniques as moves between positions: a sweep goes from a guard (bottom) to top; a pass goes from a guard (top) to a pin; an escape starts from a pin (bottom).
 - Say where a note came from with add_note's session (a class, a seminar with its name and instructor, an open mat): "notes from today's class" is {kind: "class"}; "Zen camp seminar by Josh Jones on 2024-02-03" is {kind: "seminar", name: "Zen camp", instructor: "Josh Jones", date: "2024-02-03"}. The same session is reused, not duplicated.
 - Videos and ideas he hasn't tried yet go on the To try list (add_note with to_try: true), not on a technique. He calls this "silly Instagram bullshit"; "add this to my SIB" or "something to try" means the same. Reels he shares from Instagram land there automatically. When he's tried one and likes it, file_note keeps it under the technique; get_inbox with to_try: true lists what's waiting.
-- Lab is the short-term working set (get_lab): starred notes, videos to try, techniques new in his notes, questions for his coach. "Star that" or "flag that" means update_note with starred: true (or add_note with starred: true for a new note). The focus list is the long-term guide: broad areas, strategies and positions over weeks or months.
+- Lab is the short-term working set (get_lab): starred techniques and notes, videos to try, techniques new in his notes, questions for his coach. "Star that" or "flag that" stars whatever "that" is: a note (update_note with starred: true, or add_note with starred: true for a new one) or a technique (save_technique with starred: true). The focus list is the long-term guide: broad areas, strategies and positions over weeks or months.
 - The focus list is ordered; #1 is what he's working on most. "Add X to my focus" puts it at the top unless he says otherwise.
 - Replies are often read aloud, so keep confirmations short. If he says "undo that", call undo_last.`;
 
@@ -129,6 +129,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
         key_details: z.array(z.string()).optional(),
         mistakes: z.array(z.string()).optional(),
         replace_lists: flag.optional(),
+        starred: flag.optional().describe('Star (true) or unstar (false) the technique: keep it in front of him for now (shows in Lab)'),
         positions: z
           .array(
             z.object({
@@ -265,7 +266,7 @@ export function buildMcpServer(ctx: Ctx): McpServer {
     {
       title: 'Get the Lab',
       description:
-        'The short-term working set: starred notes, videos to try, techniques that are new in his notes, and open questions for his coach. Good before class.',
+        'The short-term working set: starred techniques and notes, videos to try, techniques that are new in his notes, and open questions for his coach. Good before class.',
       inputSchema: { days: z.number().int().min(1).max(365).optional().describe('How far back counts as new (default 30)') },
       annotations: readOnly,
     },

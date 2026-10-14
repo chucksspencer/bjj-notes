@@ -1,8 +1,8 @@
 import { describeMiss, resolvePosition } from '../resolve.js';
 import { noteOrigin } from '../shared/sessions.js';
 import { today, type Ctx } from './context.js';
-import type { Status, TechniqueType } from '../shared/api.js';
-import { noteList, positionView, techniqueList } from './views.js';
+import type { Status, TechniqueListItem, TechniqueType } from '../shared/api.js';
+import { LAB_DAYS, labView, noteList, positionView, techniqueList } from './views.js';
 import { daysAgo, isoDate, type Role } from './vocab.js';
 
 /** What you can do from a position (optionally as top or bottom), what leads into it, and the gaps. */
@@ -55,7 +55,9 @@ export async function search(ctx: Ctx, input: SearchInput): Promise<string> {
   if (techniques.length) {
     lines.push('Techniques:');
     for (const t of techniques) {
-      lines.push(`- ${t.name} (${[t.type, t.role].filter(Boolean).join(', ')}; ${t.status}; ${t.noteCount} note${t.noteCount === 1 ? '' : 's'})`);
+      lines.push(
+        `- ${t.name} (${[t.type, t.role].filter(Boolean).join(', ')}; ${t.status}; ${t.noteCount} note${t.noteCount === 1 ? '' : 's'}${t.starred ? '; starred' : ''})`,
+      );
     }
   }
   if (query) {
@@ -122,39 +124,42 @@ export async function review(ctx: Ctx, days = 7): Promise<string> {
   return lines.join('\n');
 }
 
-/** The date `days` before a YYYY-MM-DD date. */
-function minusDays(date: string, days: number): string {
-  return isoDate(new Date(Date.parse(`${date}T12:00:00Z`) - days * 86_400_000));
-}
-
 /**
- * Lab: the short-term working set, next to the long-term focus list. Starred notes, videos to try,
- * techniques new in the notes, and open questions for the coach.
+ * Lab: the short-term working set, next to the long-term focus list. Starred techniques and notes, videos
+ * to try, techniques new in the notes, and open questions for the coach. Kept short: it's often read aloud.
  */
-export async function getLab(ctx: Ctx, days = 30): Promise<string> {
-  const q = ctx.db;
-  const since = minusDays(today(ctx), days);
-  const [starred, toTry, fresh, questions] = await Promise.all([
-    noteList(q, { starred: true, limit: 25 }),
-    noteList(q, { toTry: true, limit: 10 }),
-    techniqueList(q, { sort: 'new', newSince: since, limit: 15 }),
-    noteList(q, { kind: 'question', toTry: false, limit: 10 }),
-  ]);
-  const toTryTotal = (await q.query<{ c: number }>('select count(*)::int as c from notes where to_try')).rows[0]!.c;
+export async function getLab(ctx: Ctx, days = LAB_DAYS): Promise<string> {
+  const lab = await labView(ctx, days);
   const about = (n: { techniques: { name: string }[] }) => (n.techniques.length ? ` [${n.techniques.map(t => t.name).join(', ')}]` : '');
-  const section = (title: string, lines: string[], empty: string) => [title, ...(lines.length ? lines : [`- ${empty}`])];
+  const card = (t: TechniqueListItem) => `${t.name} (${[t.type, t.role].filter(Boolean).join(', ')}; ${t.status})`;
+  const section = (title: string, lines: string[], empty: string, cap = lines.length) => [
+    title,
+    ...(lines.length ? lines.slice(0, cap) : [`- ${empty}`]),
+    ...(lines.length > cap ? [`- and ${lines.length - cap} more`] : []),
+  ];
+  const { techniques, notes } = lab.starred;
   return [
-    ...section(`Starred (${starred.length}):`, starred.map(n => `- #${n.id} ${n.observedOn}${about(n)}: ${n.body}`), 'nothing starred'),
     ...section(
-      `To try (${toTryTotal}${toTryTotal > toTry.length ? `, newest ${toTry.length} shown` : ''}):`,
-      toTry.map(n => `- #${n.id} ${n.observedOn}${about(n)}: ${n.body}${n.source?.url ? ` <${n.source.url}>` : ''}`),
+      `Starred (${techniques.length + notes.length}):`,
+      [...techniques.map(t => `- ${card(t)}`), ...notes.map(n => `- #${n.id} ${n.observedOn}${about(n)}: ${n.body}`)],
+      'nothing starred',
+    ),
+    ...section(
+      `To try (${lab.toTry.total}${lab.toTry.total > lab.toTry.notes.length ? `, newest ${lab.toTry.notes.length} shown` : ''}):`,
+      lab.toTry.notes.map(n => `- #${n.id} ${n.observedOn}${about(n)}: ${n.body}${n.source?.url ? ` <${n.source.url}>` : ''}`),
       'nothing waiting to be tried',
     ),
     ...section(
-      `New in your notes (last ${days} days):`,
-      fresh.map(t => `- ${t.name} (${[t.type, t.role].filter(Boolean).join(', ')}; ${t.status}; first noted ${t.firstNoteOn})`),
+      `New in your notes (last ${lab.days} days):`,
+      lab.fresh.map(t => `- ${card(t)}, first noted ${t.firstNoteOn}${t.starred ? ', starred' : ''}`),
       'no new techniques',
+      15,
     ),
-    ...section(`Ask coach (${questions.length}):`, questions.map(n => `- #${n.id} ${n.observedOn}${about(n)}: ${n.body}`), 'no open questions'),
+    ...section(
+      `Ask coach (${lab.questions.length}):`,
+      lab.questions.map(n => `- #${n.id} ${n.observedOn}${about(n)}: ${n.body}`),
+      'no open questions',
+      15,
+    ),
   ].join('\n');
 }

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type {
   FocusView,
+  LabView,
   NoteCreateResult,
   NoteView,
   PositionListItem,
@@ -361,6 +362,45 @@ describe('JSON API', () => {
     expect(await newSince('2026-09-01')).toContainEqual(['Gogoplata', '2026-10-02']);
     expect((await newSince('2026-10-03')).map(([n]) => n)).not.toContain('Gogoplata');
     await api('POST', '/api/v1/techniques/delete', { ids: [fresh.id] });
+  });
+
+  it('stars techniques and serves the whole Lab in one call', async () => {
+    const make = (name: string) => api<TechniqueView>('POST', '/api/v1/techniques', { name, type: 'pass', role: 'top' });
+    const a = (await make('Leg drag')).body;
+    const b = (await make('Long step')).body;
+    expect(a.starred).toBe(false);
+
+    const starredA = (await api<TechniqueView>('PATCH', `/api/v1/techniques/${a.id}`, { starred: true })).body;
+    expect(starredA).toMatchObject({ starred: true, name: 'Leg drag' });
+    expect(starredA.updatedAt).toBe(a.updatedAt); // starring isn't an edit
+    await api('PATCH', `/api/v1/techniques/${b.id}`, { starred: true });
+    // Most recently starred first; the list marks them too.
+    const starred = (await api<TechniqueListItem[]>('GET', '/api/v1/techniques?starred=1')).body;
+    expect(starred.map(t => t.name)).toEqual(['Long step', 'Leg drag']);
+    expect((await api<TechniqueListItem[]>('GET', '/api/v1/techniques?q=leg+drag')).body[0]).toMatchObject({ name: 'Leg drag', starred: true });
+
+    const note = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Drag the leg across, then hip in.', techniqueIds: [a.id], starred: true })).body.note;
+    const question = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Leg drag or knee cut first?', kind: 'question', techniqueIds: [a.id] })).body.note;
+    const lab = (await api<LabView>('GET', '/api/v1/lab')).body;
+    expect(lab.days).toBe(30);
+    expect(lab.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(lab.starred.techniques.map(t => t.name).slice(0, 2)).toEqual(['Long step', 'Leg drag']);
+    expect(lab.starred.notes[0]!.id).toBe(note.id);
+    expect(lab.fresh.find(t => t.id === a.id)).toMatchObject({ starred: true, firstNoteOn: lab.today });
+    expect(lab.questions.map(n => n.id)).toContain(question.id);
+    expect(lab.toTry.total).toBeGreaterThanOrEqual(lab.toTry.notes.length);
+
+    // Unstar, and undo it.
+    expect((await api<TechniqueView>('PATCH', `/api/v1/techniques/${b.id}`, { starred: false })).body.starred).toBe(false);
+    expect((await api('POST', '/api/v1/undo')).body.message).toBe('Undid: unstarring Long step');
+    expect((await api<TechniqueView>('GET', `/api/v1/techniques/${b.id}`)).body.starred).toBe(true);
+    // Deleting a starred card and undoing it brings the star back too.
+    await api('DELETE', `/api/v1/techniques/${a.id}`);
+    await api('POST', '/api/v1/undo');
+    expect((await api<TechniqueView>('GET', `/api/v1/techniques/${a.id}`)).body.starred).toBe(true);
+
+    await api('POST', '/api/v1/notes/delete', { ids: [note.id, question.id] });
+    await api('POST', '/api/v1/techniques/delete', { ids: [a.id, b.id] });
   });
 
   it('deletes a selection of techniques or notes as one undoable change', async () => {

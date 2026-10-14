@@ -172,7 +172,7 @@ describe.runIf(run)('web app (end to end)', () => {
     // To try lives in the Lab, with the whole list a tap away.
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Focus' }).click();
     await page.getByRole('region', { name: 'To try' }).getByText('Lapel feed into the back take.').waitFor();
-    await page.getByRole('link', { name: 'Open list' }).click();
+    await page.getByRole('link', { name: 'See all' }).click();
     await page.getByRole('heading', { name: 'To try' }).waitFor();
     await page.getByText('Lapel feed into the back take.').waitFor();
     const open = page.getByRole('link', { name: 'Open in Instagram' });
@@ -208,15 +208,20 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByText('Flying armbar from standing.').waitFor();
   });
 
-  it('stars notes into the Lab, lists new techniques, and answers a question for coach', async () => {
+  it('stars techniques and notes into the Lab, triages new techniques, and answers a question for coach', async () => {
     const main = page.getByRole('navigation', { name: 'Main' });
     await main.getByRole('link', { name: 'Library' }).click();
     await page.getByLabel('Search techniques').fill('ghost');
     await page.getByRole('link', { name: /Ghost escape/ }).first().click();
+
+    // Star the card itself, and one of its notes.
+    const cardStar = page.getByRole('button', { name: 'Star Ghost escape' });
+    await cardStar.click();
+    await page.getByText('Starred. It’s in the Lab').waitFor();
+    await expect.poll(() => cardStar.getAttribute('aria-pressed')).toBe('true');
     const note = page.getByRole('article').filter({ hasText: 'Turn to the knees before the hips.' });
     await note.getByRole('button', { name: 'Star note' }).click();
-    await page.getByText('Starred. It’s in the Lab').waitFor();
-    await expect.poll(() => note.getByRole('button', { name: 'Unstar note' }).getAttribute('aria-pressed')).toBe('true');
+    await expect.poll(() => note.getByRole('button', { name: 'Star note' }).getAttribute('aria-pressed')).toBe('true');
 
     // A question, starred as it's written.
     await page.getByRole('button', { name: 'New note' }).click();
@@ -227,12 +232,22 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('button', { name: 'Save note' }).click();
     await page.getByText('Saved to your inbox').waitFor();
 
+    // The Library marks starred cards.
+    await main.getByRole('link', { name: 'Library' }).click();
+    await page.getByRole('link', { name: /Ghost escape/ }).first().getByRole('img', { name: 'Starred' }).waitFor();
+
     await main.getByRole('link', { name: 'Focus' }).click();
     await page.getByRole('heading', { name: 'Lab' }).waitFor();
     const starred = page.getByRole('region', { name: 'Starred' });
+    await starred.locator('.lab-tech').filter({ hasText: 'Ghost escape' }).waitFor();
     await starred.getByText('Turn to the knees before the hips.').waitFor();
     await starred.getByText('How do I stop the underhook before the ghost escape?').waitFor();
-    await page.getByRole('region', { name: 'New techniques' }).getByRole('link', { name: /Knee cut pass/ }).waitFor();
+
+    // New techniques can be starred where they're listed.
+    const fresh = page.getByRole('region', { name: 'New techniques' });
+    await fresh.getByRole('link', { name: /Knee cut pass/ }).waitFor();
+    await fresh.getByRole('button', { name: 'Star Knee cut pass' }).click();
+    await starred.locator('.lab-tech').filter({ hasText: 'Knee cut pass' }).waitFor();
 
     const coach = page.getByRole('region', { name: 'Ask coach' });
     await coach.getByText('How do I stop the underhook before the ghost escape?').waitFor();
@@ -243,11 +258,12 @@ describe.runIf(run)('web app (end to end)', () => {
     await coach.getByText('No open questions.', { exact: false }).waitFor();
     await starred.getByText(/Answer: Frame on the hip first, then turn\./).waitFor();
 
-    // Unstar both; the Lab empties out.
-    for (let i = 0; i < 2; i++) {
-      await starred.getByRole('button', { name: 'Unstar note' }).first().click();
-      await page.getByText('Unstarred').waitFor();
-      await expect.poll(() => starred.getByRole('article').count()).toBe(1 - i);
+    // Unstar everything from the Lab; it empties out.
+    const on = starred.getByRole('button', { pressed: true });
+    expect(await on.count()).toBe(4);
+    for (let left = 3; left >= 0; left--) {
+      await on.first().click();
+      await expect.poll(() => on.count()).toBe(left);
     }
     await starred.getByText('Nothing starred.', { exact: false }).waitFor();
   });

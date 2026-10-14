@@ -68,6 +68,11 @@ export function isoDate(d: Date | string): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** The date `days` before a YYYY-MM-DD date. */
+export function minusDays(date: string, days: number): string {
+  return isoDate(new Date(Date.parse(`${date}T12:00:00Z`) - days * 86_400_000));
+}
+
 export function daysAgo(date: string | null, today = new Date()): string {
   if (!date) return 'no notes yet';
   const ms = Date.parse(isoDate(today)) - Date.parse(date);

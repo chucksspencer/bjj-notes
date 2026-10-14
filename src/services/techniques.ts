@@ -44,7 +44,24 @@ export interface SaveTechniqueInput {
   replace_aliases?: boolean;
   positions?: EdgeInput[];
   links?: LinkInput[];
+  /** Star (true) or unstar (false): keep it in front of you in the Lab. */
+  starred?: boolean;
 }
+
+/** Inputs that edit the card itself, as opposed to only starring it. */
+const EDIT_KEYS = [
+  'rename_to',
+  'type',
+  'role',
+  'gi',
+  'status',
+  'summary',
+  'aliases',
+  'key_details',
+  'mistakes',
+  'positions',
+  'links',
+] as const satisfies readonly (keyof SaveTechniqueInput)[];
 
 export interface SaveResult {
   /** The saved technique, or null when nothing was saved. */
@@ -52,7 +69,7 @@ export interface SaveResult {
   message: string;
 }
 
-const SNAPSHOT_COLS = 'id, name, aliases, type, role, gi, status, summary, key_details, mistakes';
+const SNAPSHOT_COLS = 'id, name, aliases, type, role, gi, status, summary, key_details, mistakes, starred_at::text as starred_at';
 
 async function snapshot(q: Queryable, id: number): Promise<TechniqueSnapshot> {
   const { rows } = await q.query<TechniqueSnapshot>(`select ${SNAPSHOT_COLS} from techniques where id = $1`, [id]);
@@ -129,11 +146,22 @@ export async function saveTechniqueResult(ctx: Ctx, input: SaveTechniqueInput): 
       next.aliases = mergeList(next.aliases, [cur.name], false); // keep the old name findable
     }
     next.aliases = next.aliases.filter(a => a.toLowerCase() !== next.name.toLowerCase());
-    await q.query(
-      `update techniques set name = $2, aliases = $3, type = $4, role = $5, gi = $6, status = $7,
-         summary = $8, key_details = $9, mistakes = $10, updated_at = now() where id = $1`,
-      [id, next.name, next.aliases, next.type, next.role, next.gi, next.status, next.summary, next.key_details, next.mistakes],
-    );
+    // Starring alone isn't an edit: it leaves the card (and when it was last updated) alone.
+    const edits = !before || EDIT_KEYS.some(k => input[k] !== undefined);
+    if (edits) {
+      await q.query(
+        `update techniques set name = $2, aliases = $3, type = $4, role = $5, gi = $6, status = $7,
+           summary = $8, key_details = $9, mistakes = $10, updated_at = now() where id = $1`,
+        [id, next.name, next.aliases, next.type, next.role, next.gi, next.status, next.summary, next.key_details, next.mistakes],
+      );
+    }
+    const wasStarred = cur.starred_at != null;
+    const starChange = input.starred === undefined || input.starred === wasStarred ? null : input.starred ? 'starred' : 'unstarred';
+    if (starChange) await q.query('update techniques set starred_at = case when $2 then now() end where id = $1', [id, input.starred]);
+    if (before && !edits && !starChange) {
+      const already = input.starred === undefined ? `Nothing to change on ${next.name}` : `${next.name} is already ${wasStarred ? 'starred' : 'not starred'}`;
+      return { id, message: `${already}.` };
+    }
 
     const addedEdgeIds: number[] = [];
     for (const e of input.positions ?? []) {
@@ -179,17 +207,22 @@ export async function saveTechniqueResult(ctx: Ctx, input: SaveTechniqueInput): 
       if (rows[0]) addedLinks.push({ from: id, to: targetId, kind: l.kind });
     }
 
-    const verb = before ? 'Updated' : 'Created';
-    const summary = `${verb} ${next.name}`;
+    const starOnly = before && !edits;
+    const summary = starOnly
+      ? `${starChange === 'starred' ? 'starring' : 'unstarring'} ${next.name}`
+      : `${before ? 'Updated' : 'Created'} ${next.name}`;
     await logActivity(
       q,
-      before ? 'update_technique' : 'create_technique',
+      starOnly ? 'star_technique' : before ? 'update_technique' : 'create_technique',
       summary,
       before
         ? { kind: 'restore_technique', before, addedEdgeIds, addedLinks, createdTechniqueIds }
         : { kind: 'delete_techniques', techniqueIds: [id, ...createdTechniqueIds] },
     );
-    return { id, message: notes.length ? `${summary} (${notes.join('; ')}).` : `${summary}.` };
+    const said = starOnly
+      ? `${starChange === 'starred' ? 'Starred' : 'Unstarred'} ${next.name}`
+      : `${summary}${starChange ? `, ${starChange}` : ''}`;
+    return { id, message: notes.length ? `${said} (${notes.join('; ')}).` : `${said}.` };
   });
 }
 
@@ -200,7 +233,7 @@ export async function getTechnique(ctx: Ctx, name: string, noteLimit = 5): Promi
 
   const lines: string[] = [];
   const meta = [t.type, t.role, t.gi === 'both' ? null : t.gi].filter(Boolean).join(', ');
-  lines.push(`${t.name} (${meta}). Status: ${t.status}.`);
+  lines.push(`${t.name} (${meta}). Status: ${t.status}.${t.starred ? ' Starred.' : ''}`);
   if (t.aliases.length) lines.push(`Also called: ${t.aliases.join(', ')}.`);
   for (const e of t.edges) {
     const from = e.from ? `${e.from.name}${e.fromRole ? ` (${e.fromRole})` : ''}` : null;

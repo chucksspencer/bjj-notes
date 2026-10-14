@@ -3,6 +3,7 @@ import type {
   EdgeView,
   FocusItemView,
   FocusView,
+  LabView,
   LinkView,
   NoteView,
   PositionCategory,
@@ -18,7 +19,7 @@ import type {
 } from '../shared/api.js';
 import type { Queryable } from '../db.js';
 import { today, type Ctx } from './context.js';
-import { EXPECTED_BY_CATEGORY } from './vocab.js';
+import { EXPECTED_BY_CATEGORY, minusDays } from './vocab.js';
 
 const json = <T>(v: unknown): T => (typeof v === 'string' ? (JSON.parse(v) as T) : (v as T));
 
@@ -209,7 +210,12 @@ export async function techniqueView(q: Queryable, id: number, noteLimit = 20): P
       key_details: string[];
       mistakes: string[];
       updated_at: Date | string;
-    }>('select id, name, aliases, type, role, gi, status, summary, key_details, mistakes, updated_at from techniques where id = $1', [id])
+      starred_at: string | null;
+    }>(
+      `select id, name, aliases, type, role, gi, status, summary, key_details, mistakes, updated_at, starred_at::text as starred_at
+       from techniques where id = $1`,
+      [id],
+    )
   ).rows[0];
   if (!t) return null;
 
@@ -259,6 +265,8 @@ export async function techniqueView(q: Queryable, id: number, noteLimit = 20): P
     notes,
     noteCount: counts.c,
     lastNoteOn: counts.last,
+    starred: t.starred_at !== null,
+    starredAt: t.starred_at,
   };
 }
 
@@ -274,6 +282,8 @@ export interface TechniqueQuery {
   limit?: number;
   /** Only techniques that first showed up in your notes on or after this date (YYYY-MM-DD). */
   newSince?: string;
+  /** Only starred (true) or unstarred (false) techniques; starred ones come most recently starred first. */
+  starred?: boolean;
 }
 
 /** When a technique first showed up in your notes (videos still on the To try list don't count yet). */
@@ -284,7 +294,9 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
   const query = f.q?.trim() || null;
   const order = query
     ? 'score desc, t.name'
-    : f.sort === 'recent'
+    : f.starred && !f.sort
+      ? 't.starred_at desc, t.name'
+      : f.sort === 'recent'
       ? 'last_note desc nulls last, t.updated_at desc, t.name'
       : f.sort === 'new'
         ? 'first_note desc nulls last, t.name'
@@ -300,9 +312,10 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
     notes: number;
     last_note: string | null;
     first_note: string | null;
+    starred: boolean;
     edges: unknown;
   }>(
-    `select t.id, t.name, t.type, t.role, t.status, t.aliases,
+    `select t.id, t.name, t.type, t.role, t.status, t.aliases, t.starred_at is not null as starred,
             coalesce((select max(bjj_name_score(c, $1)) from unnest(array_prepend(t.name, t.aliases)) c), 0) as score,
             (select count(*)::int from note_techniques nt where nt.technique_id = t.id) as notes,
             (select max(n.observed_on)::text from notes n join note_techniques nt on nt.note_id = n.id
@@ -320,6 +333,7 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
              select 1 from technique_edges e where e.technique_id = t.id and e.from_role = $3))
        and ($4::text is null or t.status = $4)
        and ($7::date is null or (${FIRST_NOTE}) >= $7)
+       and ($8::boolean is null or (t.starred_at is not null) = $8)
        and ($5::int is null or exists (
              select 1 from technique_edges e where e.technique_id = t.id
                and (e.from_position_id = $5 or e.to_position_id = $5)))
@@ -338,7 +352,16 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
                 and ${originMatches(originText('ss', 'so'), '$1')}))
      order by ${order}
      limit $6`,
-    [query, f.type ?? null, f.role ?? null, f.status ?? null, f.positionId ?? null, Math.min(f.limit ?? 200, 500), f.newSince ?? null],
+    [
+      query,
+      f.type ?? null,
+      f.role ?? null,
+      f.status ?? null,
+      f.positionId ?? null,
+      Math.min(f.limit ?? 200, 500),
+      f.newSince ?? null,
+      f.starred ?? null,
+    ],
   );
   return rows.map(r => ({
     id: r.id,
@@ -347,6 +370,7 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
     role: r.role,
     status: r.status,
     aliases: r.aliases,
+    starred: r.starred,
     noteCount: r.notes,
     lastNoteOn: r.last_note,
     firstNoteOn: r.first_note,
@@ -392,6 +416,36 @@ export async function focusView(ctx: Ctx, q: Queryable = ctx.db): Promise<FocusV
     active: items.filter(i => i.status === 'active'),
     paused: items.filter(i => i.status === 'paused'),
     backlog: items.filter(i => i.status === 'backlog'),
+  };
+}
+
+// ---------- lab ----------
+
+/** How far back "new in your notes" looks, unless asked otherwise. */
+export const LAB_DAYS = 30;
+
+/**
+ * What's in the Lab, for the web app and Claude alike: starred techniques and notes, the newest videos
+ * to try, techniques first noted in the last `days` days, and questions waiting for the coach.
+ */
+export async function labView(ctx: Ctx, days = LAB_DAYS, tryLimit = 10): Promise<LabView> {
+  const q = ctx.db;
+  const now = today(ctx);
+  const [techniques, notes, toTry, toTryTotal, fresh, questions] = await Promise.all([
+    techniqueList(q, { starred: true, limit: 100 }),
+    noteList(q, { starred: true, limit: 100 }),
+    noteList(q, { toTry: true, limit: tryLimit }),
+    q.query<{ c: number }>('select count(*)::int as c from notes where to_try'),
+    techniqueList(q, { sort: 'new', newSince: minusDays(now, days), limit: 25 }),
+    noteList(q, { kind: 'question', toTry: false, limit: 50 }),
+  ]);
+  return {
+    today: now,
+    days,
+    starred: { techniques, notes },
+    toTry: { total: toTryTotal.rows[0]!.c, notes: toTry },
+    fresh,
+    questions,
   };
 }
 

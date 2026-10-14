@@ -5,7 +5,7 @@ import { isPlaceholder } from '../../../src/shared/links';
 import { noteOrigin } from '../../../src/shared/sessions';
 import { datePhrase, friendlyDate, NOTE_KIND_LABEL } from '../lib/format';
 import { useCapture } from './Capture';
-import { StarButton } from './Star';
+import { NoteStar } from './Star';
 import { SourceLink } from './Video';
 
 /** One note: when, what kind, where it came from, the text, its source, and the techniques it's filed under. */
@@ -35,7 +35,7 @@ export function NoteItem({
           {origin && <div className="note-origin">{origin.charAt(0).toUpperCase() + origin.slice(1)}</div>}
         </div>
         <div className="note-tools">
-          <StarButton note={note} />
+          <NoteStar note={note} />
           <button type="button" className="btn ghost small" onClick={() => capture.edit(note)}>
             Edit
           </button>

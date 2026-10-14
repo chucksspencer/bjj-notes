@@ -2,6 +2,7 @@ import express, { type NextFunction, type Request, type RequestHandler, type Res
 import { z } from 'zod';
 import type {
   FocusView,
+  LabView,
   MessageResult,
   NoteCreateResult,
   NoteView,
@@ -28,7 +29,7 @@ import {
   TECHNIQUE_TYPES,
 } from '../services/vocab.js';
 import { sessionList } from '../services/sessions.js';
-import { focusView, noteList, noteView, positionList, positionView, techniqueList, techniqueView } from '../services/views.js';
+import { focusView, labView, noteList, noteView, positionList, positionView, techniqueList, techniqueView } from '../services/views.js';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const id = z.coerce.number().int().positive();
@@ -98,6 +99,7 @@ const techniquePatch = z.object({
   aliases: strList.optional(),
   keyDetails: strList.optional(),
   mistakes: strList.optional(),
+  starred: z.boolean().optional(),
 });
 const edgeCreate = z.object({
   fromPositionId: z.number().int().nullable().optional(),
@@ -177,6 +179,15 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
     }),
   );
 
+  // The Lab: the short-term working set
+  r.get(
+    '/api/v1/lab',
+    h(async (req): Promise<LabView> => {
+      const qs = z.object({ days: z.coerce.number().int().min(1).max(365).optional() }).parse(req.query);
+      return labView(ctx, qs.days);
+    }),
+  );
+
   // Techniques
   r.get(
     '/api/v1/techniques',
@@ -190,10 +201,11 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
           position: id.optional(),
           sort: z.enum(['name', 'recent', 'new']).optional(),
           newSince: date.optional(),
+          starred: z.enum(['1', '0']).optional(),
           limit: z.coerce.number().int().min(1).max(500).optional(),
         })
         .parse(req.query);
-      return techniqueList(ctx.db, { ...qs, positionId: qs.position });
+      return techniqueList(ctx.db, { ...qs, positionId: qs.position, starred: qs.starred === undefined ? undefined : qs.starred === '1' });
     }),
   );
   r.post(
@@ -230,6 +242,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
         key_details: b.keyDetails,
         mistakes: b.mistakes,
         replace_lists: b.keyDetails !== undefined || b.mistakes !== undefined,
+        starred: b.starred,
       });
       if (!saved.id) throw new NotFound(saved.message);
       return loadTechnique(techniqueId);
