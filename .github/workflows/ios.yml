@@ -26,7 +26,7 @@ jobs:
       run:
         working-directory: ios
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Use the newest Xcode
         run: |
@@ -54,7 +54,31 @@ jobs:
           echo "Simulator: $SIM"
           set -o pipefail
           xcodebuild test -project BJJNotes.xcodeproj -scheme BJJNotes -destination "id=$SIM" CODE_SIGNING_ALLOWED=NO \
+            -resultBundlePath "$RUNNER_TEMP/tests.xcresult" \
             | (command -v xcbeautify >/dev/null && xcbeautify --renderer github-actions || cat)
+
+      - name: Report test results and compiler warnings
+        if: always()
+        run: |
+          RESULT="$RUNNER_TEMP/tests.xcresult"
+          [ -d "$RESULT" ] || exit 0
+          xcrun xcresulttool get test-results summary --path "$RESULT" > "$RUNNER_TEMP/summary.json" || true
+          xcrun xcresulttool get build-results --path "$RESULT" > "$RUNNER_TEMP/build.json" || true
+          python3 - "$RUNNER_TEMP/summary.json" "$RUNNER_TEMP/build.json" "$(xcodebuild -version | head -1)" <<'PY'
+          import json, sys
+          def load(p):
+              try:
+                  return json.load(open(p))
+              except Exception:
+                  return {}
+          t, b, xcode = load(sys.argv[1]), load(sys.argv[2]), sys.argv[3]
+          device = ", ".join(f"{d.get('deviceName', '?')} iOS {d.get('osVersion', '?')}" for d in t.get("devicesAndConfigurations", [{}])[0:1] for d in [d.get("device", {})])
+          print(f"::notice title=Unit tests::{t.get('passedTests', '?')} passed, {t.get('failedTests', '?')} failed, {t.get('skippedTests', 0)} skipped on {device or 'simulator'} ({xcode})")
+          warnings = b.get("warnings", [])
+          for w in warnings[:10]:
+              print(f"::warning title=Compiler warning::{w.get('message', w)}")
+          print(f"{len(warnings)} compiler warnings")
+          PY
 
       - name: Check for Apple credentials
         id: apple
