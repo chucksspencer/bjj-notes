@@ -117,6 +117,117 @@ function speechFor(linked: string[], created: string[], inbox: boolean): string 
   return parts.join(' ');
 }
 
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const CLIENT_ID = /^[\w-]{8,64}$/;
+
+/**
+ * Saves a dictated or shared note: tidied and linked to techniques by the parser when there is one.
+ * Optional hints from the caller win over the parser: `kind` ("question" for Ask coach), `starred`,
+ * `date` (the day it was captured, for notes that waited offline), and `clientId` (a retry with the
+ * same id returns the first save instead of saving twice).
+ */
+export async function captureNote(
+  ctx: Ctx,
+  structurer: Structurer | null,
+  body: Record<string, unknown> | undefined,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const b = body ?? {};
+  let text = typeof b.text === 'string' ? b.text.trim() : '';
+  let url: string | undefined;
+  // A share sheet may hand over a bare link or text with the link inside (a caption and a URL);
+  // a dictated note may contain one too. Either way the link becomes the note's source.
+  for (const candidate of [b.url, text]) {
+    if (url || typeof candidate !== 'string') continue;
+    const found = splitLink(candidate);
+    if (!found.url) continue;
+    url = found.url;
+    if (candidate === text) text = found.rest;
+  }
+  if (!text && !url) {
+    return { status: 400, body: { error: 'text is required', speech: 'Nothing to save. Say a takeaway or share a link.' } };
+  }
+  const kindHint = NOTE_KINDS.find(k => k === b.kind);
+  const date = typeof b.date === 'string' && DATE.test(b.date) ? b.date : undefined;
+  const clientId = typeof b.clientId === 'string' && CLIENT_ID.test(b.clientId) ? b.clientId : undefined;
+  const starred = b.starred === true;
+  // Anything shared with a link is something to try out before it earns a place in the library.
+  const toTry = !!url && kindHint !== 'question';
+  const hints = { date, client_id: clientId, starred, ...(kindHint ? { kind: kindHint } : {}) };
+  let input: AddNoteInput = {
+    text: text || placeholderFor(url!),
+    raw_text: text,
+    via: 'capture',
+    source: url ? { url } : undefined,
+    to_try: toTry,
+    ...hints,
+  };
+  let parsed = false;
+  if (structurer && text) {
+    try {
+      const known = {
+        techniques: (await ctx.db.query<{ name: string }>('select name from techniques order by name')).rows.map(r => r.name),
+        positions: (await ctx.db.query<{ name: string }>('select name from positions order by name')).rows.map(r => r.name),
+      };
+      const s = await structurer(text, known);
+      input = {
+        text: s.note?.trim() || text,
+        raw_text: text,
+        techniques: s.techniques ?? [],
+        new_techniques: s.new_techniques ?? [],
+        kind: s.kind,
+        to_try: toTry,
+        session: s.session?.kind && SESSION_KINDS.includes(s.session.kind) ? cleanSession(s.session) : undefined,
+        source: url ? { ...s.source, url } : s.source?.url || s.source?.author || s.source?.title ? s.source : undefined,
+        via: 'capture',
+        ...hints,
+      };
+      parsed = true;
+    } catch (err) {
+      console.error('capture: parser failed, saving raw note', err);
+    }
+  }
+  if (!parsed && text) {
+    // No parser (or it failed): still link any technique named word-for-word in the text.
+    input.techniques = (await techniquesMentionedIn(ctx.db, text)).map(t => t.name);
+  }
+  try {
+    const result = await addNote(ctx, input);
+    const about = result.linked.length ? `, about ${result.linked.join(' and ')}` : '';
+    const speech = result.duplicate
+      ? 'Already saved.'
+      : input.kind === 'question'
+        ? `Added to Ask coach${about}.`
+        : result.toTry
+          ? `Added to your to-try list${about}.`
+          : speechFor(result.linked, result.created, result.inbox);
+    return {
+      status: 200,
+      body: {
+        note_id: result.noteId,
+        linked: result.linked,
+        inbox: result.inbox,
+        parsed,
+        to_try: result.toTry,
+        duplicate: result.duplicate === true,
+        speech: starred && !result.duplicate ? `${speech.replace(/\.$/, '')}, starred.` : speech,
+      },
+    };
+  } catch (err) {
+    console.error('capture: save failed', err);
+    return { status: 500, body: { error: 'save failed', speech: "Sorry, I couldn't save that note." } };
+  }
+}
+
+/** The same capture for the iPhone app, signed in like the web app (session cookie) or with the API token. */
+export function appCaptureRouter(ctx: Ctx, structurer: Structurer | null, requireAuth: express.RequestHandler): Router {
+  const router = express.Router();
+  router.post('/api/v1/capture', express.json({ limit: '64kb' }), requireAuth, async (req, res) => {
+    const out = await captureNote(ctx, structurer, req.body);
+    res.status(out.status).json(out.body);
+  });
+  return router;
+}
+
 /**
  * Plain HTTPS endpoints for Siri Shortcuts, authenticated with a static bearer token.
  *   POST /api/capture  { "text": "...", "url"?: "..." }  -> { speech, note_id }
@@ -141,68 +252,8 @@ export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer
   };
 
   router.post('/api/capture', express.json({ limit: '64kb' }), auth, async (req, res) => {
-    let text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-    let url: string | undefined;
-    // A share sheet may hand over a bare link or text with the link inside (a caption and a URL);
-    // a dictated note may contain one too. Either way the link becomes the note's source.
-    for (const candidate of [req.body?.url, text]) {
-      if (url || typeof candidate !== 'string') continue;
-      const found = splitLink(candidate);
-      if (!found.url) continue;
-      url = found.url;
-      if (candidate === text) text = found.rest;
-    }
-    if (!text && !url) {
-      res.status(400).json({ error: 'text is required', speech: 'Nothing to save. Say a takeaway or share a link.' });
-      return;
-    }
-    // Anything shared with a link is something to try out before it earns a place in the library.
-    const toTry = !!url;
-    let input: AddNoteInput = { text: text || placeholderFor(url!), raw_text: text, via: 'capture', source: url ? { url } : undefined, to_try: toTry };
-    let parsed = false;
-    if (structurer && text) {
-      try {
-        const known = {
-          techniques: (await ctx.db.query<{ name: string }>('select name from techniques order by name')).rows.map(r => r.name),
-          positions: (await ctx.db.query<{ name: string }>('select name from positions order by name')).rows.map(r => r.name),
-        };
-        const s = await structurer(text, known);
-        input = {
-          text: s.note?.trim() || text,
-          raw_text: text,
-          techniques: s.techniques ?? [],
-          new_techniques: s.new_techniques ?? [],
-          kind: s.kind,
-          to_try: toTry,
-          session: s.session?.kind && SESSION_KINDS.includes(s.session.kind) ? cleanSession(s.session) : undefined,
-          source: url ? { ...s.source, url } : s.source?.url || s.source?.author || s.source?.title ? s.source : undefined,
-          via: 'capture',
-        };
-        parsed = true;
-      } catch (err) {
-        console.error('capture: parser failed, saving raw note', err);
-      }
-    }
-    if (!parsed && text) {
-      // No parser (or it failed): still link any technique named word-for-word in the text.
-      input.techniques = (await techniquesMentionedIn(ctx.db, text)).map(t => t.name);
-    }
-    try {
-      const result = await addNote(ctx, input);
-      res.json({
-        note_id: result.noteId,
-        linked: result.linked,
-        inbox: result.inbox,
-        parsed,
-        to_try: result.toTry,
-        speech: result.toTry
-          ? `Added to your to-try list${result.linked.length ? `, about ${result.linked.join(' and ')}` : ''}.`
-          : speechFor(result.linked, result.created, result.inbox),
-      });
-    } catch (err) {
-      console.error('capture: save failed', err);
-      res.status(500).json({ error: 'save failed', speech: "Sorry, I couldn't save that note." });
-    }
+    const out = await captureNote(ctx, structurer, req.body);
+    res.status(out.status).json(out.body);
   });
 
   router.get('/api/focus', auth, async (_req, res) => {

@@ -172,9 +172,15 @@ npm run build && E2E=1 npx vitest run test/ui.e2e.test.ts   # the web app in Chr
 TEST_PG_ADMIN_URL=postgres://postgres@localhost:5432/postgres npm test   # against real Postgres
 ```
 
+## iPhone app
+
+`ios/` is a native app around the web app for Siri (App Intents: add a note, ask coach, focus, Lab)
+and offline capture. It's built and sent to TestFlight by GitHub Actions; see [ios/README.md](ios/README.md).
+
 ## Next
 
-1. Position graph view and focus timeline.
-2. Training sessions and a weekly review screen.
-3. Offline capture in the web app, and semantic search with pgvector embeddings.
-4. Native iOS app with App Intents and a Lock Screen focus widget.
+1. iPhone app, continued: techniques and notes Siri can search and answer from, starring by voice,
+   a share-sheet extension in place of the reel Shortcut, a Lock Screen focus widget.
+2. Semantic search on the server (pgvector embeddings), for Claude and the web app.
+3. Position graph view and focus timeline.
+4. Training sessions and a weekly review screen.

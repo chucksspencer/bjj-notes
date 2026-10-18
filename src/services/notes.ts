@@ -47,6 +47,8 @@ export interface AddNoteInput {
   starred?: boolean;
   raw_text?: string;
   via?: 'mcp' | 'capture' | 'web';
+  /** An id the client made up for this note: saving again with the same id returns the first save. */
+  client_id?: string;
 }
 
 export interface OriginInput extends SessionDetails {
@@ -87,6 +89,8 @@ export interface AddNoteResult {
   inbox: boolean;
   toTry: boolean;
   message: string;
+  /** This client_id was saved before; nothing new was written. */
+  duplicate?: boolean;
 }
 
 async function upsertSource(q: Queryable, input: SourceInput): Promise<number | null> {
@@ -158,6 +162,29 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
   return ctx.db.tx(async q => {
     const text = input.text.trim();
     if (!text) throw new UserError('Note text is empty.');
+    if (input.client_id) {
+      const seen = (
+        await q.query<{ id: number; inbox: boolean; to_try: boolean; names: string[] | null }>(
+          `select n.id, n.inbox, n.to_try,
+                  (select array_agg(t.name order by t.name) from note_techniques nt join techniques t on t.id = nt.technique_id
+                    where nt.note_id = n.id) as names
+           from notes n where n.client_id = $1`,
+          [input.client_id],
+        )
+      ).rows[0];
+      if (seen) {
+        return {
+          noteId: seen.id,
+          linked: seen.names ?? [],
+          created: [],
+          unresolved: [],
+          inbox: seen.inbox,
+          toTry: seen.to_try,
+          message: `Already saved as note #${seen.id}.`,
+          duplicate: true,
+        };
+      }
+    }
     const date = input.date ?? input.session?.date ?? today(ctx);
     const { ids, created, unresolved } = await linkTechniques(
       q,
@@ -177,8 +204,9 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
     const inbox = !toTry && (ids.size === 0 || unresolved.length > 0);
 
     const { rows } = await q.query<{ id: number }>(
-      `insert into notes (body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via, starred_at)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, case when $11 then now() end) returning id`,
+      `insert into notes (body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via, starred_at,
+                          client_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, case when $11 then now() end, $12) returning id`,
       [
         text,
         input.raw_text ?? null,
@@ -191,6 +219,7 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
         toTry,
         input.via ?? 'mcp',
         input.starred === true,
+        input.client_id ?? null,
       ],
     );
     const noteId = rows[0]!.id;

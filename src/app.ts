@@ -4,7 +4,7 @@ import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from '@modelconte
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { loginRouter } from './auth/login.js';
 import { OwnerOAuthProvider } from './auth/provider.js';
-import { captureRouter, type Structurer } from './capture.js';
+import { appCaptureRouter, captureRouter, type Structurer } from './capture.js';
 import type { Config } from './config.js';
 import { buildMcpServer } from './mcp/server.js';
 import type { Ctx } from './services/context.js';
@@ -79,6 +79,7 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
     secureCookies: config.publicUrl.protocol === 'https:',
   });
   app.use(web.router);
+  app.use(appCaptureRouter(ctx, structurer, web.requireAuth));
   app.use(apiRouter(ctx, web.requireAuth));
 
   // Liveness: cheap, does not touch the database (so probes don't keep Neon awake).

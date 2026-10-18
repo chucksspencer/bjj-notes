@@ -127,3 +127,46 @@ describe('Siri capture API', () => {
     expect(body.note_id).toBeGreaterThan(0);
   });
 });
+
+describe('iPhone app capture', () => {
+  const app = (server: TestServer, body: unknown, headers: Record<string, string> = { authorization: `Bearer ${API_TOKEN}` }) =>
+    fetch(`${server.base}/api/v1/capture`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    });
+
+  it('signs in like the web app: session cookie with the app header, or the API token', async () => {
+    s = await startServer();
+    expect((await app(s, { text: 'hi' }, {})).status).toBe(401);
+    const login = await fetch(`${s.base}/api/v1/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-bjj-app': '1' },
+      body: JSON.stringify({ password: 'correct horse battery staple' }),
+    });
+    const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+    expect((await app(s, { text: 'Leg elevation: hook first.' }, { cookie })).status).toBe(403); // no app header
+    const ok = await app(s, { text: 'Leg elevation: hook first.' }, { cookie, 'x-bjj-app': '1' });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ speech: 'Saved to Leg elevation.', duplicate: false });
+  });
+
+  it('saves a retried note once, keeps the day it was captured, and takes kind and star hints', async () => {
+    s = await startServer();
+    const note = { text: 'Leg elevation: lift with the hook, not the arms.', clientId: 'a1b2c3d4-0001', date: '2026-10-10', starred: true };
+    const first = (await (await app(s, note)).json()) as any;
+    expect(first).toMatchObject({ duplicate: false, speech: 'Saved to Leg elevation, starred.' });
+    const again = (await (await app(s, note)).json()) as any;
+    expect(again).toMatchObject({ duplicate: true, note_id: first.note_id, speech: 'Already saved.', linked: ['Leg elevation'] });
+    const rows = (await s.db.query<{ observed_on: string; starred: boolean }>(
+      "select observed_on::text, starred_at is not null as starred from notes where client_id = 'a1b2c3d4-0001'",
+    )).rows;
+    expect(rows).toEqual([{ observed_on: '2026-10-10', starred: true }]);
+
+    const question = (await (await app(s, { text: 'When do I switch to the knee lever?', kind: 'question', clientId: 'a1b2c3d4-0002' })).json()) as any;
+    expect(question.speech).toBe('Added to Ask coach.');
+    expect((await s.db.query<{ kind: string }>("select kind from notes where client_id = 'a1b2c3d4-0002'")).rows[0]!.kind).toBe('question');
+    // A made-up id that doesn't look like one is ignored rather than trusted.
+    expect(((await (await app(s, { text: 'Grips first.', clientId: 'x' })).json()) as any).duplicate).toBe(false);
+  });
+});
