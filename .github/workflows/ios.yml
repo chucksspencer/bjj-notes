@@ -116,6 +116,15 @@ jobs:
           print(",".join(d.get("com.apple.security.application-groups", [])) or "none")'
           }
           ARCHIVE="$RUNNER_TEMP/BJJNotes.xcarchive"
+          # Runs an export; if it fails, shows Xcode's reasons (its own and its distribution log's) as annotations.
+          EXPORT() {
+            local log="$RUNNER_TEMP/export-$1.log"; shift
+            if xcodebuild -exportArchive "$@" > "$log" 2>&1; then return 0; fi
+            { grep -hiE "error|fail|profile|capabilit|entitlement|app group|requires|not (found|allowed|available)" "$log"
+              find "${TMPDIR:-/tmp}" -name 'IDEDistribution*.log' -newer "$ARCHIVE" 2>/dev/null | xargs grep -hiE "error|fail|profile|capabilit|entitlement" 2>/dev/null
+            } | grep -v '^\s*$' | sort -u | head -25 | while IFS= read -r line; do echo "::error title=Export::${line:0:800}"; done
+            return 1
+          }
 
           # Archive signed "ad hoc" (no certificate), which keeps the entitlements (the app group) in
           # the binaries; the export step re-signs with the team's cloud-managed distribution certificate.
@@ -147,8 +156,8 @@ jobs:
 
           # Sign it, and check what's signed before anything goes to Apple.
           options export
-          xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportPath "$RUNNER_TEMP/signed" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions-export.plist" "${AUTH[@]}" | BEAUTIFY
+          EXPORT signed -archivePath "$ARCHIVE" -exportPath "$RUNNER_TEMP/signed" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions-export.plist" "${AUTH[@]}"
           mkdir -p "$RUNNER_TEMP/ipa" && unzip -q "$RUNNER_TEMP"/signed/*.ipa -d "$RUNNER_TEMP/ipa"
           SIGNED="$RUNNER_TEMP/ipa/Payload/BJJNotes.app"
           APP_GROUPS=$(GROUPS_OF "$SIGNED")
@@ -160,7 +169,7 @@ jobs:
           fi
 
           options upload
-          xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportPath "$RUNNER_TEMP/upload" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions-upload.plist" "${AUTH[@]}" | BEAUTIFY
+          EXPORT upload -archivePath "$ARCHIVE" -exportPath "$RUNNER_TEMP/upload" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions-upload.plist" "${AUTH[@]}"
           rm -f "$KEY"
           echo "::notice title=Uploaded to TestFlight::Build $GITHUB_RUN_NUMBER is processing; it shows up in TestFlight in about 10–20 minutes."
