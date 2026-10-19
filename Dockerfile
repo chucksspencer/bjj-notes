@@ -1,5 +1,5 @@
 # Build once on the build machine's own platform (the output is plain JS), then assemble per target platform.
-FROM --platform=$BUILDPLATFORM node:22-slim AS build
+FROM --platform=$BUILDPLATFORM node:25-slim AS build
 WORKDIR /app
 # .npmrc: installed packages may not run install scripts.
 COPY package.json package-lock.json .npmrc ./
@@ -9,7 +9,7 @@ COPY src ./src
 COPY web ./web
 RUN npm run build
 
-FROM node:22-slim
+FROM node:25-slim
 ENV NODE_ENV=production \
     PORT=8080
 WORKDIR /app
