@@ -77,11 +77,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Base image
-        # Reported so the Dockerfile can pin it by digest (Docker Hub isn't reachable from every dev box).
-        run: echo "::notice title=Base image::node:22-slim is $(docker buildx imagetools inspect node:22-slim --format '{{json .Manifest.Digest}}' | tr -d '\"')"
       - id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        env:
+          # The repository is public, and so would be the build record artifact; it isn't needed.
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
         with:
           context: .
           push: true

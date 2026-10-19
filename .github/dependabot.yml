@@ -31,3 +31,7 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    ignore:
+      # Node major versions are moved by hand, to long-term-support releases only.
+      - dependency-name: node
+        update-types: [version-update:semver-major]
