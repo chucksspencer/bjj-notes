@@ -1,6 +1,7 @@
 import type { Queryable } from '../db.js';
 import { describeMiss, resolvePosition, resolveTechnique } from '../resolve.js';
 import { noteOrigin } from '../shared/sessions.js';
+import { mediaTag } from './attachments.js';
 import { logActivity, type EdgeSnapshot, type LinkSnapshot, type TechniqueSnapshot, type UndoOp } from './activity.js';
 import type { Ctx } from './context.js';
 import type { Role, TechniqueType } from './vocab.js';
@@ -263,7 +264,9 @@ export async function getTechnique(ctx: Ctx, name: string, noteLimit = 5): Promi
           ? ` [from ${named}]`
           : '';
       const origin = noteOrigin(n);
-      lines.push(`- ${n.observedOn} ${n.kind}${origin ? ` ${origin}` : ''}${n.toTry ? ' [to try]' : ''}${n.starred ? ' [starred]' : ''} #${n.id}: ${n.body}${src}`);
+      lines.push(
+        `- ${n.observedOn} ${n.kind}${origin ? ` ${origin}` : ''}${n.toTry ? ' [to try]' : ''}${n.starred ? ' [starred]' : ''}${mediaTag(n.attachments)} #${n.id}: ${n.body}${src}`,
+      );
     }
   } else if (t.noteCount) {
     // Asked for the card without its notes (note_limit 0).

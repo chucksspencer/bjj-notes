@@ -19,6 +19,8 @@ struct RootView: View {
         }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
+            // Photos and videos shared from Photos are played from there, so ask once to read the library.
+            if PhotosLibrary.notAskedYet { await PhotosLibrary.requestAccess() }
             await Sync.run()
             waiting = await Outbox.shared.count
         }

@@ -84,6 +84,20 @@ export interface SessionInput {
   date?: string;
 }
 
+/** A photo or video on a note. The original is in Apple Photos; the server keeps a small still image. */
+export interface AttachmentView {
+  id: number;
+  kind: 'photo' | 'video';
+  /** Where the original is in Photos (null until the phone has found it). */
+  photosLocalId: string | null;
+  photosCloudId: string | null;
+  /** ISO 8601 */
+  takenAt: string | null;
+  durationS: number | null;
+  width: number | null;
+  height: number | null;
+}
+
 export interface NoteView {
   id: number;
   body: string;
@@ -103,6 +117,8 @@ export interface NoteView {
   starredAt: string | null;
   /** A question that's been answered (it leaves Ask coach). */
   answered: boolean;
+  /** Photos and videos, kept in Apple Photos; the still is at /api/v1/attachments/:id/thumb. */
+  attachments: AttachmentView[];
   sessionId: number | null;
   /** Where the note came from. */
   session: SessionView | null;

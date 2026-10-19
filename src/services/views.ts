@@ -19,6 +19,7 @@ import type {
 } from '../shared/api.js';
 import type { Queryable } from '../db.js';
 import { today, type Ctx } from './context.js';
+import { ATTACHMENTS_JSON } from './attachments.js';
 import { EXPECTED_BY_CATEGORY, minusDays } from './vocab.js';
 
 const json = <T>(v: unknown): T => (typeof v === 'string' ? (JSON.parse(v) as T) : (v as T));
@@ -55,6 +56,7 @@ interface NoteRow {
   to_try: boolean;
   starred_at: string | null;
   answered_at: string | null;
+  attachments: unknown;
   session_id: number | null;
   created_via: NoteView['createdVia'];
   s_id: number | null;
@@ -73,7 +75,7 @@ interface NoteRow {
 
 const NOTE_SELECT = `
   select n.id, n.body, n.raw_text, n.kind, n.observed_on::text as observed_on, n.source_timestamp, n.inbox, n.to_try,
-         ${iso('n.starred_at')} as starred_at, ${iso('n.answered_at')} as answered_at,
+         ${iso('n.starred_at')} as starred_at, ${iso('n.answered_at')} as answered_at, ${ATTACHMENTS_JSON} as attachments,
          n.session_id, n.created_via,
          s.id as s_id, s.kind as s_kind, s.url as s_url, s.title as s_title, s.author as s_author,
          ss.date::text as ss_date, ss.kind as ss_kind, ss.name as ss_name, ss.instructor as ss_instructor,
@@ -102,6 +104,7 @@ function toNote(r: NoteRow): NoteView {
     starred: r.starred_at !== null,
     starredAt: r.starred_at,
     answered: r.answered_at !== null,
+    attachments: json<NoteView['attachments']>(r.attachments),
     sessionId: r.session_id,
     session:
       r.session_id && r.ss_kind

@@ -5,6 +5,7 @@ import { isPlaceholder } from '../../../src/shared/links';
 import { noteOrigin } from '../../../src/shared/sessions';
 import { datePhrase, friendlyDate, NOTE_KIND_LABEL } from '../lib/format';
 import { useCapture } from './Capture';
+import { Clips } from './Clips';
 import { NoteStar } from './Star';
 import { SourceLink } from './Video';
 
@@ -46,7 +47,8 @@ export function NoteItem({
           </button>
         </div>
       </div>
-      {!(isPlaceholder(note.body) && note.source?.url) && <div className="note-body">{note.body}</div>}
+      {!(isPlaceholder(note.body) && (note.source?.url || note.attachments.length)) && <div className="note-body">{note.body}</div>}
+      <Clips attachments={note.attachments} />
       {note.source?.url && (
         <SourceLink url={note.source.url} timestamp={note.sourceTimestamp} title={note.source.title} author={note.source.author} />
       )}

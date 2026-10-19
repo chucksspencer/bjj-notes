@@ -20,6 +20,8 @@ struct WebAppView: UIViewRepresentable {
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.applicationNameForUserAgent = "BJJNotesApp/1.0"
+        // The web app asks the app to open photos and videos from Photos (see web/src/components/Clips.tsx).
+        config.userContentController.add(context.coordinator, name: "bjjNative")
 
         let web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
@@ -49,7 +51,7 @@ struct WebAppView: UIViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPCookieStoreObserver {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPCookieStoreObserver, WKScriptMessageHandler {
         @Binding var unreachable: Bool
         var reloads = 0
         weak var web: WKWebView?
@@ -71,6 +73,19 @@ struct WebAppView: UIViewRepresentable {
                     cookie.name == Config.sessionCookieName && host.hasSuffix(cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")))
                 }
                 Session.remember(session?.value)
+            }
+        }
+
+        // MARK: Photos and videos
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard let body = message.body as? [String: Any], body["action"] as? String == "open",
+                  let presenter = web?.window?.rootViewController?.topmostPresented
+            else { return }
+            let localId = body["photosLocalId"] as? String
+            let cloudId = body["photosCloudId"] as? String
+            Task { @MainActor in
+                await PhotosViewer.open(localId: localId, cloudId: cloudId, from: presenter)
             }
         }
 

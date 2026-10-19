@@ -1450,3 +1450,58 @@ button.row.fold {
 .empty + .row {
   border-top: 1px solid var(--rule);
 }
+
+/* Photos and videos on a note: stills from the server; in the iPhone app a tap plays the original from Photos */
+.clips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.clip {
+  position: relative;
+  display: block;
+  height: 168px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-small);
+  overflow: hidden;
+  background: var(--bar);
+  cursor: default;
+}
+
+button.clip {
+  cursor: pointer;
+}
+
+button.clip:active {
+  opacity: 0.85;
+}
+
+.clip img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.clip-badge {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.65);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+}
+
+.clip-note {
+  margin: 6px 0 0;
+}

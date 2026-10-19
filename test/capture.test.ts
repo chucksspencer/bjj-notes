@@ -170,3 +170,83 @@ describe('iPhone app capture', () => {
     expect(((await (await app(s, { text: 'Grips first.', clientId: 'x' })).json()) as any).duplicate).toBe(false);
   });
 });
+
+describe('photos and videos from the share sheet', () => {
+  // A 1×1 JPEG, standing in for a still image.
+  const STILL = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
+  const app = (server: TestServer, body: unknown) =>
+    fetch(`${server.base}/api/v1/capture`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${API_TOKEN}` },
+      body: JSON.stringify(body),
+    });
+  const get = (server: TestServer, path: string) => fetch(`${server.base}${path}`, { headers: { authorization: `Bearer ${API_TOKEN}` } });
+
+  it('saves a clip with no takeaway to the inbox, with its still and where the original is', async () => {
+    s = await startServer();
+    const res = (await (
+      await app(s, {
+        clientId: 'clip-0001-abcd',
+        attachments: [{ kind: 'video', thumb: STILL, filename: 'IMG_1234.MOV', takenAt: '2026-10-19T01:30:00Z', durationS: 42.5, width: 1920, height: 1080 }],
+      })
+    ).json()) as any;
+    expect(res).toMatchObject({ inbox: true, speech: 'Saved to your inbox.', attachments: [{ linked: false }] });
+    const attachmentId = res.attachments[0].id;
+
+    const note = ((await (await get(s, '/api/v1/notes?inbox=1')).json()) as any[]).find(n => n.id === res.note_id);
+    expect(note.body).toBe('Video from Photos.');
+    expect(note.attachments).toEqual([
+      expect.objectContaining({ id: attachmentId, kind: 'video', photosLocalId: null, durationS: 42.5, width: 1920 }),
+    ]);
+    expect(Date.parse(note.attachments[0].takenAt)).toBe(Date.parse('2026-10-19T01:30:00Z'));
+
+    // The still comes back as the same JPEG.
+    const thumb = await get(s, `/api/v1/attachments/${attachmentId}/thumb`);
+    expect(thumb.headers.get('content-type')).toBe('image/jpeg');
+    expect(Buffer.from(await thumb.arrayBuffer()).toString('base64')).toBe(STILL);
+    expect((await fetch(`${s.base}/api/v1/attachments/${attachmentId}/thumb`)).status).toBe(401);
+
+    // The phone finds the original in Photos later and records it.
+    const linked = (await (
+      await fetch(`${s.base}/api/v1/attachments/${attachmentId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${API_TOKEN}` },
+        body: JSON.stringify({ photosLocalId: 'ABC-123/L0/001', photosCloudId: 'ABC-123:001:xyz' }),
+      })
+    ).json()) as any;
+    expect(linked).toMatchObject({ id: attachmentId, photosLocalId: 'ABC-123/L0/001', photosCloudId: 'ABC-123:001:xyz' });
+  });
+
+  it('files a clip with a takeaway, and keeps its clips through delete and undo', async () => {
+    s = await startServer();
+    const res = (await (
+      await app(s, {
+        text: 'Leg elevation: lift with the hook.',
+        attachments: [
+          { kind: 'video', thumb: STILL, photosLocalId: 'V1/L0/001' },
+          { kind: 'photo', thumb: STILL, photosLocalId: 'P1/L0/001' },
+        ],
+      })
+    ).json()) as any;
+    expect(res).toMatchObject({ linked: ['Leg elevation'], attachments: [{ linked: true }, { linked: true }] });
+    const card = async () => {
+      const t = ((await (await get(s!, '/api/v1/techniques?q=leg+elevation')).json()) as any[])[0];
+      return (await (await get(s!, `/api/v1/techniques/${t.id}`)).json()) as any;
+    };
+    expect((await card()).notes[0].attachments.map((a: any) => a.kind)).toEqual(['video', 'photo']);
+
+    const del = await fetch(`${s.base}/api/v1/notes/${res.note_id}`, { method: 'DELETE', headers: { authorization: `Bearer ${API_TOKEN}` } });
+    expect(del.status).toBe(200);
+    await fetch(`${s.base}/api/v1/undo`, { method: 'POST', headers: { authorization: `Bearer ${API_TOKEN}` } });
+    expect((await card()).notes[0].attachments.map((a: any) => a.photosLocalId)).toEqual(['V1/L0/001', 'P1/L0/001']);
+  });
+
+  it('refuses an oversized still and skips malformed entries', async () => {
+    s = await startServer();
+    const huge = 'A'.repeat(700_000);
+    const tooBig = await app(s, { attachments: [{ kind: 'photo', thumb: huge }] });
+    expect(tooBig.status).toBe(400);
+    const junk = await app(s, { attachments: [{ kind: 'gif', thumb: STILL }, null, 'x'] });
+    expect(junk.status).toBe(400); // nothing usable: no text, no link, no clip
+  });
+});

@@ -104,20 +104,37 @@ jobs:
           printf '%s\n' "$ASC_KEY_P8" > "$KEY"
           AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
           BEAUTIFY() { command -v xcbeautify >/dev/null && xcbeautify --renderer github-actions || cat; }
+          # The app groups in a bundle's signature (the app and its share extension must both have ours).
+          GROUPS_OF() {
+            codesign -d --entitlements - --xml "$1" 2>/dev/null | python3 -c '
+          import plistlib, sys
+          raw = sys.stdin.buffer.read()
+          try:
+              d = plistlib.loads(raw) if raw.strip() else {}
+          except Exception:
+              d = {}
+          print(",".join(d.get("com.apple.security.application-groups", [])) or "none")'
+          }
+          ARCHIVE="$RUNNER_TEMP/BJJNotes.xcarchive"
 
-          # Archive unsigned; the export step signs it with the team's cloud-managed distribution certificate.
+          # Archive signed "ad hoc" (no certificate), which keeps the entitlements (the app group) in
+          # the binaries; the export step re-signs with the team's cloud-managed distribution certificate.
           xcodebuild archive -project BJJNotes.xcodeproj -scheme BJJNotes -configuration Release \
-            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/BJJNotes.xcarchive" \
+            -destination 'generic/platform=iOS' -archivePath "$ARCHIVE" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
-            CODE_SIGNING_ALLOWED=NO | BEAUTIFY
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- PROVISIONING_PROFILE_SPECIFIER= \
+            CODE_SIGNING_REQUIRED=NO PROVISIONING_PROFILE_REQUIRED=NO AD_HOC_CODE_SIGNING_ALLOWED=YES | BEAUTIFY
+          APP="$ARCHIVE/Products/Applications/BJJNotes.app"
+          echo "::notice title=Archived entitlements::app: $(GROUPS_OF "$APP"); share sheet: $(GROUPS_OF "$APP/PlugIns/BJJNotesShare.appex")"
 
-          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          options() {
+            cat > "$RUNNER_TEMP/ExportOptions-$1.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
             <key>method</key><string>app-store-connect</string>
-            <key>destination</key><string>upload</string>
+            <key>destination</key><string>$1</string>
             <key>signingStyle</key><string>automatic</string>
             <key>teamID</key><string>$APPLE_TEAM_ID</string>
             <key>manageAppVersionAndBuildNumber</key><false/>
@@ -126,8 +143,24 @@ jobs:
           </dict>
           </plist>
           PLIST
+          }
 
-          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/BJJNotes.xcarchive" \
-            -exportPath "$RUNNER_TEMP/export" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" "${AUTH[@]}" | BEAUTIFY
+          # Sign it, and check what's signed before anything goes to Apple.
+          options export
+          xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportPath "$RUNNER_TEMP/signed" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions-export.plist" "${AUTH[@]}" | BEAUTIFY
+          mkdir -p "$RUNNER_TEMP/ipa" && unzip -q "$RUNNER_TEMP"/signed/*.ipa -d "$RUNNER_TEMP/ipa"
+          SIGNED="$RUNNER_TEMP/ipa/Payload/BJJNotes.app"
+          APP_GROUPS=$(GROUPS_OF "$SIGNED")
+          SHARE_GROUPS=$(GROUPS_OF "$SIGNED/PlugIns/BJJNotesShare.appex")
+          echo "::notice title=Signed entitlements::app: $APP_GROUPS; share sheet: $SHARE_GROUPS"
+          if [[ "$APP_GROUPS" != *group.com.chucksspencer.bjjnotes* || "$SHARE_GROUPS" != *group.com.chucksspencer.bjjnotes* ]]; then
+            echo "::error title=App group missing::The signed app or share sheet lacks group.com.chucksspencer.bjjnotes, so they couldn't share the sign-in. Not uploading."
+            exit 1
+          fi
+
+          options upload
+          xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportPath "$RUNNER_TEMP/upload" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions-upload.plist" "${AUTH[@]}" | BEAUTIFY
           rm -f "$KEY"
           echo "::notice title=Uploaded to TestFlight::Build $GITHUB_RUN_NUMBER is processing; it shows up in TestFlight in about 10–20 minutes."

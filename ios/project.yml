@@ -8,17 +8,25 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.0"
+    MARKETING_VERSION: "1.1"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
     # Set by the cloud build from the APPLE_TEAM_ID secret.
     DEVELOPMENT_TEAM: ""
+    BJJ_SERVER_URL: https://bjj-notes-602476730933.us-central1.run.app
 targets:
   BJJNotes:
     type: application
     platform: iOS
     sources:
       - path: BJJNotes
+    dependencies:
+      - target: BJJNotesShare
+    entitlements:
+      path: BJJNotes/BJJNotes.entitlements
+      properties:
+        # Shared with the share extension: the sign-in (Keychain), the offline queue and Photos links.
+        com.apple.security.application-groups: [group.com.chucksspencer.bjjnotes]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chucksspencer.bjjnotes
@@ -26,7 +34,6 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        BJJ_SERVER_URL: https://bjj-notes-602476730933.us-central1.run.app
     info:
       path: BJJNotes/Info.plist
       properties:
@@ -36,6 +43,7 @@ targets:
         BJJServerURL: $(BJJ_SERVER_URL)
         ITSAppUsesNonExemptEncryption: false
         LSApplicationCategoryType: public.app-category.sports
+        NSPhotoLibraryUsageDescription: BJJ Notes plays the photos and videos you share to it straight from your Photos library, so it never needs its own copy.
         UILaunchScreen:
           UIColorName: Canvas
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
@@ -45,6 +53,43 @@ targets:
         BGTaskSchedulerPermittedIdentifiers: [com.chucksspencer.bjjnotes.sync]
     scheme:
       testTargets: [BJJNotesTests]
+
+  # "BJJ Notes" in the share sheet: photos, videos, links and text.
+  BJJNotesShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: BJJNotesShare
+      - path: BJJNotes/Core
+    entitlements:
+      path: BJJNotesShare/BJJNotesShare.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.chucksspencer.bjjnotes]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chucksspencer.bjjnotes.share
+        PRODUCT_NAME: BJJNotesShare
+        TARGETED_DEVICE_FAMILY: "1"
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SHARE_EXTENSION
+    info:
+      path: BJJNotesShare/Info.plist
+      properties:
+        CFBundleDisplayName: BJJ Notes
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        BJJServerURL: $(BJJ_SERVER_URL)
+        NSPhotoLibraryUsageDescription: BJJ Notes finds what you share in your Photos library, so it can play it from there instead of keeping a copy.
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsImageWithMaxCount: 10
+              NSExtensionActivationSupportsMovieWithMaxCount: 10
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+
   BJJNotesTests:
     type: bundle.unit-test
     platform: iOS

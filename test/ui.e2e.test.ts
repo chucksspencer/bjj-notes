@@ -312,6 +312,27 @@ describe.runIf(run)('web app (end to end)', () => {
     await coach.getByRole('button', { name: /2 older questions/ }).waitFor();
   });
 
+  it('shows a clip shared from Photos as its still, and says it plays in the iPhone app', async () => {
+    // A 1×1 JPEG standing in for a video's still.
+    const still = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
+    const res = await page.request.post(`${s.base}/api/v1/capture`, {
+      headers: { 'x-bjj-app': '1' },
+      data: { attachments: [{ kind: 'video', thumb: still, durationS: 42, width: 1080, height: 1920, photosLocalId: 'L/1' }] },
+    });
+    expect(res.status()).toBe(200);
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /Inbox/ }).click();
+    await page.reload();
+    const clip = page.getByRole('img', { name: 'A video, 0:42 in Photos' });
+    await clip.waitFor();
+    await expect.poll(() => clip.locator('img').evaluate(img => (img as HTMLImageElement).naturalWidth)).toBe(1);
+    await page.getByText('Plays from Photos in the iPhone app.').waitFor();
+    expect(await page.getByText('Video from Photos.').count()).toBe(0); // the placeholder text stays hidden
+    await page.getByRole('button', { name: 'Select', exact: true }).click(); // tidy up (the confirm is accepted above)
+    await page.getByRole('button', { name: 'Select all' }).click();
+    await page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name: 'Delete' }).click();
+    await page.getByText('Nothing to file.').waitFor();
+  });
+
   it('navigates on desktop Chrome 150+, where scrollTo returns a Promise', async () => {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await ctx.addInitScript(() => {

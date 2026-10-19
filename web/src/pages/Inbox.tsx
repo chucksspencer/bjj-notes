@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { NoteView, TechniqueRef } from '../../../src/shared/api';
 import { useDeleteNotes, useFileNote, useFocus, useNotes } from '../api';
+import { isPlaceholder } from '../../../src/shared/links';
 import { useCapture } from '../components/Capture';
+import { Clips } from '../components/Clips';
 import { countOf, SelectionBar, useSelection } from '../components/Selection';
 import { Sheet } from '../components/Sheet';
 import { TechniquePicker, type NewTechnique } from '../components/TechniquePicker';
@@ -77,10 +79,11 @@ export function Inbox() {
                   Edit
                 </button>
               </div>
-              <div className="note-body">{n.body}</div>
+              {!(isPlaceholder(n.body) && n.attachments.length) && <div className="note-body">{n.body}</div>}
               {n.source?.url && (
                 <SourceLink url={n.source.url} timestamp={n.sourceTimestamp} title={n.source.title} author={n.source.author} />
               )}
+              <Clips attachments={n.attachments} />
               <div className="note-foot">
                 <button type="button" className="btn quiet small" onClick={() => setFiling(n)}>
                   File under a technique

@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import express, { type Router } from 'express';
 import { secretsMatch } from './auth/provider.js';
-import { placeholderFor, splitLink } from './shared/links.js';
+import { clipPlaceholder, placeholderFor, splitLink } from './shared/links.js';
+import { MAX_THUMB_BYTES, type AttachmentInput } from './services/attachments.js';
 import { techniquesMentionedIn } from './resolve.js';
 import type { Ctx } from './services/context.js';
 import { getFocus } from './services/focus.js';
@@ -121,6 +122,37 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const CLIENT_ID = /^[\w-]{8,64}$/;
 
 /**
+ * Photos and videos sent with a note: [{ kind, thumb (JPEG, base64), photosLocalId?, photosCloudId?,
+ * filename?, takenAt?, durationS?, width?, height? }]. Malformed entries are skipped.
+ */
+function parseAttachments(raw: unknown): AttachmentInput[] | 'too big' {
+  if (!Array.isArray(raw)) return [];
+  const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() && v.length <= max ? v.trim() : undefined);
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+  const int = (v: unknown) => (num(v) === undefined ? undefined : Math.round(v as number));
+  const out: AttachmentInput[] = [];
+  for (const item of raw.slice(0, 10)) {
+    if (!item || typeof item !== 'object') continue;
+    const a = item as Record<string, unknown>;
+    if ((a.kind !== 'photo' && a.kind !== 'video') || typeof a.thumb !== 'string' || !a.thumb) continue;
+    if (a.thumb.length > Math.ceil((MAX_THUMB_BYTES * 4) / 3) + 4) return 'too big';
+    const takenAt = str(a.takenAt, 40);
+    out.push({
+      kind: a.kind,
+      thumb_base64: a.thumb,
+      photos_local_id: str(a.photosLocalId, 300),
+      photos_cloud_id: str(a.photosCloudId, 600),
+      filename: str(a.filename, 255),
+      taken_at: takenAt && !Number.isNaN(Date.parse(takenAt)) ? takenAt : undefined,
+      duration_s: num(a.durationS),
+      width: int(a.width),
+      height: int(a.height),
+    });
+  }
+  return out;
+}
+
+/**
  * Saves a dictated or shared note: tidied and linked to techniques by the parser when there is one.
  * Optional hints from the caller win over the parser: `kind` ("question" for Ask coach), `starred`,
  * `date` (the day it was captured, for notes that waited offline), and `clientId` (a retry with the
@@ -143,7 +175,11 @@ export async function captureNote(
     url = found.url;
     if (candidate === text) text = found.rest;
   }
-  if (!text && !url) {
+  const attachments = parseAttachments(b.attachments);
+  if (attachments === 'too big') {
+    return { status: 400, body: { error: 'still too large', speech: "That photo's preview was too large to save." } };
+  }
+  if (!text && !url && !attachments.length) {
     return { status: 400, body: { error: 'text is required', speech: 'Nothing to save. Say a takeaway or share a link.' } };
   }
   const kindHint = NOTE_KINDS.find(k => k === b.kind);
@@ -152,9 +188,15 @@ export async function captureNote(
   const starred = b.starred === true;
   // Anything shared with a link is something to try out before it earns a place in the library.
   const toTry = !!url && kindHint !== 'question';
-  const hints = { date, client_id: clientId, starred, ...(kindHint ? { kind: kindHint } : {}) };
+  const hints = {
+    date,
+    client_id: clientId,
+    starred,
+    ...(kindHint ? { kind: kindHint } : {}),
+    ...(attachments.length ? { attachments } : {}),
+  };
   let input: AddNoteInput = {
-    text: text || placeholderFor(url!),
+    text: text || (url ? placeholderFor(url) : clipPlaceholder(attachments.map(a => a.kind))),
     raw_text: text,
     via: 'capture',
     source: url ? { url } : undefined,
@@ -209,6 +251,7 @@ export async function captureNote(
         parsed,
         to_try: result.toTry,
         duplicate: result.duplicate === true,
+        attachments: result.attachments ?? [],
         speech: starred && !result.duplicate ? `${speech.replace(/\.$/, '')}, starred.` : speech,
       },
     };
@@ -221,7 +264,8 @@ export async function captureNote(
 /** The same capture for the iPhone app, signed in like the web app (session cookie) or with the API token. */
 export function appCaptureRouter(ctx: Ctx, structurer: Structurer | null, requireAuth: express.RequestHandler): Router {
   const router = express.Router();
-  router.post('/api/v1/capture', express.json({ limit: '64kb' }), requireAuth, async (req, res) => {
+  // Room for a note's still images (each a small JPEG).
+  router.post('/api/v1/capture', express.json({ limit: '6mb' }), requireAuth, async (req, res) => {
     const out = await captureNote(ctx, structurer, req.body);
     res.status(out.status).json(out.body);
   });

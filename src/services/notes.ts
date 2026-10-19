@@ -3,6 +3,7 @@ import { cleanUrl, instagramPost } from '../shared/links.js';
 import { resolveTechnique, type Candidate } from '../resolve.js';
 import type { SessionView } from '../shared/api.js';
 import { sessionPhrase } from '../shared/sessions.js';
+import { insertAttachments, mediaTag, type AttachmentInput } from './attachments.js';
 import { logActivity, NOTE_SNAPSHOT_SQL, type NoteRowSnapshot, type SessionChange, type UndoOp } from './activity.js';
 import { today, type Ctx } from './context.js';
 import { findOrCreateSession, sessionById, type SessionDetails } from './sessions.js';
@@ -49,6 +50,8 @@ export interface AddNoteInput {
   via?: 'mcp' | 'capture' | 'web';
   /** An id the client made up for this note: saving again with the same id returns the first save. */
   client_id?: string;
+  /** Photos and videos (references to Apple Photos, with a still image each). */
+  attachments?: AttachmentInput[];
 }
 
 export interface OriginInput extends SessionDetails {
@@ -91,6 +94,8 @@ export interface AddNoteResult {
   message: string;
   /** This client_id was saved before; nothing new was written. */
   duplicate?: boolean;
+  /** The attachments saved with the note, in the order given. */
+  attachments?: { id: number; linked: boolean }[];
 }
 
 async function upsertSource(q: Queryable, input: SourceInput): Promise<number | null> {
@@ -226,6 +231,7 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
     for (const id of ids.keys()) {
       await q.query('insert into note_techniques (note_id, technique_id) values ($1, $2)', [noteId, id]);
     }
+    const attachments = input.attachments?.length ? await insertAttachments(q, noteId, input.attachments) : undefined;
 
     const linked = [...ids.values()];
     const from = origin?.view ? ` (from ${sessionPhrase(origin.view)})` : '';
@@ -252,7 +258,7 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
       createdTechniqueIds: created.map(c => c.id),
       session: origin?.change,
     });
-    return { noteId, linked, created: created.map(c => c.name), unresolved, inbox, toTry, message };
+    return { noteId, linked, created: created.map(c => c.name), unresolved, inbox, toTry, message, attachments };
   });
 }
 
@@ -310,7 +316,7 @@ export async function getInbox(ctx: Ctx, limit = 10, toTry = false): Promise<str
     ...rows.map(r => {
       const about = r.techniques.length ? ` [${toTry ? 'about' : 'linked'}: ${r.techniques.map(t => t.name).join(', ')}]` : '';
       const link = r.source?.url ? ` <${r.source.url}>` : '';
-      return `- #${r.id} (${r.observedOn}): ${r.body}${about}${link}`;
+      return `- #${r.id} (${r.observedOn}): ${r.body}${about}${mediaTag(r.attachments)}${link}`;
     }),
   ].join('\n');
 }
@@ -415,8 +421,9 @@ async function removeNote(q: Queryable, id: number): Promise<UndoOp | null> {
   const techniqueIds = (
     await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [id])
   ).rows.map(r => r.technique_id);
+  const attachmentIds = (await q.query<{ id: number }>('select id from attachments where note_id = $1', [id])).rows.map(r => r.id);
   await q.query('delete from notes where id = $1', [id]);
-  return { kind: 'restore_note', row, techniqueIds };
+  return { kind: 'restore_note', row, techniqueIds, ...(attachmentIds.length ? { attachmentIds } : {}) };
 }
 
 export async function deleteNote(ctx: Ctx, id: number): Promise<string> {

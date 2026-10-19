@@ -4,3 +4,6 @@ BJJNotes/Info.plist
 DerivedData/
 build/
 *.xcuserstate
+BJJNotes/BJJNotes.entitlements
+BJJNotesShare/Info.plist
+BJJNotesShare/BJJNotesShare.entitlements

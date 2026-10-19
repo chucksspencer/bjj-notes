@@ -53,7 +53,14 @@ struct LabView: Codable {
 
 /// What the server says after saving a note; `speech` is written to be read aloud.
 struct CaptureResponse: Codable, Equatable {
+    struct Attachment: Codable, Equatable {
+        let id: Int
+        /// Whether the server knows where the original is in Photos.
+        let linked: Bool
+    }
     let note_id: Int?
     let speech: String
     let duplicate: Bool?
+    /// The saved photos and videos, in the order they were sent.
+    var attachments: [Attachment]? = nil
 }

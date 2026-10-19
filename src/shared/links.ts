@@ -64,9 +64,20 @@ export function placeholderFor(url: string): string {
   return 'Link to try.';
 }
 
-/** Whether a note's text is only that placeholder (so there's no takeaway to show or edit yet). */
+/** The text of a note that's only photos or videos, shared without a takeaway. */
+export function clipPlaceholder(kinds: ('photo' | 'video')[]): string {
+  const videos = kinds.filter(k => k === 'video').length;
+  const photos = kinds.length - videos;
+  if (kinds.length === 1) return videos ? 'Video from Photos.' : 'Photo from Photos.';
+  if (!photos) return `${videos} videos from Photos.`;
+  if (!videos) return `${photos} photos from Photos.`;
+  return `${kinds.length} clips from Photos.`;
+}
+
+/** Whether a note's text is only a placeholder (so there's no takeaway to show or edit yet). */
 export function isPlaceholder(body: string): boolean {
-  return /^(Instagram reel|Video|Link) to (try|review)\.$/.test(body.trim());
+  const text = body.trim();
+  return /^(Instagram reel|Video|Link) to (try|review)\.$/.test(text) || /^(\d+ )?(Video|Photo|Clip|video|photo|clip)s? from Photos\.$/.test(text);
 }
 
 function safeHost(url: string): string {

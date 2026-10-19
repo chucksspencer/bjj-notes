@@ -60,7 +60,15 @@ export type UndoOp =
   | { kind: 'delete_session'; sessionId: number; attachedNoteIds: number[]; created?: boolean; before?: SessionSnapshot | null }
   | { kind: 'refile_note'; noteId: number; inbox: boolean; toTry?: boolean; techniqueIds: number[]; createdTechniqueIds: number[] }
   /** Puts a note back exactly as it was (after an edit or a delete). */
-  | { kind: 'restore_note'; row: NoteRowSnapshot; techniqueIds: number[]; session?: SessionChange; createdTechniqueIds?: number[] }
+  | {
+      kind: 'restore_note';
+      row: NoteRowSnapshot;
+      techniqueIds: number[];
+      session?: SessionChange;
+      createdTechniqueIds?: number[];
+      /** Photos and videos to link to the note again. */
+      attachmentIds?: number[];
+    }
   | { kind: 'restore_edge'; edge: EdgeSnapshot }
   | { kind: 'restore_link'; link: LinkSnapshot }
   /** Recreates a deleted technique with everything that pointed at it. */
@@ -173,6 +181,7 @@ async function revertSessionChange(q: Queryable, c: SessionChange | undefined) {
 async function apply(q: Queryable, op: UndoOp): Promise<void> {
   switch (op.kind) {
     case 'delete_note':
+      await q.query('delete from attachments where note_id = $1', [op.noteId]);
       await q.query('delete from notes where id = $1', [op.noteId]);
       await deleteTechniques(q, op.createdTechniqueIds);
       await revertSessionChange(q, op.session);
@@ -251,6 +260,9 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       }
       await revertSessionChange(q, op.session);
       await deleteTechniques(q, op.createdTechniqueIds ?? []);
+      if (op.attachmentIds?.length) {
+        await q.query('update attachments set note_id = $1 where id = any($2::int[])', [r.id, op.attachmentIds]);
+      }
       return;
     }
     case 'restore_edge':

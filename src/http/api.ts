@@ -1,6 +1,7 @@
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from 'express';
 import { z } from 'zod';
 import type {
+  AttachmentView,
   FocusView,
   LabView,
   MessageResult,
@@ -16,6 +17,7 @@ import { undoLast } from '../services/activity.js';
 import { NotFoundError as NotFound, UserError } from '../services/errors.js';
 import type { Ctx } from '../services/context.js';
 import { editFocusItem, updateFocus } from '../services/focus.js';
+import { attachmentThumb, linkAttachment } from '../services/attachments.js';
 import { clearStars, markAnswered } from '../services/marks.js';
 import { addNote, deleteNote, deleteNotes, fileNote, updateNote } from '../services/notes.js';
 import { deleteTechnique, deleteTechniques, removeEdge, removeLink, saveTechniqueResult } from '../services/techniques.js';
@@ -178,6 +180,26 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
       const b = focusPatch.parse(req.body);
       const message = await editFocusItem(ctx, id.parse(req.params.id), b);
       return { message, focus: await focusView(ctx) };
+    }),
+  );
+
+  // Photos and videos: the still image, and recording where the original is in Photos
+  r.get('/api/v1/attachments/:id/thumb', async (req, res, next) => {
+    try {
+      const thumb = await attachmentThumb(ctx.db, id.parse(req.params.id));
+      if (!thumb) throw new NotFound('No such photo or video.');
+      res.type('image/jpeg').set('Cache-Control', 'private, max-age=31536000, immutable').send(thumb);
+    } catch (err) {
+      next(err);
+    }
+  });
+  r.patch(
+    '/api/v1/attachments/:id',
+    h(async (req): Promise<AttachmentView> => {
+      const b = z
+        .object({ photosLocalId: z.string().trim().min(1).max(300).optional(), photosCloudId: z.string().trim().min(1).max(600).optional() })
+        .parse(req.body);
+      return linkAttachment(ctx, id.parse(req.params.id), b);
     }),
   );
 

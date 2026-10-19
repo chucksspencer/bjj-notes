@@ -1,5 +1,6 @@
 import { describeMiss, resolvePosition } from '../resolve.js';
 import { noteOrigin } from '../shared/sessions.js';
+import { mediaTag } from './attachments.js';
 import { today, type Ctx } from './context.js';
 import type { NoteView, Status, TechniqueListItem, TechniqueType } from '../shared/api.js';
 import { LAB_DAYS, labView, noteList, positionView, techniqueList } from './views.js';
@@ -67,7 +68,7 @@ export async function search(ctx: Ctx, input: SearchInput): Promise<string> {
       for (const n of notes) {
         const origin = noteOrigin(n);
         lines.push(
-          `- #${n.id} ${n.observedOn}${origin ? ` ${origin}` : ''}${n.toTry ? ' [to try]' : ''}${n.techniques.length ? ` [${n.techniques.map(t => t.name).join(', ')}]` : ''}: ${n.body}`,
+          `- #${n.id} ${n.observedOn}${origin ? ` ${origin}` : ''}${n.toTry ? ' [to try]' : ''}${n.techniques.length ? ` [${n.techniques.map(t => t.name).join(', ')}]` : ''}${mediaTag(n.attachments)}: ${n.body}`,
         );
       }
     }
@@ -132,7 +133,7 @@ export async function getLab(ctx: Ctx, days = LAB_DAYS): Promise<string> {
   const lab = await labView(ctx, days);
   const about = (n: { techniques: { name: string }[] }) => (n.techniques.length ? ` [${n.techniques.map(t => t.name).join(', ')}]` : '');
   const card = (t: TechniqueListItem) => `${t.name} (${[t.type, t.role].filter(Boolean).join(', ')}; ${t.status})`;
-  const note = (n: NoteView) => `#${n.id} ${n.observedOn}${about(n)}: ${n.body}`;
+  const note = (n: NoteView) => `#${n.id} ${n.observedOn}${about(n)}${mediaTag(n.attachments)}: ${n.body}`;
   const section = (title: string, lines: string[], empty: string, cap = lines.length) => [
     title,
     ...(lines.length ? lines.slice(0, cap) : [`- ${empty}`]),

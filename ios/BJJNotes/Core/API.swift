@@ -42,11 +42,45 @@ final class API {
     }
 
     func capture(_ note: PendingNote, timeout: TimeInterval = 20) async throws -> CaptureResponse {
+        let data = try JSONSerialization.data(withJSONObject: API.captureBody(note))
+        // Stills make the request bigger; give slow connections longer.
+        let limit = note.attachments?.isEmpty == false ? max(timeout, 30) : timeout
+        return try await send(request("POST", "/api/v1/capture", body: data, timeout: limit), as: CaptureResponse.self)
+    }
+
+    /// The JSON for POST /api/v1/capture.
+    static func captureBody(_ note: PendingNote) -> [String: Any] {
         var body: [String: Any] = ["text": note.text, "clientId": note.id, "date": note.date]
         if let kind = note.kind { body["kind"] = kind }
         if note.starred { body["starred"] = true }
+        if let url = note.url { body["url"] = url }
+        if let attachments = note.attachments, !attachments.isEmpty {
+            let iso = ISO8601DateFormatter()
+            body["attachments"] = attachments.map { a -> [String: Any] in
+                var item: [String: Any] = ["kind": a.kind, "thumb": a.thumb.base64EncodedString()]
+                if let v = a.photosLocalId { item["photosLocalId"] = v }
+                if let v = a.photosCloudId { item["photosCloudId"] = v }
+                if let v = a.filename { item["filename"] = v }
+                if let v = a.takenAt { item["takenAt"] = iso.string(from: v) }
+                if let v = a.durationS { item["durationS"] = v }
+                if let v = a.width { item["width"] = v }
+                if let v = a.height { item["height"] = v }
+                return item
+            }
+        }
+        return body
+    }
+
+    /// Records where a saved photo or video's original is in Photos.
+    func linkAttachment(id: Int, localId: String, cloudId: String?) async throws {
+        var body: [String: Any] = ["photosLocalId": localId]
+        if let cloudId { body["photosCloudId"] = cloudId }
         let data = try JSONSerialization.data(withJSONObject: body)
-        return try await send(request("POST", "/api/v1/capture", body: data, timeout: timeout), as: CaptureResponse.self)
+        _ = try await send(request("PATCH", "/api/v1/attachments/\(id)", body: data, timeout: 15), as: LinkedAttachment.self)
+    }
+
+    private struct LinkedAttachment: Decodable {
+        let id: Int
     }
 
     func focus(timeout: TimeInterval = 15) async throws -> FocusView {
