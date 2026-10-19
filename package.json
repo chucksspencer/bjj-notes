@@ -34,7 +34,7 @@
     "playwright": "^1.56.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "react-router": "^7.18.4",
+    "react-router": "^8.4.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
