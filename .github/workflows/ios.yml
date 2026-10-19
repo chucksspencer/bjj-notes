@@ -120,9 +120,11 @@ jobs:
           EXPORT() {
             local log="$RUNNER_TEMP/export-$1.log"; shift
             if xcodebuild -exportArchive "$@" > "$log" 2>&1; then return 0; fi
-            { grep -hiE "error|fail|profile|capabilit|entitlement|app group|requires|not (found|allowed|available)" "$log"
-              find "${TMPDIR:-/tmp}" -name 'IDEDistribution*.log' -newer "$ARCHIVE" 2>/dev/null | xargs grep -hiE "error|fail|profile|capabilit|entitlement" 2>/dev/null
-            } | grep -v '^\s*$' | sort -u | head -25 | while IFS= read -r line; do echo "::error title=Export::${line:0:800}"; done
+            # Xcode's own error lines first, then the distribution log's (skipping its raw API traffic).
+            { grep -hE '^(error|warning):|Error Domain=|NSLocalizedDescription|NSLocalizedRecoverySuggestion|EXPORT FAILED' "$log"
+              find "${TMPDIR:-/tmp}" -name 'IDEDistribution*.log' -newer "$ARCHIVE" 2>/dev/null \
+                | xargs grep -hE 'error|Error|fail|Fail' 2>/dev/null | grep -vE '^\s*"|developerservices|^\s*[{}\[\]],?\s*$'
+            } | sed 's/^[[:space:]]*//' | awk '!seen[$0]++' | head -9 | while IFS= read -r line; do echo "::error title=Export::${line:0:900}"; done
             return 1
           }
 
