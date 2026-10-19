@@ -172,6 +172,28 @@ npm run build && E2E=1 npx vitest run test/ui.e2e.test.ts   # the web app in Chr
 TEST_PG_ADMIN_URL=postgres://postgres@localhost:5432/postgres npm test   # against real Postgres
 ```
 
+## Security
+
+What runs on the server and on the phone is only ever built by GitHub Actions from `main`, so the
+GitHub account is the root of trust. Around that:
+
+- **Dependencies.** The lockfile pins every package; npm never runs install scripts (`.npmrc`); CI
+  verifies the registry's signatures and fails on known high or critical vulnerabilities in production
+  packages. Dependabot proposes updates weekly, a week after release (`.github/dependabot.yml`).
+- **Build pipeline.** Every third-party GitHub Action is pinned to a commit. Workflows get read-only
+  tokens unless a job needs more. The iPhone build uses only Apple frameworks (no third-party Swift
+  packages), and XcodeGen is built from a pinned commit.
+- **Deploys.** Keyless: Google Cloud trusts only this repository's `main` branch (Workload Identity
+  Federation), and deploys the exact image digest that was built. The app runs as its own service
+  account that can only read its secrets, which live in Secret Manager.
+- **The app.** Passwords and tokens are compared in constant time and stored only as hashes; sign-in is
+  rate-limited; OAuth uses PKCE; every response sends `nosniff`, no framing and HSTS; the web app has a
+  strict Content Security Policy; stills must be JPEGs.
+- **The phone.** TestFlight installs only Apple-signed builds. Inside the app, the web view loads pages
+  only from this server and frames only from the YouTube and Instagram players, and sends nothing but
+  ordinary `https` links out of the app, so even a compromised server couldn't use it to offer an
+  app install or open other apps. The page can ask the app for one thing: to open a Photos item by id.
+
 ## iPhone app
 
 `ios/` is a native app around the web app for Siri (App Intents: add a note, ask coach, focus, Lab)

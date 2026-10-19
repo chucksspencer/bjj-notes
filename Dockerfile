@@ -1,7 +1,8 @@
 # Build once on the build machine's own platform (the output is plain JS), then assemble per target platform.
 FROM --platform=$BUILDPLATFORM node:22-slim AS build
 WORKDIR /app
-COPY package.json package-lock.json ./
+# .npmrc: installed packages may not run install scripts.
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
@@ -12,7 +13,7 @@ FROM node:22-slim
 ENV NODE_ENV=production \
     PORT=8080
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY db ./db

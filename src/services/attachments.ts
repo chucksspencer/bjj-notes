@@ -33,6 +33,8 @@ export async function insertAttachments(q: Queryable, noteId: number, inputs: At
     const bytes = Buffer.from(a.thumb_base64, 'base64');
     if (!bytes.length) throw new UserError('A photo or video arrived without its still image.');
     if (bytes.length > MAX_THUMB_BYTES) throw new UserError('That still image is too large.');
+    // Stills are served back as image/jpeg, so only JPEGs are kept.
+    if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) throw new UserError("A still image wasn't a JPEG.");
     const { rows } = await q.query<{ id: number }>(
       `insert into attachments (note_id, kind, photos_local_id, photos_cloud_id, filename, taken_at, duration_s, width, height, thumb)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, decode($10, 'base64')) returning id`,

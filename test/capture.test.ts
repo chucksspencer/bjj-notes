@@ -248,5 +248,13 @@ describe('photos and videos from the share sheet', () => {
     expect(tooBig.status).toBe(400);
     const junk = await app(s, { attachments: [{ kind: 'gif', thumb: STILL }, null, 'x'] });
     expect(junk.status).toBe(400); // nothing usable: no text, no link, no clip
+    // Stills are served as image/jpeg, so anything else (an HTML page, say) is refused.
+    const html = Buffer.from('<html><script>alert(1)</script></html>').toString('base64');
+    const notJpeg = await app(s, { text: 'Grips.', attachments: [{ kind: 'photo', thumb: html }] });
+    expect(notJpeg.status).toBe(400); // refused for good, so the phone doesn't keep retrying
+    expect(((await notJpeg.json()) as any).speech).toBe("That photo's preview couldn't be read.");
+    const headers = (await get(s, '/api/v1/notes')).headers;
+    expect(headers.get('x-content-type-options')).toBe('nosniff');
+    expect(headers.get('x-frame-options')).toBe('DENY');
   });
 });

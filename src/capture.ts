@@ -125,7 +125,7 @@ const CLIENT_ID = /^[\w-]{8,64}$/;
  * Photos and videos sent with a note: [{ kind, thumb (JPEG, base64), photosLocalId?, photosCloudId?,
  * filename?, takenAt?, durationS?, width?, height? }]. Malformed entries are skipped.
  */
-function parseAttachments(raw: unknown): AttachmentInput[] | 'too big' {
+function parseAttachments(raw: unknown): AttachmentInput[] | 'too big' | 'not jpeg' {
   if (!Array.isArray(raw)) return [];
   const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() && v.length <= max ? v.trim() : undefined);
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
@@ -136,6 +136,8 @@ function parseAttachments(raw: unknown): AttachmentInput[] | 'too big' {
     const a = item as Record<string, unknown>;
     if ((a.kind !== 'photo' && a.kind !== 'video') || typeof a.thumb !== 'string' || !a.thumb) continue;
     if (a.thumb.length > Math.ceil((MAX_THUMB_BYTES * 4) / 3) + 4) return 'too big';
+    const head = Buffer.from(a.thumb.slice(0, 8), 'base64');
+    if (head[0] !== 0xff || head[1] !== 0xd8 || head[2] !== 0xff) return 'not jpeg';
     const takenAt = str(a.takenAt, 40);
     out.push({
       kind: a.kind,
@@ -178,6 +180,9 @@ export async function captureNote(
   const attachments = parseAttachments(b.attachments);
   if (attachments === 'too big') {
     return { status: 400, body: { error: 'still too large', speech: "That photo's preview was too large to save." } };
+  }
+  if (attachments === 'not jpeg') {
+    return { status: 400, body: { error: 'still not a jpeg', speech: "That photo's preview couldn't be read." } };
   }
   if (!text && !url && !attachments.length) {
     return { status: 400, body: { error: 'text is required', speech: 'Nothing to save. Say a takeaway or share a link.' } };

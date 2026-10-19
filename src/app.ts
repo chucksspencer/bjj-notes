@@ -19,6 +19,19 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
   const app = express();
   app.set('trust proxy', 1); // Cloud Run terminates TLS in front of us
   app.disable('x-powered-by');
+  // On every response, not just the web page: no MIME sniffing (stills are served as stored), no
+  // framing, no cross-site embedding of API responses, and HTTPS only from here on.
+  const https = config.publicUrl.protocol === 'https:';
+  app.use((_req, res, next) => {
+    res.set({
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'same-origin',
+      'Cross-Origin-Resource-Policy': 'same-origin',
+      ...(https ? { 'Strict-Transport-Security': 'max-age=31536000' } : {}),
+    });
+    next();
+  });
 
   const mcpUrl = new URL('/mcp', config.publicUrl);
   const provider = new OwnerOAuthProvider(ctx.db, mcpUrl);

@@ -2,10 +2,11 @@
 # Deploys an image to Cloud Run. Run by GitHub Actions after it has authenticated to Google Cloud
 # (see .github/workflows/ci.yml); can also be run by hand in Cloud Shell with the same variables.
 #
-# Required: IMAGE (built image, e.g. ghcr.io/owner/bjj-notes:sha-abc), DATABASE_URL, OWNER_PASSWORD, API_TOKEN,
+# Required: IMAGE (built image, by digest: ghcr.io/owner/bjj-notes@sha256:…, or tag), DATABASE_URL, OWNER_PASSWORD, API_TOKEN,
 #           GCP_SERVICE_ACCOUNT (deploy account; gives the project id) or PROJECT_ID,
 #           GCP_WORKLOAD_IDENTITY_PROVIDER (gives the project number) or PROJECT_NUMBER
-# Optional: ANTHROPIC_API_KEY, PUBLIC_URL (custom domain), TIME_ZONE, GCP_REGION, SERVICE
+# Optional: IMAGE_TAG (tag for the Artifact Registry copy, e.g. sha-abc), ANTHROPIC_API_KEY, PUBLIC_URL (custom domain),
+#           TIME_ZONE, GCP_REGION, SERVICE
 set -Eeuo pipefail
 
 # In GitHub Actions, failures are also reported as an annotation on the run (readable without the logs).
@@ -52,7 +53,8 @@ RUN_SA="bjj-notes-run@$PROJECT_ID.iam.gserviceaccount.com"
 
 # 1. Copy the image into Artifact Registry (Cloud Run can't pull from GitHub's registry).
 AR_HOST="$REGION-docker.pkg.dev"
-TARGET="$AR_HOST/$PROJECT_ID/bjj-notes/app:${IMAGE##*:}"
+TAG="${IMAGE_TAG:-${IMAGE##*[:@]}}"
+TARGET="$AR_HOST/$PROJECT_ID/bjj-notes/app:${TAG#sha256:}"
 gcloud auth configure-docker "$AR_HOST" --quiet >/dev/null 2>&1
 docker pull --quiet --platform linux/amd64 "$IMAGE" >/dev/null
 docker tag "$IMAGE" "$TARGET"

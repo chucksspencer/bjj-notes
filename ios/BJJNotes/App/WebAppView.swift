@@ -79,11 +79,18 @@ struct WebAppView: UIViewRepresentable {
         // MARK: Photos and videos
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard let body = message.body as? [String: Any], body["action"] as? String == "open",
+            // Only the app's own pages may ask, and only to open a Photos item by its id.
+            guard message.frameInfo.isMainFrame,
+                  message.frameInfo.securityOrigin.host == Config.serverURL.host,
+                  let body = message.body as? [String: Any], body["action"] as? String == "open",
                   let presenter = web?.window?.rootViewController?.topmostPresented
             else { return }
-            let localId = body["photosLocalId"] as? String
-            let cloudId = body["photosCloudId"] as? String
+            let id = { (key: String) -> String? in
+                guard let value = body[key] as? String, !value.isEmpty, value.count <= 600 else { return nil }
+                return value
+            }
+            let localId = id("photosLocalId")
+            let cloudId = id("photosCloudId")
             Task { @MainActor in
                 await PhotosViewer.open(localId: localId, cloudId: cloudId, from: presenter)
             }
@@ -115,24 +122,40 @@ struct WebAppView: UIViewRepresentable {
 
         // MARK: Links
 
+        /// Embedded players the web app may show (it loads them only when tapped).
+        static let playerHosts: Set<String> = ["www.youtube-nocookie.com", "www.youtube.com", "www.instagram.com", "instagram.com"]
+
+        /**
+         What the web view may load. The page itself only ever comes from the BJJ Notes server; frames
+         only from the server or the YouTube and Instagram players. Other web links open outside the app
+         (Safari, or Instagram and YouTube through their links). Anything else, such as app-install
+         (itms-services:) or other apps' URL schemes, is refused: even a compromised server can't use
+         the app to hand the phone something to install.
+         */
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard let url = action.request.url, let scheme = url.scheme?.lowercased() else {
-                decisionHandler(.allow)
-                return
-            }
-            if ["about", "blob", "data"].contains(scheme) {
-                decisionHandler(.allow)
-                return
-            }
-            let mainFrame = action.targetFrame?.isMainFrame ?? true
-            let ours = url.host == Config.serverURL.host
-            if !["http", "https"].contains(scheme) || (mainFrame && !ours) {
-                // Instagram, YouTube and the like open in their own apps.
-                UIApplication.shared.open(url)
                 decisionHandler(.cancel)
                 return
             }
-            decisionHandler(.allow)
+            let mainFrame = action.targetFrame?.isMainFrame ?? true
+            let host = url.host?.lowercased() ?? ""
+            let ours = scheme == Config.serverURL.scheme && host == Config.serverURL.host?.lowercased()
+            if ["about", "blob", "data"].contains(scheme) {
+                decisionHandler(mainFrame ? .cancel : .allow)
+                return
+            }
+            guard scheme == "https" || (scheme == "http" && ours) else {
+                decisionHandler(.cancel)
+                return
+            }
+            if ours || (!mainFrame && Coordinator.playerHosts.contains(host)) {
+                decisionHandler(.allow)
+                return
+            }
+            if mainFrame, action.navigationType == .linkActivated || action.navigationType == .other {
+                Coordinator.openOutside(url)
+            }
+            decisionHandler(.cancel)
         }
 
         /// target="_blank" links: open outside the app rather than in a new web view.
@@ -142,8 +165,14 @@ struct WebAppView: UIViewRepresentable {
             for navigationAction: WKNavigationAction,
             windowFeatures: WKWindowFeatures
         ) -> WKWebView? {
-            if let url = navigationAction.request.url { UIApplication.shared.open(url) }
+            if let url = navigationAction.request.url { Coordinator.openOutside(url) }
             return nil
+        }
+
+        /// Only ordinary web links leave the app; iOS sends Instagram and YouTube ones to their apps.
+        static func openOutside(_ url: URL) {
+            guard url.scheme?.lowercased() == "https" else { return }
+            UIApplication.shared.open(url)
         }
 
         // The web app asks before deleting several things at once.
