@@ -34,7 +34,8 @@ days. Note your **Team ID** (developer.apple.com → Account → Membership deta
    Name `GitHub`, access **Admin** (needed to sign with Apple-managed certificates). Download the
    `.p8` key (it can only be downloaded once) and note the **Key ID** and the **Issuer ID** above
    the list.
-4. **TestFlight → Internal Testing → +** a group (say `Me`) and add yourself.
+4. **TestFlight → Internal Testing → +** a group (say `Me`) and add yourself. (To share the app with
+   other people too, see [Sharing it with other people](#sharing-it-with-other-people).)
 
 ### 3. Give GitHub the keys
 
@@ -57,7 +58,33 @@ open it, and sign in.
 do it again: it says the note is saved on the phone, and it's sent when you're back online.
 
 Every later change pushed to `main` under `ios/` becomes a new TestFlight build automatically.
-TestFlight builds expire after 90 days; any new build resets that.
+TestFlight builds expire after 90 days; any new build resets that. If nothing under `ios/` has
+changed in a while, Actions → **iOS** → Run workflow makes a fresh one.
+
+## Sharing it with other people
+
+The people you invite (Account → People on the web app) can use the iPhone app too, through a public
+TestFlight link. They don't need a developer account: just an iPhone on iOS 18 or later, an Apple
+Account, and Apple's free **TestFlight** app. Once, in App Store Connect → your app → **TestFlight**:
+
+1. **Test Information** (sidebar, under Additional): a short beta description (say "A jiu-jitsu
+   notebook: notes, techniques and a focus list, with Siri") and a feedback email.
+2. **An account for Apple's reviewer.** In the web app, make an invite and join it yourself as, say,
+   `review@` your domain, with its own password. Put that email and password under **Sign-In
+   Information**. (Remove that person later if you like; reviews of later versions need it again.)
+3. **External Testing → +**, a group (say `Friends`). **Add Builds**, pick the newest build, and
+   **Submit Review**. Only the first build of each version needs the full Beta App Review; later builds
+   of the same version usually go straight out.
+4. In that group's Testers tab, **Create Public Link**: open to anyone, or filtered to iPhone on
+   iOS 18 or later, with a tester limit if you like. Without an account from your invite, the app
+   is just a sign-in screen, so a link that travels further than you meant gives nothing away.
+
+Then send each person two links, in this order: their BJJ Notes invite (they pick an email and
+password in Safari), then the TestFlight link (Accept, Install). They open BJJ Notes and sign in.
+New builds reach them in TestFlight, which can update the app automatically.
+
+Raising `MARKETING_VERSION` in `project.yml` (it's the version people see) means a full Beta App
+Review again; the build number goes up on its own with every build.
 
 ## Working on it
 

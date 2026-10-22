@@ -112,8 +112,9 @@ undo history. Only the starter positions are shared. Nobody, the owner included,
 - **Removing someone.** People → ••• → **Remove**. Their account and whole notebook are deleted; their sign-ins,
   Claude connection and tokens stop working at once.
 - **Your password** stays the `OWNER_PASSWORD` secret. Everyone else changes theirs on their Account page.
-- **The iPhone app** works for anyone who signs in, but TestFlight builds only reach people you add as testers in
-  App Store Connect. Everyone else can use the web app from the home screen.
+- **The iPhone app** reaches them through a public TestFlight link: no developer account needed on their side,
+  just an iPhone on iOS 18+ and the free TestFlight app. One-time setup in App Store Connect is in
+  [ios/README.md](ios/README.md#sharing-it-with-other-people). Until then, the web app works from their home screen.
 
 Upgrading from the single-user version needs nothing in GitHub: on the first start, everything that was there
 becomes the owner's, and existing sign-ins, the Claude connector and Siri Shortcuts keep working. The next time
