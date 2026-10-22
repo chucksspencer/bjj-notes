@@ -68,7 +68,7 @@ describe('accounts', () => {
   it('signs the owner in with the password alone until an email is on file', async () => {
     owner = await signIn('', OWNER_PASSWORD);
     const me = await api<AccountView>(owner, 'GET', '/api/v1/account');
-    expect(me.body.me).toEqual({ id: 1, name: 'Chuck', email: null, isOwner: true });
+    expect(me.body.me).toEqual({ id: 1, name: 'Chuck', email: null, isOwner: true, belt: 'purple' });
     expect(me.body.people!.map(p => p.name)).toEqual(['Chuck']);
 
     const set = await api(owner, 'PATCH', '/api/v1/account', { email: 'Owner@Example.com' });
@@ -80,13 +80,20 @@ describe('accounts', () => {
   });
 
   it('invites someone with a one-time link', async () => {
-    const made = await api<{ url: string; invite: { id: number } }>(owner, 'POST', '/api/v1/invites', { name: SAM.name, email: SAM.email });
+    // Belts are checked; the owner picks the new person's.
+    expect((await api(owner, 'POST', '/api/v1/invites', { name: SAM.name, belt: 'green' })).status).toBe(400);
+    const made = await api<{ url: string; invite: { id: number; belt: string } }>(owner, 'POST', '/api/v1/invites', {
+      name: SAM.name,
+      email: SAM.email,
+      belt: 'blue',
+    });
     expect(made.status).toBe(201);
+    expect(made.body.invite.belt).toBe('blue');
     expect(made.body.url).toMatch(new RegExp(`^${s.base}/join#[\\w-]{20,}$`));
     const token = made.body.url.split('#')[1]!;
 
     const check = await api({}, 'POST', '/api/v1/invites/check', { token });
-    expect(check.body).toMatchObject({ purpose: 'join', name: 'Sam', email: SAM.email });
+    expect(check.body).toMatchObject({ purpose: 'join', name: 'Sam', email: SAM.email, belt: 'blue' });
     expect((await api({}, 'POST', '/api/v1/invites/check', { token: 'not-a-real-token-at-all' })).status).toBe(404);
 
     // The app header is required, the password must be long enough, and the email can't be taken.
@@ -98,7 +105,7 @@ describe('accounts', () => {
 
     const joined = await api({}, 'POST', '/api/v1/invites/accept', { token, ...SAM });
     expect(joined.status).toBe(200);
-    expect(joined.body).toMatchObject({ signedIn: true, user: { name: 'Sam', email: SAM.email, isOwner: false } });
+    expect(joined.body).toMatchObject({ signedIn: true, user: { name: 'Sam', email: SAM.email, isOwner: false, belt: 'blue' } });
     samId = joined.body.user.id;
     sam = { cookie: joined.headers.get('set-cookie')!.split(';')[0]! };
 
@@ -117,6 +124,32 @@ describe('accounts', () => {
     const people = (await api<AccountView>(owner, 'GET', '/api/v1/account')).body.people!;
     expect(people.map(p => p.name)).toEqual(['Chuck', 'Sam']);
     expect((await api(owner, 'DELETE', '/api/v1/people/1')).status).toBe(404); // the owner can't be removed
+  });
+});
+
+describe('belts', () => {
+  it('lets each person change their own belt, and shows everyone\'s to the owner', async () => {
+    expect((await api(sam, 'PATCH', '/api/v1/account', { belt: 'green' })).status).toBe(400);
+    expect((await api(sam, 'PATCH', '/api/v1/account', { belt: 'purple' })).body).toMatchObject({ name: 'Sam', belt: 'purple' });
+    expect((await api(sam, 'GET', '/api/v1/session')).body.user.belt).toBe('purple');
+    // Changing the belt leaves the rest of the profile alone.
+    expect((await api<AccountView>(sam, 'GET', '/api/v1/account')).body.me).toMatchObject({ name: 'Sam', email: SAM.email, belt: 'purple' });
+    const people = (await api<AccountView>(owner, 'GET', '/api/v1/account')).body.people!;
+    expect(people.map(p => [p.name, p.belt])).toEqual([
+      ['Chuck', 'purple'],
+      ['Sam', 'purple'],
+    ]);
+    // An invite without a belt is for a white belt; a reset link keeps the person's own.
+    const plain = await api<{ url: string; invite: { belt: string } }>(owner, 'POST', '/api/v1/invites', {});
+    expect(plain.body.invite.belt).toBe('white');
+    expect((await api({}, 'POST', '/api/v1/invites/check', { token: plain.body.url.split('#')[1] })).body.belt).toBe('white');
+    const reset = await api<{ url: string; invite: { belt: string | null } }>(owner, 'POST', `/api/v1/people/${samId}/reset`);
+    expect(reset.body.invite.belt).toBeNull();
+    expect((await api({}, 'POST', '/api/v1/invites/check', { token: reset.body.url.split('#')[1] })).body.belt).toBe('purple');
+    for (const i of (await api<AccountView>(owner, 'GET', '/api/v1/account')).body.invites!) {
+      await api(owner, 'DELETE', `/api/v1/invites/${i.id}`);
+    }
+    await api(sam, 'PATCH', '/api/v1/account', { belt: 'blue' });
   });
 });
 
@@ -243,7 +276,9 @@ describe('separate notebooks for Claude and Siri', () => {
     const ownerMcp = await mcp((await connect(s, { email: 'owner@example.com', password: OWNER_PASSWORD })).access_token);
     try {
       expect(samMcp.client.getInstructions()).toMatch(/^Sam's personal Brazilian jiu-jitsu notebook/);
+      expect(samMcp.client.getInstructions()).toContain('Sam is a blue belt.');
       expect(ownerMcp.client.getInstructions()).toMatch(/^Chuck's personal Brazilian jiu-jitsu notebook/);
+      expect(ownerMcp.client.getInstructions()).toContain('Chuck is a purple belt.');
       expect(await samMcp.call('get_focus')).toContain('1. Escapes');
       expect(await samMcp.call('get_focus')).not.toContain('Baratoplata');
       expect(await samMcp.call('search', { query: 'baratoplata' })).toBe('Nothing found for "baratoplata".');
@@ -358,7 +393,7 @@ describe('owner without an email yet', () => {
       headers: { 'content-type': 'application/json', 'x-bjj-app': '1' },
       body: JSON.stringify({ email: 'Me@Example.com', password: OWNER_PASSWORD }),
     });
-    expect(await res.json()).toEqual({ signedIn: true, user: { id: 1, name: 'Chuck', email: 'me@example.com', isOwner: true } });
+    expect(await res.json()).toEqual({ signedIn: true, user: { id: 1, name: 'Chuck', email: 'me@example.com', isOwner: true, belt: 'purple' } });
     const pwOnly = await fetch(`${fresh.base}/api/v1/session`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-bjj-app': '1' },

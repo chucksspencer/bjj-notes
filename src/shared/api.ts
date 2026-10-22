@@ -273,11 +273,15 @@ export interface TechniquePatch {
 
 // ---------- people and sign-in ----------
 
+/** A person's rank, which colours their app. */
+export type BeltRank = 'white' | 'blue' | 'purple' | 'brown' | 'black';
+
 export interface Me {
   id: number;
   name: string | null;
   email: string | null;
   isOwner: boolean;
+  belt: BeltRank;
 }
 
 export type SessionInfo = { signedIn: false } | { signedIn: true; user: Me };
@@ -302,6 +306,8 @@ export interface InviteView {
   name: string | null;
   email: string | null;
   userId: number | null;
+  /** The belt a join link gives the new account (null for resets). */
+  belt: BeltRank | null;
   createdAt: string;
   expiresAt: string;
 }
@@ -321,5 +327,7 @@ export interface InviteCheck {
   purpose: 'join' | 'reset';
   name: string | null;
   email: string | null;
+  /** The new account's belt, or (for a reset) the person's own. */
+  belt: BeltRank;
   expiresAt: string;
 }

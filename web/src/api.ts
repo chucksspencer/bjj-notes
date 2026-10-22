@@ -2,6 +2,7 @@ import { QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/re
 import type {
   AccountView,
   ApiTokenView,
+  BeltRank,
   FocusAction,
   InviteCheck,
   InviteView,
@@ -380,7 +381,7 @@ function useAccountWrite<V, R>(fn: (v: V) => Promise<R>) {
 export function useUpdateProfile() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { name?: string | null; email?: string | null }) => request<Me>('PATCH', '/api/v1/account', v),
+    mutationFn: (v: { name?: string | null; email?: string | null; belt?: BeltRank }) => request<Me>('PATCH', '/api/v1/account', v),
     onSuccess: me => {
       qc.setQueryData(keys.session, { signedIn: true, user: me } satisfies SessionInfo);
       void qc.invalidateQueries({ queryKey: keys.account });
@@ -397,7 +398,9 @@ export const useCreateToken = () =>
 export const useRevokeToken = () => useAccountWrite((id: number) => request<MessageResult>('DELETE', `/api/v1/account/tokens/${id}`));
 
 export const useCreateInvite = () =>
-  useAccountWrite((v: { name?: string; email?: string }) => request<{ url: string; invite: InviteView }>('POST', '/api/v1/invites', v));
+  useAccountWrite((v: { name?: string; email?: string; belt?: BeltRank }) =>
+    request<{ url: string; invite: InviteView }>('POST', '/api/v1/invites', v),
+  );
 
 export const useRevokeInvite = () => useAccountWrite((id: number) => request<MessageResult>('DELETE', `/api/v1/invites/${id}`));
 

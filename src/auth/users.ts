@@ -4,11 +4,16 @@ import type { Queryable } from '../db.js';
 import { UserError } from '../services/errors.js';
 import { secretsMatch, sha256 } from './provider.js';
 
+export const BELTS = ['white', 'blue', 'purple', 'brown', 'black'] as const;
+export type Belt = (typeof BELTS)[number];
+
 export interface User {
   id: number;
   email: string | null;
   name: string | null;
   isOwner: boolean;
+  /** Their rank. It colours their app. */
+  belt: Belt;
 }
 
 interface UserRow {
@@ -16,11 +21,17 @@ interface UserRow {
   email: string | null;
   name: string | null;
   is_owner: boolean;
+  belt: Belt;
   password_hash: string | null;
 }
 
-const toUser = (r: UserRow): User => ({ id: r.id, email: r.email, name: r.name, isOwner: r.is_owner });
-const USER_COLS = 'id, email, name, is_owner, password_hash';
+const toUser = (r: UserRow): User => ({ id: r.id, email: r.email, name: r.name, isOwner: r.is_owner, belt: r.belt });
+const USER_COLS = 'id, email, name, is_owner, belt, password_hash';
+
+export function checkBelt(belt: string): Belt {
+  if (!(BELTS as readonly string[]).includes(belt)) throw new UserError(`Belts are ${BELTS.join(', ')}.`);
+  return belt as Belt;
+}
 
 // ---------- passwords ----------
 
@@ -136,8 +147,13 @@ export async function listPeople(q: Queryable): Promise<PersonRow[]> {
   return rows.map(r => ({ ...toUser(r), createdAt: r.created_at, lastActiveAt: r.last_active }));
 }
 
-export async function updateProfile(q: Queryable, user: User, input: { name?: string | null; email?: string | null }): Promise<User> {
+export async function updateProfile(
+  q: Queryable,
+  user: User,
+  input: { name?: string | null; email?: string | null; belt?: string },
+): Promise<User> {
   const name = input.name !== undefined ? cleanName(input.name) : user.name;
+  const belt = input.belt !== undefined ? checkBelt(input.belt) : user.belt;
   let email = user.email;
   if (input.email !== undefined) {
     email = cleanEmail(input.email);
@@ -145,8 +161,8 @@ export async function updateProfile(q: Queryable, user: User, input: { name?: st
     const taken = (await q.query('select 1 from users where lower(email) = $1 and id <> $2', [email, user.id])).rows[0];
     if (taken) throw new UserError('Someone else already signs in with that email.');
   }
-  await q.query('update users set name = $2, email = $3 where id = $1', [user.id, name, email]);
-  return { ...user, name, email };
+  await q.query('update users set name = $2, email = $3, belt = $4 where id = $1', [user.id, name, email, belt]);
+  return { ...user, name, email, belt };
 }
 
 export async function changePassword(q: Queryable, user: User, current: string, next: string): Promise<void> {
@@ -174,6 +190,8 @@ export interface InviteRow {
   name: string | null;
   email: string | null;
   userId: number | null;
+  /** The belt a join link gives the new account. */
+  belt: Belt | null;
   createdAt: string;
   expiresAt: string;
 }
@@ -183,7 +201,14 @@ const newToken = () => randomBytes(24).toString('base64url');
 /** A one-time link to make an account (join) or set a new password (reset). Returns the token; only its hash is kept. */
 export async function createInvite(
   q: Queryable,
-  input: { createdBy: number; purpose: 'join' | 'reset'; userId?: number; name?: string | null; email?: string | null },
+  input: {
+    createdBy: number;
+    purpose: 'join' | 'reset';
+    userId?: number;
+    name?: string | null;
+    email?: string | null;
+    belt?: string;
+  },
 ): Promise<{ token: string; invite: InviteRow }> {
   const token = newToken();
   const email = cleanEmail(input.email);
@@ -196,10 +221,19 @@ export async function createInvite(
     await q.query("delete from invites where purpose = 'reset' and user_id = $1 and used_at is null", [input.userId]);
   }
   const { rows } = await q.query<InviteDbRow>(
-    `insert into invites (token_hash, purpose, created_by, user_id, name, email, expires_at)
-     values ($1, $2, $3, $4, $5, $6, now() + make_interval(days => $7))
+    `insert into invites (token_hash, purpose, created_by, user_id, name, email, expires_at, belt)
+     values ($1, $2, $3, $4, $5, $6, now() + make_interval(days => $7), $8)
      returning ${INVITE_COLS}`,
-    [sha256(token), input.purpose, input.createdBy, input.userId ?? null, cleanName(input.name), email, INVITE_DAYS],
+    [
+      sha256(token),
+      input.purpose,
+      input.createdBy,
+      input.userId ?? null,
+      cleanName(input.name),
+      email,
+      INVITE_DAYS,
+      input.purpose === 'join' ? checkBelt(input.belt ?? 'white') : null,
+    ],
   );
   return { token, invite: toInvite(rows[0]!) };
 }
@@ -210,16 +244,18 @@ interface InviteDbRow {
   name: string | null;
   email: string | null;
   user_id: number | null;
+  belt: Belt | null;
   created_at: string;
   expires_at: string;
 }
-const INVITE_COLS = `id, purpose, name, email, user_id, to_json(created_at) #>> '{}' as created_at, to_json(expires_at) #>> '{}' as expires_at`;
+const INVITE_COLS = `id, purpose, name, email, user_id, belt, to_json(created_at) #>> '{}' as created_at, to_json(expires_at) #>> '{}' as expires_at`;
 const toInvite = (r: InviteDbRow): InviteRow => ({
   id: r.id,
   purpose: r.purpose,
   name: r.name,
   email: r.email,
   userId: r.user_id,
+  belt: r.belt,
   createdAt: r.created_at,
   expiresAt: r.expires_at,
 });
@@ -281,10 +317,11 @@ export async function acceptInvite(
     const taken = (await q.query('select 1 from users where lower(email) = $1', [email])).rows[0];
     if (taken) throw new UserError('Someone already signs in with that email.');
     const created = (
-      await q.query<UserRow>(`insert into users (email, name, password_hash) values ($1, $2, $3) returning ${USER_COLS}`, [
+      await q.query<UserRow>(`insert into users (email, name, password_hash, belt) values ($1, $2, $3, $4) returning ${USER_COLS}`, [
         email,
         cleanName(input.name),
         hash,
+        row.belt ?? 'white',
       ])
     ).rows[0]!;
     user = toUser(created);

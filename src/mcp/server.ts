@@ -22,9 +22,10 @@ import {
 } from '../services/vocab.js';
 
 /** What Claude is told about the notebook, written for the person it belongs to. */
-export function instructions(name: string | null): string {
+export function instructions(name: string | null, belt?: string): string {
   const who = name?.trim() || 'the user';
-  return `${name?.trim() ? `${who}'s` : 'A'} personal Brazilian jiu-jitsu notebook: technique cards organised as a position graph, dated notes from classes, videos and rolling, training sessions, and a ranked focus list.
+  const rank = belt ? ` ${name?.trim() ? who : 'They'} ${name?.trim() ? 'is' : 'are'} a ${belt} belt.` : '';
+  return `${name?.trim() ? `${who}'s` : 'A'} personal Brazilian jiu-jitsu notebook: technique cards organised as a position graph, dated notes from classes, videos and rolling, training sessions, and a ranked focus list.${rank}
 
 How to use it well:
 - Names often arrive through voice transcription and may be misspelled. Tools resolve names fuzzily; check the names they report back and correct with another call if a match looks wrong.
@@ -81,8 +82,8 @@ const newTechnique = z.object({
   role: z.enum(ROLES).optional(),
 });
 
-export function buildMcpServer(ctx: Ctx, userName: string | null = null): McpServer {
-  const server = new McpServer({ name: 'bjj-notes', version: '0.1.0' }, { instructions: instructions(userName) });
+export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: string } = { name: null }): McpServer {
+  const server = new McpServer({ name: 'bjj-notes', version: '0.1.0' }, { instructions: instructions(user.name, user.belt) });
   const readOnly = { readOnlyHint: true, openWorldHint: false };
   const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 

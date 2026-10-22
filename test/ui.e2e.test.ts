@@ -29,15 +29,20 @@ describe.runIf(run)('web app (end to end)', () => {
 
   it('signs in', async () => {
     await page.goto(s.base);
+    // Signed out, the app is black with a red bar, like its icon.
+    expect(await page.evaluate(() => document.documentElement.dataset.belt ?? null)).toBeNull();
     await page.getByLabel('Password').fill('wrong password');
     await page.getByRole('button', { name: 'Sign in' }).click();
     await expect.poll(() => page.getByRole('alert').textContent()).toBe('Wrong email or password.');
     await page.getByLabel('Password').fill(OWNER_PASSWORD);
     await page.getByRole('button', { name: 'Sign in' }).click();
     await page.getByRole('heading', { name: 'Lab' }).waitFor(); // the Focus tab opens on the Lab
+    // The app wears the owner's belt.
+    expect(await page.evaluate(() => document.documentElement.dataset.belt)).toBe('purple');
     await page.getByRole('navigation', { name: 'Views' }).getByRole('link', { name: 'Focus' }).click();
     await page.getByRole('heading', { name: 'Focus' }).waitFor();
-    expect(await page.locator('.focus-row').count()).toBe(7);
+    // The heading comes before the list has loaded.
+    await expect.poll(() => page.locator('.focus-row').count()).toBe(7);
   });
 
   it('adds a note from the tab bar and shows it on the technique card', async () => {
@@ -378,21 +383,27 @@ describe.runIf(run)('web app (end to end)', () => {
 
     await page.getByRole('button', { name: 'Invite' }).click();
     await page.getByRole('dialog').getByLabel('Their name').fill('Sam');
+    await page.getByRole('dialog').getByRole('radio', { name: 'Blue belt' }).check({ force: true });
     await page.getByRole('button', { name: 'Make invite link' }).click();
     const link = await page.getByRole('dialog').getByLabel('Link').inputValue();
     expect(link).toMatch(new RegExp(`^${s.base}/join#[\\w-]{20,}$`));
     await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click();
     await page.getByText('Invite for Sam').waitFor();
+    await page.getByText(/^Blue belt · made today/).waitFor();
 
     const phone = await (await browser.newContext({ timezoneId: TIME_ZONE, viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true })).newPage();
     phone.setDefaultTimeout(8000);
     await phone.goto(link);
     await phone.getByRole('heading', { name: 'Join BJJ Notes' }).waitFor();
     expect(await phone.getByLabel('Your name').inputValue()).toBe('Sam');
+    // The join page already wears their belt.
+    await phone.getByText("You're joining as a blue belt").waitFor();
+    expect(await phone.evaluate(() => document.documentElement.dataset.belt)).toBe('blue');
     await phone.getByLabel(/^Email/).fill('sam@example.com');
     await phone.getByLabel('Password').fill('sam-password-123');
     await phone.getByRole('button', { name: 'Create my account' }).click();
     await phone.getByRole('heading', { name: 'Lab' }).waitFor();
+    expect(await phone.evaluate(() => document.documentElement.dataset.belt)).toBe('blue');
     await phone.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Library/ }).click();
     await phone.getByRole('heading', { name: 'Library', exact: true }).waitFor();
     expect(await phone.locator('.row-title', { hasText: 'Baratoplata' }).count()).toBe(0);
@@ -411,10 +422,20 @@ describe.runIf(run)('web app (end to end)', () => {
     await phone.getByRole('heading', { name: 'Account' }).waitFor(); // back where they were
     expect(await phone.getByLabel('Your name').count()).toBe(0);
     expect(await phone.getByLabel('Name (Claude calls you this)').inputValue()).toBe('Sam');
+
+    // A promotion: the app changes colour as soon as the new belt is saved.
+    expect(await phone.getByRole('radio', { name: 'Blue belt' }).isChecked()).toBe(true);
+    await phone.getByRole('radio', { name: 'Brown belt' }).check({ force: true });
+    await phone.getByText('Brown belt saved.').waitFor();
+    expect(await phone.evaluate(() => document.documentElement.dataset.belt)).toBe('brown');
+    const band = await phone.locator('.btn').first().evaluate(el => getComputedStyle(el).backgroundColor);
+    expect(band).toBe('rgb(107, 65, 40)'); // the brown belt's colour
     await phone.context().close();
 
-    // The owner sees Sam in People.
+    // The owner sees Sam in People, with Sam's belt; the owner's app stays purple.
     await page.reload();
     await page.locator('.row-title', { hasText: 'Sam' }).waitFor();
+    await page.getByText(/^Brown belt · sam@example.com/).waitFor();
+    expect(await page.evaluate(() => document.documentElement.dataset.belt)).toBe('purple');
   });
 });

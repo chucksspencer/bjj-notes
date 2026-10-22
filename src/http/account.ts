@@ -13,6 +13,7 @@ import type {
 } from '../shared/api.js';
 import {
   acceptInvite,
+  BELTS,
   changePassword,
   createApiToken,
   createInvite,
@@ -36,7 +37,8 @@ const id = z.coerce.number().int().positive();
 const token = z.string().trim().min(10).max(100);
 const optional = (max: number) => z.string().trim().max(max).nullable().optional();
 
-const toMe = (u: User): Me => ({ id: u.id, name: u.name, email: u.email, isOwner: u.isOwner });
+const toMe = (u: User): Me => ({ id: u.id, name: u.name, email: u.email, isOwner: u.isOwner, belt: u.belt });
+const belt = z.enum(BELTS);
 
 /** Wraps an async handler; the result is sent as JSON, errors go to the API error handler. */
 const h =
@@ -106,6 +108,7 @@ export function accountRouter(opts: AccountRouterOptions): Router {
         purpose: found.purpose,
         name: found.user?.name ?? found.name,
         email: found.user?.email ?? found.email,
+        belt: found.user?.belt ?? found.belt ?? 'white',
         expiresAt: found.expiresAt,
       };
     }),
@@ -147,8 +150,8 @@ export function accountRouter(opts: AccountRouterOptions): Router {
     requireAuth,
     json,
     h(async (req, res): Promise<Me> => {
-      const b = z.object({ name: optional(80), email: optional(254) }).parse(req.body);
-      return toMe(await updateProfile(db, await me(res), { name: b.name, email: b.email ?? undefined }));
+      const b = z.object({ name: optional(80), email: optional(254), belt: belt.optional() }).parse(req.body);
+      return toMe(await updateProfile(db, await me(res), { name: b.name, email: b.email ?? undefined, belt: b.belt }));
     }),
   );
 
@@ -191,8 +194,8 @@ export function accountRouter(opts: AccountRouterOptions): Router {
     json,
     h(async (req, res): Promise<{ url: string; invite: InviteView }> => {
       const user = await owner(res);
-      const b = z.object({ name: optional(80), email: optional(254) }).parse(req.body ?? {});
-      const made = await createInvite(db, { createdBy: user.id, purpose: 'join', name: b.name, email: b.email });
+      const b = z.object({ name: optional(80), email: optional(254), belt: belt.optional() }).parse(req.body ?? {});
+      const made = await createInvite(db, { createdBy: user.id, purpose: 'join', name: b.name, email: b.email, belt: b.belt });
       res.status(201);
       return { url: linkFor(made.token), invite: made.invite };
     }),
