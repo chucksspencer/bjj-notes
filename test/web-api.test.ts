@@ -54,7 +54,7 @@ describe('web sign-in', () => {
   it('signs in with the owner password and sets a locked-down cookie', async () => {
     const res = await api('POST', '/api/v1/session', { password: OWNER_PASSWORD }, { auth: 'none' });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ signedIn: true, user: { id: 1, name: 'Chuck', email: null, isOwner: true } });
+    expect(res.body).toEqual({ signedIn: true, user: { id: 1, name: 'Chuck', email: null, isOwner: true, belt: 'purple' } });
     const setCookie = res.headers.get('set-cookie')!;
     expect(setCookie).toMatch(/^bjj_session=[\w-]{20,};/);
     expect(setCookie).toContain('HttpOnly');

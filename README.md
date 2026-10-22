@@ -71,7 +71,7 @@ Open the server's address in Safari and sign in with your email and `OWNER_PASSW
 - **Technique card**: tap the belt's stripes to change status; positions, key details, common mistakes, related techniques and notes, with YouTube videos that play from the saved timestamp.
 - **+**: a new note from anywhere. Notes without a technique land in the **Inbox** to file later.
 - **Positions**: what you have from each position, top or bottom, the ways in, and the gaps.
-- **Account** (the person icon at the top of Focus): your name (Claude uses it), email, password, Siri Shortcut tokens and, for the owner, People.
+- **Account** (the person icon at the top of Focus): your name and belt (Claude knows both), email, password, Siri Shortcut tokens and, for the owner, People. The app wears your belt's colours, in light and dark mode; a black belt's rank bar is red. Signed out, and in its icon, the app is a black belt.
 
 Every change shows an **Undo** button, the same undo Claude uses when you say "undo that".
 
@@ -102,8 +102,9 @@ Shortcuts also run on Apple Watch.
 Everyone has their own notebook: techniques, notes, sessions, sources, the focus list, the Lab, photos and
 undo history. Only the starter positions are shared. Nobody, the owner included, can read anyone else's notes.
 
-- **Inviting.** Account → People → **Invite**. You get a one-time link (good for 7 days) to send however you
-  like. They open it, pick their email and password, and land in an empty notebook. Pending links are listed
+- **Inviting.** Account → People → **Invite**, with their belt. You get a one-time link (good for 7 days) to send
+  however you like. They open it, pick their email and password, and land in an empty notebook in their belt's
+  colours. They can change their belt on their Account page when they're promoted. Pending links are listed
   under People until they're used, and you can cancel them.
 - **Their Claude and Siri.** They add the same connector URL in their own Claude settings and sign in with their
   email and password; their Shortcuts use a token they make on their own Account page.
@@ -165,7 +166,7 @@ infra/               Google Cloud bootstrap (run once) and deploy (run by CI) sc
 test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture, JSON API) and the web app in Chromium
 ```
 
-**Data model.** `users` (the owner and everyone invited) · `invites` (join and password-reset links) · `api_tokens` (Siri Shortcuts) · `positions` (with aliases like "100 kilos"; shared) · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, inbox flag) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `focus_items` + `focus_events` (every add, move, pause and completion, for focus over time) · `activity_log` (powers `undo_last`). Every notebook table has a `user_id`; each request reads and writes only its signed-in user's rows (the handle services get carries the user, and a query without one throws), and composite foreign keys mean a row can only ever point at the same person's notes, techniques, sessions and sources.
+**Data model.** `users` (the owner and everyone invited, each with a belt) · `invites` (join and password-reset links) · `api_tokens` (Siri Shortcuts) · `positions` (with aliases like "100 kilos"; shared) · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, inbox flag) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `focus_items` + `focus_events` (every add, move, pause and completion, for focus over time) · `activity_log` (powers `undo_last`). Every notebook table has a `user_id`; each request reads and writes only its signed-in user's rows (the handle services get carries the user, and a query without one throws), and composite foreign keys mean a row can only ever point at the same person's notes, techniques, sessions and sources.
 
 **Name matching.** Voice transcription mangles names, so lookups combine trigram similarity, edit distance and word matching: "barra toe plata" finds Baratoplata, "ghost" finds Ghost escape, but "omoplata" is not mistaken for Baratoplata. Exact names and aliases always win; uncertain matches are reported back rather than guessed.
 

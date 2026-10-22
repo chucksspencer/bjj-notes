@@ -30,7 +30,7 @@ export function userIdOf(res: Response): number {
 
 export const sessionInfo = (u: User): SessionInfo => ({
   signedIn: true,
-  user: { id: u.id, name: u.name, email: u.email, isOwner: u.isOwner },
+  user: { id: u.id, name: u.name, email: u.email, isOwner: u.isOwner, belt: u.belt },
 });
 
 export interface WebAuthOptions {

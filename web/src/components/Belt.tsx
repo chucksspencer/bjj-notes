@@ -1,7 +1,7 @@
 import type { Status } from '../../../src/shared/api';
 import { STATUS_LABEL, STATUSES, stripesFor } from '../lib/format';
 
-/** Small black rank bar with four stripes: how well a technique is known, at a glance. */
+/** Small rank bar with four stripes (black, or red on a black belt): how well a technique is known, at a glance. */
 export function RankBar({ status }: { status: Status }) {
   const n = stripesFor(status);
   return (
@@ -48,7 +48,7 @@ export function Belt({ status, onChange, disabled }: { status: Status; onChange:
   );
 }
 
-/** The app's mark: the end of a purple belt with its black rank bar. */
+/** The app's mark: the end of the belt (the signed-in person's; black with a red bar otherwise) and its rank bar. */
 export function BeltMark() {
   return (
     <span className="belt-mark" aria-hidden>

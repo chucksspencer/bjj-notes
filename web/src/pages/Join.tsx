@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ApiError, useAcceptInvite, useInviteCheck } from '../api';
 import { BeltMark } from '../components/Belt';
+import { applyBelt, beltName } from '../lib/belt';
 
 /**
  * Where invite and password-reset links land (/join#token). The token stays in the fragment, so it
@@ -21,6 +22,10 @@ export function Join() {
     setName(n => n || check.data.name || '');
     setEmail(e => e || check.data.email || '');
   }, [check.data]);
+  // The page wears the belt the account is for.
+  useEffect(() => {
+    applyBelt(check.data?.belt);
+  }, [check.data?.belt]);
 
   const reset = check.data?.purpose === 'reset';
   const tooShort = password.length > 0 && password.length < 10;
@@ -62,7 +67,7 @@ export function Join() {
         <p className="muted" style={{ marginTop: 0, marginBottom: 24 }}>
           {reset
             ? `Choose a new password for ${check.data.email ?? check.data.name ?? 'your account'}.`
-            : 'Your own notebook: techniques, notes from class and video, and a focus list. Nobody else sees it.'}
+            : `Your own notebook: techniques, notes from class and video, and a focus list. Nobody else sees it. You're joining as a ${beltName(check.data.belt).toLowerCase()}; you can change that later.`}
         </p>
         {!reset && (
           <>

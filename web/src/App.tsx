@@ -5,6 +5,7 @@ import { queryClient, setUnauthorizedHandler, useNotes, useSession } from './api
 import { CaptureProvider, useCapture } from './components/Capture';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Icon } from './components/Icon';
+import { applyBelt } from './lib/belt';
 import { ToastProvider } from './components/Toast';
 import { Account } from './pages/Account';
 import { Focus } from './pages/Focus';
@@ -33,6 +34,12 @@ function Gate() {
   useEffect(() => {
     setUnauthorizedHandler(() => queryClient.setQueryData(['session'], { signedIn: false }));
   }, []);
+  // The app wears the signed-in person's belt; signed out, it's black with a red bar. (The join page
+  // shows the belt the invite is for.)
+  const belt = session.data?.signedIn ? session.data.user.belt : null;
+  useEffect(() => {
+    if (pathname !== '/join') applyBelt(belt);
+  }, [belt, pathname]);
   // Invite and password-reset links work whether or not anyone is signed in on this device.
   if (pathname === '/join') return <Join />;
   if (session.isPending) return null;

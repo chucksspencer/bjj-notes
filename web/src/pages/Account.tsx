@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
-import type { AccountView, InviteView, PersonView } from '../../../src/shared/api';
+import type { AccountView, BeltRank, InviteView, PersonView } from '../../../src/shared/api';
 import {
   useAccount,
   useChangePassword,
@@ -13,12 +13,14 @@ import {
   useSignOut,
   useUpdateProfile,
 } from '../api';
+import { BeltPicker, BeltSwatch } from '../components/BeltPicker';
 import { Icon } from '../components/Icon';
 import { Sheet } from '../components/Sheet';
 import { useToast } from '../components/Toast';
+import { beltName } from '../lib/belt';
 import { agoText } from '../lib/format';
 
-/** Your name, email and password, tokens for Siri Shortcuts, and (for the owner) who else can sign in. */
+/** Your name, email, belt and password, tokens for Siri Shortcuts, and (for the owner) who else can sign in. */
 export function Account() {
   const account = useAccount();
   const signOut = useSignOut();
@@ -37,6 +39,7 @@ export function Account() {
       {a && (
         <>
           <Profile a={a} />
+          <YourBelt a={a} />
           <Password a={a} />
           <Tokens a={a} />
           {a.me.isOwner && <People a={a} />}
@@ -48,6 +51,41 @@ export function Account() {
         </button>
       </div>
     </div>
+  );
+}
+
+/** Your belt: it colours the app, and Claude knows it. Saved as soon as you pick one. */
+function YourBelt({ a }: { a: AccountView }) {
+  const update = useUpdateProfile();
+  const toast = useToast();
+  // Shows the pick straight away; the app changes colour once it's saved.
+  const [picked, setPicked] = useState<BeltRank>(a.me.belt);
+  return (
+    <section>
+      <h2 className="section-title">Belt</h2>
+      <div className="panel belt-panel">
+        <BeltPicker
+          label="Your belt"
+          value={picked}
+          disabled={update.isPending}
+          onChange={belt => {
+            const before = picked;
+            setPicked(belt);
+            update.mutate(
+              { belt },
+              {
+                onSuccess: () => toast.show(`${beltName(belt)} saved.`),
+                onError: err => {
+                  setPicked(before);
+                  toast.error(err);
+                },
+              },
+            );
+          }}
+        />
+      </div>
+      <p className="section-hint">The app wears your belt's colours.</p>
+    </section>
   );
 }
 
@@ -255,13 +293,20 @@ function People({ a }: { a: AccountView }) {
       <div className="panel">
         {people.map(p => (
           <div className="row row-split" key={p.id}>
+            <span className="person-belt" title={beltName(p.belt)}>
+              <BeltSwatch belt={p.belt} small />
+            </span>
             <div className="grow">
               <span className="row-title">
                 {p.name ?? p.email ?? 'No name yet'}
                 {p.isOwner && <span className="account-tag">owner</span>}
               </span>
               <span className="row-meta">
-                {[p.name ? p.email : null, p.lastActiveAt ? `active ${agoText(p.lastActiveAt)}` : `joined ${agoText(p.createdAt)}`]
+                {[
+                  beltName(p.belt),
+                  p.name ? p.email : null,
+                  p.lastActiveAt ? `active ${agoText(p.lastActiveAt)}` : `joined ${agoText(p.createdAt)}`,
+                ]
                   .filter(Boolean)
                   .join(' · ')}
               </span>
@@ -286,7 +331,16 @@ function People({ a }: { a: AccountView }) {
                   <span className="row-title">
                     {i.purpose === 'reset' ? `New password for ${nameOf(i.userId)}` : `Invite${i.name || i.email ? ` for ${i.name ?? i.email}` : ''}`}
                   </span>
-                  <span className="row-meta">Made {agoText(i.createdAt)} · expires {new Date(i.expiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                  <span className="row-meta">
+                    {[
+                      i.belt ? beltName(i.belt) : null,
+                      `made ${agoText(i.createdAt)}`,
+                      `expires ${new Date(i.expiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                      .replace(/^m/, 'M')}
+                  </span>
                 </div>
                 <button
                   type="button"
@@ -346,18 +400,19 @@ function InviteSheet({ onClose, onMade }: { onClose: () => void; onMade: (url: s
   const create = useCreateInvite();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [belt, setBelt] = useState<BeltRank>('white');
   return (
     <Sheet title="Invite someone" onClose={onClose}>
       <form
         onSubmit={e => {
           e.preventDefault();
           create.mutate(
-            { name: name.trim() || undefined, email: email.trim() || undefined },
+            { name: name.trim() || undefined, email: email.trim() || undefined, belt },
             { onSuccess: r => onMade(r.url, name.trim() || email.trim() || null) },
           );
         }}
       >
-        <p className="muted">You'll get a link to send them. Both details are optional; they can change them when they join.</p>
+        <p className="muted">You'll get a link to send them. Name and email are optional; they can change them, and their belt, later.</p>
         <label className="field">
           <span className="label">Their name</span>
           <input className="input" value={name} onChange={e => setName(e.target.value)} autoFocus />
@@ -374,6 +429,10 @@ function InviteSheet({ onClose, onMade }: { onClose: () => void; onMade: (url: s
             onChange={e => setEmail(e.target.value)}
           />
         </label>
+        <div className="field">
+          <span className="label">Their belt</span>
+          <BeltPicker label="Their belt" value={belt} onChange={setBelt} />
+        </div>
         {create.error && (
           <p className="error-text" role="alert">
             {create.error.message}

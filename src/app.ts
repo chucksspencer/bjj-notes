@@ -77,7 +77,7 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
       res.status(401).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Sign in again.' }, id: null });
       return;
     }
-    const server = buildMcpServer(userCtx(ctx, user.id), user.name);
+    const server = buildMcpServer(userCtx(ctx, user.id), user);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => {
       void transport.close();
