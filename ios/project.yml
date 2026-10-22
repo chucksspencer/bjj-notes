@@ -13,7 +13,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     # Set by the cloud build from the APPLE_TEAM_ID secret.
     DEVELOPMENT_TEAM: ""
-    BJJ_SERVER_URL: https://bjj-notes-602476730933.us-central1.run.app
+    BJJ_SERVER_URL: https://bjjnotes.chuckspencer.com
 targets:
   BJJNotes:
     type: application

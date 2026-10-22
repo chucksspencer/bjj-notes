@@ -128,6 +128,9 @@ The `run.app` address works fine. To use something like `bjj.example.com` with D
 2. `gcloud beta run domain-mappings create --service bjj-notes --domain bjj.example.com --region us-central1`
 3. Add the **CNAME** it prints (`bjj` → `ghs.googlehosted.com.`) at DreamHost. The certificate can take up to an hour.
 4. Add a repository variable `PUBLIC_URL` = `https://bjj.example.com`, re-run the workflow, then remove and re-add the Claude connector with the new URL (tokens are bound to the URL they were issued for), and update the Siri Shortcuts.
+5. Set `BJJ_SERVER_URL` in `ios/project.yml` to the new address, so the iPhone app uses it (sign in once more in the app afterwards). This repo's is `https://bjjnotes.chuckspencer.com`.
+
+The `run.app` address keeps working alongside the new one.
 
 ## Costs
 

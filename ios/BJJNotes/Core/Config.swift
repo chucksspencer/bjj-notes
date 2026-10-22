@@ -7,7 +7,7 @@ enum Config {
            let url = URL(string: value), url.scheme == "https" || url.scheme == "http" {
             return url
         }
-        return URL(string: "https://bjj-notes-602476730933.us-central1.run.app")!
+        return URL(string: "https://bjjnotes.chuckspencer.com")!
     }()
 
     /// The web app's sign-in cookie. The app reuses it for its own requests.
