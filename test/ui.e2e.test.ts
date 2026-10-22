@@ -6,6 +6,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OWNER_PASSWORD, startServer, type TestServer } from './helpers.js';
 
 const webDir = path.resolve('dist/public');
+// The browser's clock reads in the server's zone (as on a phone in Chicago), so "Today" means the same
+// day to both even when the test machine runs on UTC late in the evening.
+const TIME_ZONE = 'America/Chicago';
 const run = process.env.E2E === '1' && existsSync(path.join(webDir, 'index.html'));
 
 describe.runIf(run)('web app (end to end)', () => {
@@ -16,7 +19,7 @@ describe.runIf(run)('web app (end to end)', () => {
   beforeAll(async () => {
     s = await startServer(null, webDir);
     browser = await chromium.launch();
-    page = await (await browser.newContext({ viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true })).newPage();
+    page = await (await browser.newContext({ timezoneId: TIME_ZONE, viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true })).newPage();
     page.setDefaultTimeout(8000);
   });
   afterAll(async () => {
@@ -28,7 +31,7 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.goto(s.base);
     await page.getByLabel('Password').fill('wrong password');
     await page.getByRole('button', { name: 'Sign in' }).click();
-    await expect.poll(() => page.getByRole('alert').textContent()).toBe('Wrong password.');
+    await expect.poll(() => page.getByRole('alert').textContent()).toBe('Wrong email or password.');
     await page.getByLabel('Password').fill(OWNER_PASSWORD);
     await page.getByRole('button', { name: 'Sign in' }).click();
     await page.getByRole('heading', { name: 'Lab' }).waitFor(); // the Focus tab opens on the Lab
@@ -334,7 +337,7 @@ describe.runIf(run)('web app (end to end)', () => {
   });
 
   it('navigates on desktop Chrome 150+, where scrollTo returns a Promise', async () => {
-    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const ctx = await browser.newContext({ timezoneId: TIME_ZONE, viewport: { width: 1440, height: 900 } });
     await ctx.addInitScript(() => {
       const scrollTo = window.scrollTo.bind(window) as (x: number, y: number) => void;
       (window as unknown as { scrollTo: (x: number, y: number) => Promise<void> }).scrollTo = (x, y) => {
@@ -363,5 +366,55 @@ describe.runIf(run)('web app (end to end)', () => {
     await desktop.getByRole('heading', { name: 'Focus', exact: true }).waitFor();
     expect(errors).toEqual([]);
     await ctx.close();
+  });
+
+  it('invites someone, who joins on their own phone with an empty notebook of their own', async () => {
+    await page.goto(s.base);
+    await page.getByRole('link', { name: 'Account' }).click();
+    await page.getByRole('heading', { name: 'Account' }).waitFor();
+    await page.getByLabel('Email (you sign in with it)').fill('owner@example.com');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByText('Saved.').waitFor();
+
+    await page.getByRole('button', { name: 'Invite' }).click();
+    await page.getByRole('dialog').getByLabel('Their name').fill('Sam');
+    await page.getByRole('button', { name: 'Make invite link' }).click();
+    const link = await page.getByRole('dialog').getByLabel('Link').inputValue();
+    expect(link).toMatch(new RegExp(`^${s.base}/join#[\\w-]{20,}$`));
+    await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click();
+    await page.getByText('Invite for Sam').waitFor();
+
+    const phone = await (await browser.newContext({ timezoneId: TIME_ZONE, viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true })).newPage();
+    phone.setDefaultTimeout(8000);
+    await phone.goto(link);
+    await phone.getByRole('heading', { name: 'Join BJJ Notes' }).waitFor();
+    expect(await phone.getByLabel('Your name').inputValue()).toBe('Sam');
+    await phone.getByLabel(/^Email/).fill('sam@example.com');
+    await phone.getByLabel('Password').fill('sam-password-123');
+    await phone.getByRole('button', { name: 'Create my account' }).click();
+    await phone.getByRole('heading', { name: 'Lab' }).waitFor();
+    await phone.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Library/ }).click();
+    await phone.getByRole('heading', { name: 'Library', exact: true }).waitFor();
+    expect(await phone.locator('.row-title', { hasText: 'Baratoplata' }).count()).toBe(0);
+
+    // The link is spent; opening it again says so.
+    await phone.goto(link);
+    await phone.getByText('This link has expired or was already used.').waitFor();
+
+    // Signing out on the phone, then in again with the new email and password.
+    await phone.goto(`${s.base}/account`);
+    await phone.getByRole('button', { name: 'Sign out' }).click();
+    await phone.getByRole('button', { name: 'Sign in' }).waitFor();
+    await phone.getByLabel('Email').fill('sam@example.com');
+    await phone.getByLabel('Password').fill('sam-password-123');
+    await phone.getByRole('button', { name: 'Sign in' }).click();
+    await phone.getByRole('heading', { name: 'Account' }).waitFor(); // back where they were
+    expect(await phone.getByLabel('Your name').count()).toBe(0);
+    expect(await phone.getByLabel('Name (Claude calls you this)').inputValue()).toBe('Sam');
+    await phone.context().close();
+
+    // The owner sees Sam in People.
+    await page.reload();
+    await page.locator('.row-title', { hasText: 'Sam' }).waitFor();
   });
 });

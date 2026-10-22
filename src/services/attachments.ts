@@ -1,5 +1,5 @@
 // Photos and videos on notes: a reference to the original in Apple Photos, and a small still image.
-import type { Queryable } from '../db.js';
+import { uid, type Queryable } from '../db.js';
 import type { AttachmentView } from '../shared/api.js';
 import { NotFoundError, UserError } from './errors.js';
 import type { Ctx } from './context.js';
@@ -36,8 +36,8 @@ export async function insertAttachments(q: Queryable, noteId: number, inputs: At
     // Stills are served back as image/jpeg, so only JPEGs are kept.
     if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) throw new UserError("A still image wasn't a JPEG.");
     const { rows } = await q.query<{ id: number }>(
-      `insert into attachments (note_id, kind, photos_local_id, photos_cloud_id, filename, taken_at, duration_s, width, height, thumb)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, decode($10, 'base64')) returning id`,
+      `insert into attachments (note_id, kind, photos_local_id, photos_cloud_id, filename, taken_at, duration_s, width, height, thumb, user_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, decode($10, 'base64'), $11) returning id`,
       [
         noteId,
         a.kind,
@@ -49,6 +49,7 @@ export async function insertAttachments(q: Queryable, noteId: number, inputs: At
         a.width ?? null,
         a.height ?? null,
         bytes.toString('base64'),
+        uid(q),
       ],
     );
     out.push({ id: rows[0]!.id, linked: !!(a.photos_local_id || a.photos_cloud_id) });
@@ -58,7 +59,10 @@ export async function insertAttachments(q: Queryable, noteId: number, inputs: At
 
 /** The still image, as JPEG bytes. */
 export async function attachmentThumb(q: Queryable, id: number): Promise<Buffer | null> {
-  const { rows } = await q.query<{ thumb: string }>(`select encode(thumb, 'base64') as thumb from attachments where id = $1`, [id]);
+  const { rows } = await q.query<{ thumb: string }>(`select encode(thumb, 'base64') as thumb from attachments where id = $1 and user_id = $2`, [
+    id,
+    uid(q),
+  ]);
   return rows[0] ? Buffer.from(rows[0].thumb, 'base64') : null;
 }
 
@@ -66,16 +70,16 @@ export async function attachmentThumb(q: Queryable, id: number): Promise<Buffer 
 export async function linkAttachment(ctx: Ctx, id: number, link: { photosLocalId?: string; photosCloudId?: string }): Promise<AttachmentView> {
   const { rows } = await ctx.db.query<{ id: number }>(
     `update attachments set photos_local_id = coalesce($2, photos_local_id), photos_cloud_id = coalesce($3, photos_cloud_id)
-     where id = $1 returning id`,
-    [id, link.photosLocalId ?? null, link.photosCloudId ?? null],
+     where id = $1 and user_id = $4 returning id`,
+    [id, link.photosLocalId ?? null, link.photosCloudId ?? null, uid(ctx.db)],
   );
   if (!rows[0]) throw new NotFoundError(`No attachment #${id}.`);
   const view = (
     await ctx.db.query<{ v: AttachmentView | string }>(
       `select json_build_object('id', a.id, 'kind', a.kind, 'photosLocalId', a.photos_local_id, 'photosCloudId', a.photos_cloud_id,
          'takenAt', to_json(a.taken_at), 'durationS', a.duration_s, 'width', a.width, 'height', a.height) as v
-       from attachments a where a.id = $1`,
-      [id],
+       from attachments a where a.id = $1 and a.user_id = $2`,
+      [id, uid(ctx.db)],
     )
   ).rows[0]!.v;
   return typeof view === 'string' ? (JSON.parse(view) as AttachmentView) : view;

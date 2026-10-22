@@ -81,8 +81,11 @@ export function pkce() {
 
 export const form = (data: Record<string, string>) => new URLSearchParams(data).toString();
 
-/** Runs the whole connector flow the way Claude does: register, authorize, log in, exchange the code. */
-export async function connect(s: TestServer) {
+/**
+ * Runs the whole connector flow the way Claude does: register, authorize, log in, exchange the code.
+ * Signs in as the owner unless given someone's email and password.
+ */
+export async function connect(s: TestServer, as: { email?: string; password: string } = { password: OWNER_PASSWORD }) {
   const reg = await fetch(`${s.base}/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -107,7 +110,8 @@ export async function connect(s: TestServer) {
       code_challenge: challenge,
       scope: 'notes',
       resource: s.mcpUrl,
-      password: OWNER_PASSWORD,
+      email: as.email ?? '',
+      password: as.password,
     }),
   });
   const code = new URL(login.headers.get('location')!).searchParams.get('code')!;

@@ -1,8 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response, type Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
-import { secretsMatch, sha256 } from '../auth/provider.js';
+import { sha256 } from '../auth/provider.js';
+import { authenticate, getUser, userForApiToken, type User } from '../auth/users.js';
 import type { Db } from '../db.js';
+import type { SessionInfo } from '../shared/api.js';
 
 const COOKIE = 'bjj_session';
 const SESSION_DAYS = 90;
@@ -18,6 +20,18 @@ function readCookie(req: Request, name: string): string | undefined {
   }
   return undefined;
 }
+
+/** The signed-in user's id, set by requireAuth. */
+export function userIdOf(res: Response): number {
+  const id = res.locals.userId;
+  if (typeof id !== 'number') throw new Error('Route reached without a signed-in user.');
+  return id;
+}
+
+export const sessionInfo = (u: User): SessionInfo => ({
+  signedIn: true,
+  user: { id: u.id, name: u.name, email: u.email, isOwner: u.isOwner },
+});
 
 export interface WebAuthOptions {
   db: Db;
@@ -36,27 +50,46 @@ export function webAuth(opts: WebAuthOptions) {
     );
   };
 
-  /** Valid sessions slide forward: 90 days from last use. */
-  async function sessionValid(token: string): Promise<boolean> {
-    const { rows } = await db.query(
+  /** Whose session this is. Valid sessions slide forward: 90 days from last use. */
+  async function sessionUserId(token: string): Promise<number | null> {
+    const { rows } = await db.query<{ user_id: number }>(
       `update web_sessions set last_used_at = now(), expires_at = now() + interval '${SESSION_DAYS} days'
-       where token_hash = $1 and expires_at > now() returning 1 as ok`,
+       where token_hash = $1 and expires_at > now() returning user_id`,
       [sha256(token)],
     );
-    return rows.length > 0;
+    return rows[0]?.user_id ?? null;
   }
 
-  /** Signed in with the browser cookie, or a bearer API token (for scripts and Shortcuts). */
+  /** Signs this browser in as the user (a new session cookie). */
+  async function startSession(req: Request, res: Response, userId: number) {
+    const token = randomBytes(32).toString('base64url');
+    await db.query(
+      `insert into web_sessions (token_hash, expires_at, user_agent, user_id) values ($1, now() + interval '${SESSION_DAYS} days', $2, $3)`,
+      [sha256(token), (req.get('user-agent') ?? '').slice(0, 300), userId],
+    );
+    await db.query("delete from web_sessions where expires_at < now() - interval '1 day'");
+    cookie(res, token, SESSION_DAYS * 86400);
+  }
+
+  /** Signed in with the browser cookie, or a bearer API token (for scripts and Shortcuts). Sets res.locals.userId. */
   const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const bearer = (req.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
-      if (bearer && secretsMatch(bearer, opts.apiToken)) return next();
+      const bearer = (req.get('authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+      if (bearer) {
+        const userId = await userForApiToken(db, bearer, opts.apiToken);
+        if (userId !== null) {
+          res.locals.userId = userId;
+          return next();
+        }
+      }
       const token = readCookie(req, COOKIE);
-      if (token && (await sessionValid(token))) {
+      const userId = token ? await sessionUserId(token) : null;
+      if (userId !== null) {
         if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.get(CSRF_HEADER) !== '1') {
           res.status(403).json({ error: 'csrf', message: 'Missing app header.' });
           return;
         }
+        res.locals.userId = userId;
         return next();
       }
       res.status(401).json({ error: 'unauthorized', message: 'Sign in to continue.' });
@@ -66,14 +99,23 @@ export function webAuth(opts: WebAuthOptions) {
   };
 
   const router: Router = express.Router();
-  const limiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false });
+  // Wrong passwords count toward the limit; successful sign-ins don't, so several people behind one
+  // network (a gym's wifi) aren't locked out by each other.
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+  });
 
   router.get('/api/v1/session', async (req, res, next) => {
     try {
       const token = readCookie(req, COOKIE);
-      const signedIn = !!token && (await sessionValid(token));
-      if (signedIn) cookie(res, token, SESSION_DAYS * 86400); // the app checks this on start, so the cookie slides too
-      res.set('Cache-Control', 'no-store').json({ signedIn });
+      const userId = token ? await sessionUserId(token) : null;
+      const user = userId !== null ? await getUser(db, userId) : null;
+      if (user) cookie(res, token!, SESSION_DAYS * 86400); // the app checks this on start, so the cookie slides too
+      res.set('Cache-Control', 'no-store').json(user ? sessionInfo(user) : ({ signedIn: false } satisfies SessionInfo));
     } catch (err) {
       next(err);
     }
@@ -86,18 +128,14 @@ export function webAuth(opts: WebAuthOptions) {
         return;
       }
       const password = typeof req.body?.password === 'string' ? req.body.password : '';
-      if (!secretsMatch(password, opts.ownerPassword)) {
-        res.status(401).json({ error: 'wrong_password', message: 'Wrong password.' });
+      const email = typeof req.body?.email === 'string' ? req.body.email.slice(0, 254) : '';
+      const user = await authenticate(db, email, password, opts.ownerPassword);
+      if (!user) {
+        res.status(401).json({ error: 'wrong_password', message: 'Wrong email or password.' });
         return;
       }
-      const token = randomBytes(32).toString('base64url');
-      await db.query(
-        `insert into web_sessions (token_hash, expires_at, user_agent) values ($1, now() + interval '${SESSION_DAYS} days', $2)`,
-        [sha256(token), (req.get('user-agent') ?? '').slice(0, 300)],
-      );
-      await db.query("delete from web_sessions where expires_at < now() - interval '1 day'");
-      cookie(res, token, SESSION_DAYS * 86400);
-      res.status(204).end();
+      await startSession(req, res, user.id);
+      res.status(200).set('Cache-Control', 'no-store').json(sessionInfo(user));
     } catch (err) {
       next(err);
     }
@@ -114,5 +152,5 @@ export function webAuth(opts: WebAuthOptions) {
     }
   });
 
-  return { router, requireAuth };
+  return { router, requireAuth, startSession, limiter };
 }

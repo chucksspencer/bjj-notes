@@ -1,3 +1,4 @@
+import { uid } from '../db.js';
 import { describeMiss, resolvePosition } from '../resolve.js';
 import { noteOrigin } from '../shared/sessions.js';
 import { mediaTag } from './attachments.js';
@@ -79,23 +80,24 @@ export async function search(ctx: Ctx, input: SearchInput): Promise<string> {
 /** Training summary over the last N days, plus focus items that have gone quiet. */
 export async function review(ctx: Ctx, days = 7): Promise<string> {
   const q = ctx.db;
+  const me = uid(q);
   const end = today(ctx);
   const start = isoDate(new Date(Date.parse(end) - (days - 1) * 86_400_000));
   const sessions = (
     await q.query<{ kind: string; c: number }>(
-      'select kind, count(*)::int as c from sessions where date between $1 and $2 group by kind order by c desc',
-      [start, end],
+      'select kind, count(*)::int as c from sessions where user_id = $3 and date between $1 and $2 group by kind order by c desc',
+      [start, end, me],
     )
   ).rows;
   const noteCount = (
-    await q.query<{ c: number }>('select count(*)::int as c from notes where observed_on between $1 and $2', [start, end])
+    await q.query<{ c: number }>('select count(*)::int as c from notes where user_id = $3 and observed_on between $1 and $2', [start, end, me])
   ).rows[0]!.c;
   const top = (
     await q.query<{ name: string; c: number }>(
       `select t.name, count(*)::int as c from notes n
        join note_techniques nt on nt.note_id = n.id join techniques t on t.id = nt.technique_id
-       where n.observed_on between $1 and $2 group by t.name order by c desc, t.name limit 5`,
-      [start, end],
+       where n.user_id = $3 and n.observed_on between $1 and $2 group by t.name order by c desc, t.name limit 5`,
+      [start, end, me],
     )
   ).rows;
   const quiet = (
@@ -105,10 +107,11 @@ export async function review(ctx: Ctx, days = 7): Promise<string> {
                  join note_techniques nt on nt.note_id = n.id
                  join focus_item_techniques ft on ft.technique_id = nt.technique_id
                 where ft.focus_item_id = f.id) as last_note
-       from focus_items f where f.status = 'active' order by f.rank`,
+       from focus_items f where f.user_id = $1 and f.status = 'active' order by f.rank`,
+      [me],
     )
   ).rows.filter(f => !f.last_note || Date.parse(end) - Date.parse(f.last_note) > 14 * 86_400_000);
-  const inbox = (await q.query<{ c: number }>('select count(*)::int as c from notes where inbox')).rows[0]!.c;
+  const inbox = (await q.query<{ c: number }>('select count(*)::int as c from notes where user_id = $1 and inbox', [me])).rows[0]!.c;
 
   const sessionTotal = sessions.reduce((s, r) => s + r.c, 0);
   const lines = [

@@ -77,7 +77,7 @@ describe('OAuth for the Claude connector', () => {
       body: form({ ...fields, password: 'nope' }),
     });
     expect(wrong.status).toBe(401);
-    expect(await wrong.text()).toContain('Wrong password');
+    expect(await wrong.text()).toContain('Wrong email or password');
 
     const forged = await fetch(`${s.base}/oauth/login`, {
       method: 'POST',

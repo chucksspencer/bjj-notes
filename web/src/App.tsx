@@ -6,8 +6,10 @@ import { CaptureProvider, useCapture } from './components/Capture';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Icon } from './components/Icon';
 import { ToastProvider } from './components/Toast';
+import { Account } from './pages/Account';
 import { Focus } from './pages/Focus';
 import { Inbox } from './pages/Inbox';
+import { Join } from './pages/Join';
 import { Lab } from './pages/Lab';
 import { Library } from './pages/Library';
 import { Login } from './pages/Login';
@@ -27,9 +29,12 @@ export function App() {
 
 function Gate() {
   const session = useSession();
+  const { pathname } = useLocation();
   useEffect(() => {
     setUnauthorizedHandler(() => queryClient.setQueryData(['session'], { signedIn: false }));
   }, []);
+  // Invite and password-reset links work whether or not anyone is signed in on this device.
+  if (pathname === '/join') return <Join />;
   if (session.isPending) return null;
   if (!session.data?.signedIn) return <Login />;
   return (
@@ -62,6 +67,7 @@ function Shell() {
             <Route path="/p/:slug" element={<Position />} />
             <Route path="/inbox" element={<Inbox />} />
             <Route path="/inbox/try" element={<Navigate to="/try" replace />} />
+            <Route path="/account" element={<Account />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </ErrorBoundary>

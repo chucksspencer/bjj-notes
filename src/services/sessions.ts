@@ -1,7 +1,7 @@
 // Training sessions: classes, seminars, open mats. A note's session is where it came from.
 import type { Gi, SessionKind, SessionView } from '../shared/api.js';
 import { sessionLabel, sessionPhrase } from '../shared/sessions.js';
-import type { Queryable } from '../db.js';
+import { uid, type Queryable } from '../db.js';
 import { logActivity, type SessionSnapshot } from './activity.js';
 import { today, type Ctx } from './context.js';
 import { NotFoundError } from './errors.js';
@@ -61,7 +61,9 @@ export async function findOrCreateSession(q: Queryable, date: string, d: Session
   const kind = d.kind ?? 'class';
   const want = { name: clean(d.name), instructor: clean(d.instructor), location: clean(d.location), gi: d.gi ?? null };
   const summary = clean(d.summary);
-  const candidates = (await q.query<SessionRow>(`${SESSION_SQL} where date = $1 and kind = $2 order by id desc`, [date, kind])).rows;
+  const candidates = (
+    await q.query<SessionRow>(`${SESSION_SQL} where date = $1 and kind = $2 and user_id = $3 order by id desc`, [date, kind, uid(q)])
+  ).rows;
 
   let best: SessionRow | null = null;
   let bestScore = -1;
@@ -77,9 +79,9 @@ export async function findOrCreateSession(q: Queryable, date: string, d: Session
 
   if (!best) {
     const { rows } = await q.query<SessionRow>(
-      `insert into sessions (date, kind, name, instructor, location, gi, summary) values ($1, $2, $3, $4, $5, $6, $7)
+      `insert into sessions (date, kind, name, instructor, location, gi, summary, user_id) values ($1, $2, $3, $4, $5, $6, $7, $8)
        returning id, date::text as date, kind, name, instructor, location, gi, summary`,
-      [date, kind, want.name, want.instructor, want.location, want.gi, summary],
+      [date, kind, want.name, want.instructor, want.location, want.gi, summary, uid(q)],
     );
     return { id: rows[0]!.id, created: true, before: null, view: toSessionView(rows[0]!) };
   }
@@ -94,13 +96,14 @@ export async function findOrCreateSession(q: Queryable, date: string, d: Session
   if (summary && !(best.summary ?? '').includes(summary)) next.summary = best.summary ? `${best.summary}\n\n${summary}` : summary;
   const changed = [...IDENTITY, 'summary' as const].some(f => next[f] !== best[f]);
   if (!changed) return { id: best.id, created: false, before: null, view: toSessionView(best) };
-  await q.query('update sessions set name = $2, instructor = $3, location = $4, gi = $5, summary = $6 where id = $1', [
+  await q.query('update sessions set name = $2, instructor = $3, location = $4, gi = $5, summary = $6 where id = $1 and user_id = $7', [
     best.id,
     next.name,
     next.instructor,
     next.location,
     next.gi,
     next.summary,
+    uid(q),
   ]);
   return { id: best.id, created: false, before: snapshot(best), view: toSessionView(next) };
 }
@@ -115,7 +118,7 @@ const snapshot = (r: SessionRow): SessionSnapshot => ({
 });
 
 export async function sessionById(q: Queryable, id: number): Promise<SessionView> {
-  const row = (await q.query<SessionRow>(`${SESSION_SQL} where id = $1`, [id])).rows[0];
+  const row = (await q.query<SessionRow>(`${SESSION_SQL} where id = $1 and user_id = $2`, [id, uid(q)])).rows[0];
   if (!row) throw new NotFoundError(`No session #${id}.`);
   return toSessionView(row);
 }
@@ -123,8 +126,8 @@ export async function sessionById(q: Queryable, id: number): Promise<SessionView
 /** Recent sessions (or those on one date), newest first, for picking where a note came from. */
 export async function sessionList(q: Queryable, opts: { limit?: number; date?: string } = {}): Promise<SessionView[]> {
   const { rows } = await q.query<SessionRow>(
-    `${SESSION_SQL} where ($2::date is null or date = $2) order by date desc, id desc limit $1`,
-    [Math.min(Math.max(opts.limit ?? 12, 1), 100), opts.date ?? null],
+    `${SESSION_SQL} where user_id = $3 and ($2::date is null or date = $2) order by date desc, id desc limit $1`,
+    [Math.min(Math.max(opts.limit ?? 12, 1), 100), opts.date ?? null, uid(q)],
   );
   return rows.map(toSessionView);
 }
@@ -139,8 +142,8 @@ export async function logSession(ctx: Ctx, input: LogSessionInput): Promise<stri
     const found = await findOrCreateSession(q, date, input);
     const attached = (
       await q.query<{ id: number }>(
-        'update notes set session_id = $1 where observed_on = $2 and session_id is null returning id',
-        [found.id, date],
+        'update notes set session_id = $1 where observed_on = $2 and session_id is null and user_id = $3 returning id',
+        [found.id, date, uid(q)],
       )
     ).rows.map(r => r.id);
     const label = sessionLabel(found.view);

@@ -1,4 +1,4 @@
-import type { Db, Queryable } from '../db.js';
+import { uid, type Db, type Queryable } from '../db.js';
 
 export interface TechniqueSnapshot {
   id: number;
@@ -130,59 +130,64 @@ export interface LinkSnapshot {
 
 export const NOTE_SNAPSHOT_SQL = `select id, body, raw_text, kind, observed_on::text as observed_on, session_id, source_id,
   source_timestamp, inbox, to_try, starred_at::text as starred_at, answered_at::text as answered_at, created_via,
-  created_at::text as created_at from notes where id = $1`;
+  created_at::text as created_at from notes where id = $1 and user_id = $2`;
 
 export async function logActivity(q: Queryable, action: string, summary: string, undo: UndoOp): Promise<void> {
-  await q.query('insert into activity_log (action, summary, undo) values ($1, $2, $3)', [
+  await q.query('insert into activity_log (action, summary, undo, user_id) values ($1, $2, $3, $4)', [
     action,
     summary,
     JSON.stringify(undo),
+    uid(q),
   ]);
 }
 
 async function insertEdge(q: Queryable, e: EdgeSnapshot) {
   await q.query(
     `insert into technique_edges (id, technique_id, from_position_id, from_role, to_position_id, to_role)
-     values ($1, $2, $3, $4, $5, $6) on conflict do nothing`,
-    [e.id, e.technique_id, e.from_position_id, e.from_role, e.to_position_id, e.to_role],
+     select $1, $2, $3, $4, $5, $6 where exists (select 1 from techniques where id = $2 and user_id = $7)
+     on conflict do nothing`,
+    [e.id, e.technique_id, e.from_position_id, e.from_role, e.to_position_id, e.to_role, uid(q)],
   );
 }
 
 async function insertLink(q: Queryable, l: LinkSnapshot) {
-  await q.query('insert into technique_links (from_id, to_id, kind, note) values ($1, $2, $3, $4) on conflict do nothing', [
+  await q.query('insert into technique_links (from_id, to_id, kind, note, user_id) values ($1, $2, $3, $4, $5) on conflict do nothing', [
     l.from_id,
     l.to_id,
     l.kind,
     l.note,
+    uid(q),
   ]);
 }
 
 async function deleteTechniques(q: Queryable, ids: number[]) {
-  if (ids.length) await q.query('delete from techniques where id = any($1::int[])', [ids]);
+  if (ids.length) await q.query('delete from techniques where id = any($1::int[]) and user_id = $2', [ids, uid(q)]);
 }
 
 async function restoreSession(q: Queryable, s: SessionSnapshot) {
-  await q.query('update sessions set name = $2, instructor = $3, location = $4, gi = $5, summary = $6 where id = $1', [
+  await q.query('update sessions set name = $2, instructor = $3, location = $4, gi = $5, summary = $6 where id = $1 and user_id = $7', [
     s.id,
     s.name,
     s.instructor,
     s.location,
     s.gi,
     s.summary,
+    uid(q),
   ]);
 }
 
 /** Runs after the note itself is put back, so a session made for it has nothing pointing at it. */
 async function revertSessionChange(q: Queryable, c: SessionChange | undefined) {
   if (c?.before) await restoreSession(q, c.before);
-  if (c?.createdId) await q.query('delete from sessions where id = $1', [c.createdId]);
+  if (c?.createdId) await q.query('delete from sessions where id = $1 and user_id = $2', [c.createdId, uid(q)]);
 }
 
 async function apply(q: Queryable, op: UndoOp): Promise<void> {
+  const me = uid(q);
   switch (op.kind) {
     case 'delete_note':
-      await q.query('delete from attachments where note_id = $1', [op.noteId]);
-      await q.query('delete from notes where id = $1', [op.noteId]);
+      await q.query('delete from attachments where note_id = $1 and user_id = $2', [op.noteId, me]);
+      await q.query('delete from notes where id = $1 and user_id = $2', [op.noteId, me]);
       await deleteTechniques(q, op.createdTechniqueIds);
       await revertSessionChange(q, op.session);
       return;
@@ -195,48 +200,64 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
         `update techniques set name = $2, aliases = $3, type = $4, role = $5, gi = $6, status = $7,
            summary = $8, key_details = $9, mistakes = $10, updated_at = now(),
            starred_at = case when $12 then $11::timestamptz else starred_at end
-         where id = $1`,
-        [b.id, b.name, b.aliases, b.type, b.role, b.gi, b.status, b.summary, b.key_details, b.mistakes, b.starred_at ?? null, b.starred_at !== undefined],
+         where id = $1 and user_id = $13`,
+        [b.id, b.name, b.aliases, b.type, b.role, b.gi, b.status, b.summary, b.key_details, b.mistakes, b.starred_at ?? null, b.starred_at !== undefined, me],
       );
-      if (op.addedEdgeIds.length) await q.query('delete from technique_edges where id = any($1::int[])', [op.addedEdgeIds]);
+      if (op.addedEdgeIds.length) {
+        await q.query(
+          'delete from technique_edges where id = any($1::int[]) and technique_id in (select id from techniques where user_id = $2)',
+          [op.addedEdgeIds, me],
+        );
+      }
       for (const l of op.addedLinks) {
-        await q.query('delete from technique_links where from_id = $1 and to_id = $2 and kind = $3', [l.from, l.to, l.kind]);
+        await q.query('delete from technique_links where from_id = $1 and to_id = $2 and kind = $3 and user_id = $4', [l.from, l.to, l.kind, me]);
       }
       await deleteTechniques(q, op.createdTechniqueIds);
       return;
     }
     case 'restore_focus':
-      if (op.eventIds.length) await q.query('delete from focus_events where id = any($1::int[])', [op.eventIds]);
-      for (const l of op.addedLinks) {
-        await q.query('delete from focus_item_techniques where focus_item_id = $1 and technique_id = $2', [l.item, l.technique]);
+      if (op.eventIds.length) {
+        await q.query(
+          'delete from focus_events where id = any($1::int[]) and focus_item_id in (select id from focus_items where user_id = $2)',
+          [op.eventIds, me],
+        );
       }
-      if (op.deleteItemId !== null) await q.query('delete from focus_items where id = $1', [op.deleteItemId]);
+      for (const l of op.addedLinks) {
+        await q.query('delete from focus_item_techniques where focus_item_id = $1 and technique_id = $2 and user_id = $3', [
+          l.item,
+          l.technique,
+          me,
+        ]);
+      }
+      if (op.deleteItemId !== null) await q.query('delete from focus_items where id = $1 and user_id = $2', [op.deleteItemId, me]);
       for (const s of op.items) {
-        await q.query('update focus_items set status = $2, rank = $3, goal = $4, updated_at = now() where id = $1', [
+        await q.query('update focus_items set status = $2, rank = $3, goal = $4, updated_at = now() where id = $1 and user_id = $5', [
           s.id,
           s.status,
           s.rank,
           s.goal,
+          me,
         ]);
       }
       return;
     case 'delete_session':
       if (op.attachedNoteIds.length) {
-        await q.query('update notes set session_id = null where id = any($1::int[])', [op.attachedNoteIds]);
+        await q.query('update notes set session_id = null where id = any($1::int[]) and user_id = $2', [op.attachedNoteIds, me]);
       }
       if (op.before) await restoreSession(q, op.before);
-      if (op.created !== false) await q.query('delete from sessions where id = $1', [op.sessionId]);
+      if (op.created !== false) await q.query('delete from sessions where id = $1 and user_id = $2', [op.sessionId, me]);
       return;
     case 'restore_note': {
       const r = op.row;
       await q.query(
         `insert into notes (id, body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via, created_at,
-                            starred_at, answered_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                            starred_at, answered_at, user_id)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
          on conflict (id) do update set body = excluded.body, raw_text = excluded.raw_text, kind = excluded.kind,
            observed_on = excluded.observed_on, session_id = excluded.session_id, source_id = excluded.source_id,
            source_timestamp = excluded.source_timestamp, inbox = excluded.inbox, to_try = excluded.to_try,
-           starred_at = excluded.starred_at, answered_at = excluded.answered_at`,
+           starred_at = excluded.starred_at, answered_at = excluded.answered_at
+         where notes.user_id = excluded.user_id`,
         [
           r.id,
           r.body,
@@ -252,16 +273,17 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
           r.created_at,
           r.starred_at ?? null,
           r.answered_at ?? null,
+          me,
         ],
       );
-      await q.query('delete from note_techniques where note_id = $1', [r.id]);
+      await q.query('delete from note_techniques where note_id = $1 and user_id = $2', [r.id, me]);
       for (const t of op.techniqueIds) {
-        await q.query('insert into note_techniques (note_id, technique_id) values ($1, $2) on conflict do nothing', [r.id, t]);
+        await insertNoteTechnique(q, r.id, t);
       }
       await revertSessionChange(q, op.session);
       await deleteTechniques(q, op.createdTechniqueIds ?? []);
       if (op.attachmentIds?.length) {
-        await q.query('update attachments set note_id = $1 where id = any($2::int[])', [r.id, op.attachmentIds]);
+        await q.query('update attachments set note_id = $1 where id = any($2::int[]) and user_id = $3', [r.id, op.attachmentIds, me]);
       }
       return;
     }
@@ -274,20 +296,39 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
     case 'restore_deleted_technique': {
       const r = op.row;
       await q.query(
-        `insert into techniques (id, name, aliases, type, role, gi, status, summary, key_details, mistakes, created_at, updated_at, starred_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-        [r.id, r.name, r.aliases, r.type, r.role, r.gi, r.status, r.summary, r.key_details, r.mistakes, r.created_at, r.updated_at, r.starred_at ?? null],
+        `insert into techniques (id, name, aliases, type, role, gi, status, summary, key_details, mistakes, created_at, updated_at, starred_at,
+                                 user_id)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+        [
+          r.id,
+          r.name,
+          r.aliases,
+          r.type,
+          r.role,
+          r.gi,
+          r.status,
+          r.summary,
+          r.key_details,
+          r.mistakes,
+          r.created_at,
+          r.updated_at,
+          r.starred_at ?? null,
+          me,
+        ],
       );
       for (const e of op.edges) await insertEdge(q, e);
       for (const l of op.links) await insertLink(q, l);
-      for (const n of op.noteIds) {
-        await q.query('insert into note_techniques (note_id, technique_id) values ($1, $2) on conflict do nothing', [n, r.id]);
-      }
+      for (const n of op.noteIds) await insertNoteTechnique(q, n, r.id);
       for (const f of op.focusItemIds) {
-        await q.query('insert into focus_item_techniques (focus_item_id, technique_id) values ($1, $2) on conflict do nothing', [f, r.id]);
+        // Only focus items that are still there: a dropped item may have been deleted since.
+        await q.query(
+          `insert into focus_item_techniques (focus_item_id, technique_id, user_id)
+           select $1, $2, $3 where exists (select 1 from focus_items where id = $1 and user_id = $3) on conflict do nothing`,
+          [f, r.id, me],
+        );
       }
       if (op.inboxedNoteIds?.length) {
-        await q.query('update notes set inbox = false where id = any($1::int[])', [op.inboxedNoteIds]);
+        await q.query('update notes set inbox = false where id = any($1::int[]) and user_id = $2', [op.inboxedNoteIds, me]);
       }
       return;
     }
@@ -296,31 +337,48 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       return;
     case 'restore_marks': {
       const col = op.mark === 'starred' ? 'starred_at' : 'answered_at';
-      for (const n of op.notes) await q.query(`update notes set ${col} = $2::timestamptz where id = $1`, [n.id, n.at]);
+      for (const n of op.notes) await q.query(`update notes set ${col} = $2::timestamptz where id = $1 and user_id = $3`, [n.id, n.at, me]);
       if (op.mark === 'starred') {
-        for (const t of op.techniques) await q.query('update techniques set starred_at = $2::timestamptz where id = $1', [t.id, t.at]);
+        for (const t of op.techniques) {
+          await q.query('update techniques set starred_at = $2::timestamptz where id = $1 and user_id = $3', [t.id, t.at, me]);
+        }
       }
       return;
     }
     case 'restore_focus_label':
-      await q.query('update focus_items set label = $2, goal = $3, updated_at = now() where id = $1', [op.itemId, op.label, op.goal]);
+      await q.query('update focus_items set label = $2, goal = $3, updated_at = now() where id = $1 and user_id = $4', [
+        op.itemId,
+        op.label,
+        op.goal,
+        me,
+      ]);
       return;
     case 'refile_note':
-      await q.query('delete from note_techniques where note_id = $1', [op.noteId]);
-      for (const t of op.techniqueIds) {
-        await q.query('insert into note_techniques (note_id, technique_id) values ($1, $2)', [op.noteId, t]);
-      }
-      await q.query('update notes set inbox = $2, to_try = $3 where id = $1', [op.noteId, op.inbox, op.toTry ?? false]);
+      await q.query('delete from note_techniques where note_id = $1 and user_id = $2', [op.noteId, me]);
+      for (const t of op.techniqueIds) await insertNoteTechnique(q, op.noteId, t);
+      await q.query('update notes set inbox = $2, to_try = $3 where id = $1 and user_id = $4', [op.noteId, op.inbox, op.toTry ?? false, me]);
       await deleteTechniques(q, op.createdTechniqueIds);
       return;
   }
 }
 
-/** Reverses the most recent write that hasn't been undone yet. */
+/** Links a note to a technique again, if both are still there. */
+async function insertNoteTechnique(q: Queryable, noteId: number, techniqueId: number) {
+  await q.query(
+    `insert into note_techniques (note_id, technique_id, user_id)
+     select $1, $2, $3
+     where exists (select 1 from notes where id = $1 and user_id = $3) and exists (select 1 from techniques where id = $2 and user_id = $3)
+     on conflict do nothing`,
+    [noteId, techniqueId, uid(q)],
+  );
+}
+
+/** Reverses the user's most recent write that hasn't been undone yet. */
 export async function undoLast(db: Db): Promise<string> {
   return db.tx(async q => {
     const { rows } = await q.query<{ id: number; summary: string; undo: UndoOp | string }>(
-      'select id, summary, undo from activity_log where not undone order by id desc limit 1 for update',
+      'select id, summary, undo from activity_log where user_id = $1 and not undone order by id desc limit 1 for update',
+      [uid(q)],
     );
     const row = rows[0];
     if (!row) return 'Nothing to undo.';

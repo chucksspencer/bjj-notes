@@ -1,4 +1,4 @@
-import type { Queryable } from '../db.js';
+import { uid, type Queryable } from '../db.js';
 import { cleanUrl, instagramPost } from '../shared/links.js';
 import { resolveTechnique, type Candidate } from '../resolve.js';
 import type { SessionView } from '../shared/api.js';
@@ -107,26 +107,26 @@ async function upsertSource(q: Queryable, input: SourceInput): Promise<number | 
   if (!kind) return null;
   if (s.url) {
     const { rows } = await q.query<{ id: number }>(
-      `insert into sources (kind, url, title, author) values ($1, $2, $3, $4)
-       on conflict (url) do update set
+      `insert into sources (kind, url, title, author, user_id) values ($1, $2, $3, $4, $5)
+       on conflict (user_id, url) do update set
          title = coalesce(excluded.title, sources.title),
          author = coalesce(excluded.author, sources.author)
        returning id`,
-      [kind, s.url, s.title ?? null, s.author ?? null],
+      [kind, s.url, s.title ?? null, s.author ?? null, uid(q)],
     );
     return rows[0]!.id;
   }
   if (!s.title && !s.author) return null; // a bare "from class" is covered by the session
   // The same book or set of class notes is one source, however many notes cite it.
   const same = await q.query<{ id: number }>(
-    `select id from sources where url is null and kind = $1
+    `select id from sources where user_id = $4 and url is null and kind = $1
        and title is not distinct from $2 and author is not distinct from $3 order by id limit 1`,
-    [kind, s.title ?? null, s.author ?? null],
+    [kind, s.title ?? null, s.author ?? null, uid(q)],
   );
   if (same.rows[0]) return same.rows[0].id;
   const { rows } = await q.query<{ id: number }>(
-    'insert into sources (kind, title, author) values ($1, $2, $3) returning id',
-    [kind, s.title ?? null, s.author ?? null],
+    'insert into sources (kind, title, author, user_id) values ($1, $2, $3, $4) returning id',
+    [kind, s.title ?? null, s.author ?? null, uid(q)],
   );
   return rows[0]!.id;
 }
@@ -138,9 +138,10 @@ async function linkTechniques(q: Queryable, names: string[], newOnes: NewTechniq
   const unresolved: { name: string; candidates: Candidate[] }[] = [];
 
   if (exactIds.length) {
-    const { rows } = await q.query<{ id: number; name: string }>('select id, name from techniques where id = any($1::int[])', [
-      exactIds,
-    ]);
+    const { rows } = await q.query<{ id: number; name: string }>(
+      'select id, name from techniques where id = any($1::int[]) and user_id = $2',
+      [exactIds, uid(q)],
+    );
     for (const r of rows) ids.set(r.id, r.name);
   }
 
@@ -173,8 +174,8 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
           `select n.id, n.inbox, n.to_try,
                   (select array_agg(t.name order by t.name) from note_techniques nt join techniques t on t.id = nt.technique_id
                     where nt.note_id = n.id) as names
-           from notes n where n.client_id = $1`,
-          [input.client_id],
+           from notes n where n.client_id = $1 and n.user_id = $2`,
+          [input.client_id, uid(q)],
         )
       ).rows[0];
       if (seen) {
@@ -202,7 +203,7 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
     let sessionId = origin?.id ?? null;
     if (!origin) {
       // Nothing said: a note from a day with exactly one session is from that session.
-      const sessions = (await q.query<{ id: number }>('select id from sessions where date = $1', [date])).rows;
+      const sessions = (await q.query<{ id: number }>('select id from sessions where date = $1 and user_id = $2', [date, uid(q)])).rows;
       sessionId = sessions.length === 1 ? sessions[0]!.id : null;
     }
     const toTry = input.to_try === true;
@@ -210,8 +211,8 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
 
     const { rows } = await q.query<{ id: number }>(
       `insert into notes (body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via, starred_at,
-                          client_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, case when $11 then now() end, $12) returning id`,
+                          client_id, user_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, case when $11 then now() end, $12, $13) returning id`,
       [
         text,
         input.raw_text ?? null,
@@ -225,11 +226,12 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
         input.via ?? 'mcp',
         input.starred === true,
         input.client_id ?? null,
+        uid(q),
       ],
     );
     const noteId = rows[0]!.id;
     for (const id of ids.keys()) {
-      await q.query('insert into note_techniques (note_id, technique_id) values ($1, $2)', [noteId, id]);
+      await q.query('insert into note_techniques (note_id, technique_id, user_id) values ($1, $2, $3)', [noteId, id, uid(q)]);
     }
     const attachments = input.attachments?.length ? await insertAttachments(q, noteId, input.attachments) : undefined;
 
@@ -272,7 +274,10 @@ export async function fileNote(
 ): Promise<string> {
   return ctx.db.tx(async q => {
     const note = (
-      await q.query<{ id: number; inbox: boolean; to_try: boolean }>('select id, inbox, to_try from notes where id = $1', [noteId])
+      await q.query<{ id: number; inbox: boolean; to_try: boolean }>('select id, inbox, to_try from notes where id = $1 and user_id = $2', [
+        noteId,
+        uid(q),
+      ])
     ).rows[0];
     if (!note) return `No note #${noteId}.`;
     const before = (
@@ -280,11 +285,15 @@ export async function fileNote(
     ).rows.map(r => r.technique_id);
     const { ids, created, unresolved } = await linkTechniques(q, techniques, newTechniques, techniqueIds);
     for (const id of ids.keys()) {
-      await q.query('insert into note_techniques (note_id, technique_id) values ($1, $2) on conflict do nothing', [noteId, id]);
+      await q.query('insert into note_techniques (note_id, technique_id, user_id) values ($1, $2, $3) on conflict do nothing', [
+        noteId,
+        id,
+        uid(q),
+      ]);
     }
     const total = new Set([...before, ...ids.keys()]).size;
     const inbox = total === 0 || unresolved.length > 0;
-    await q.query('update notes set inbox = $2, to_try = false where id = $1', [noteId, inbox]);
+    await q.query('update notes set inbox = $2, to_try = false where id = $1 and user_id = $3', [noteId, inbox, uid(q)]);
     await logActivity(q, 'file_note', `${note.to_try ? 'keeping' : 'filing'} note #${noteId}`, {
       kind: 'refile_note',
       noteId,
@@ -307,7 +316,11 @@ export async function getInbox(ctx: Ctx, limit = 10, toTry = false): Promise<str
     ? await noteList(ctx.db, { toTry: true, limit })
     : await noteList(ctx.db, { inbox: true, limit, oldestFirst: true });
   if (!rows.length) return toTry ? 'Nothing waiting to be tried.' : 'Inbox is empty.';
-  const total = (await ctx.db.query<{ c: number }>(`select count(*)::int as c from notes where ${toTry ? 'to_try' : 'inbox'}`)).rows[0]!.c;
+  const total = (
+    await ctx.db.query<{ c: number }>(`select count(*)::int as c from notes where user_id = $1 and ${toTry ? 'to_try' : 'inbox'}`, [
+      uid(ctx.db),
+    ])
+  ).rows[0]!.c;
   const heading = toTry
     ? `${total} to try (newest first)${total > rows.length ? `, showing ${rows.length}` : ''}:`
     : `${total} note${total === 1 ? '' : 's'} in the inbox${total > rows.length ? ` (showing ${rows.length})` : ''}:`;
@@ -344,7 +357,7 @@ export interface UpdateNoteInput {
 
 export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): Promise<string> {
   return ctx.db.tx(async q => {
-    const row = (await q.query<NoteRowSnapshot>(NOTE_SNAPSHOT_SQL, [id])).rows[0];
+    const row = (await q.query<NoteRowSnapshot>(NOTE_SNAPSHOT_SQL, [id, uid(q)])).rows[0];
     if (!row) return `No note #${id}.`;
     const before = (
       await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [id])
@@ -353,20 +366,24 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
     if (!body) throw new UserError('Note text is empty.');
     const observedOn = input.observed_on ?? row.observed_on;
     const origin = await resolveOrigin(q, observedOn, input.session_id, input.session);
-    await q.query('update notes set body = $2, kind = $3, observed_on = $4, session_id = $5 where id = $1', [
+    await q.query('update notes set body = $2, kind = $3, observed_on = $4, session_id = $5 where id = $1 and user_id = $6', [
       id,
       body,
       input.kind ?? row.kind,
       observedOn,
       origin ? origin.id : row.session_id,
+      uid(q),
     ]);
     const fresh = input.new_techniques?.length ? await linkTechniques(q, [], input.new_techniques) : null;
     if (input.technique_ids || fresh) {
       const ids = new Set([...(input.technique_ids ?? before), ...(fresh ? fresh.ids.keys() : [])]);
       await q.query('delete from note_techniques where note_id = $1', [id]);
-      const { rows } = await q.query<{ id: number }>('select id from techniques where id = any($1::int[])', [[...ids]]);
+      const { rows } = await q.query<{ id: number }>('select id from techniques where id = any($1::int[]) and user_id = $2', [
+        [...ids],
+        uid(q),
+      ]);
       for (const t of rows) {
-        await q.query('insert into note_techniques (note_id, technique_id) values ($1, $2)', [id, t.id]);
+        await q.query('insert into note_techniques (note_id, technique_id, user_id) values ($1, $2, $3)', [id, t.id, uid(q)]);
       }
     }
     // A to-try note waits out of the inbox; otherwise a note with no techniques needs filing.
@@ -374,17 +391,17 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
     const toTry = input.to_try ?? wasToTry;
     if (input.technique_ids || fresh || toTry !== wasToTry) {
       const count = (await q.query<{ c: number }>('select count(*)::int as c from note_techniques where note_id = $1', [id])).rows[0]!.c;
-      await q.query('update notes set inbox = $2, to_try = $3 where id = $1', [id, !toTry && count === 0, toTry]);
+      await q.query('update notes set inbox = $2, to_try = $3 where id = $1 and user_id = $4', [id, !toTry && count === 0, toTry, uid(q)]);
     }
     const wasStarred = !!row.starred_at;
     if (input.starred !== undefined && input.starred !== wasStarred) {
-      await q.query('update notes set starred_at = case when $2 then now() end where id = $1', [id, input.starred]);
+      await q.query('update notes set starred_at = case when $2 then now() end where id = $1 and user_id = $3', [id, input.starred, uid(q)]);
     }
     const starChange = input.starred === undefined || input.starred === wasStarred ? null : input.starred ? 'starred' : 'unstarred';
     const wasAnswered = !!row.answered_at;
     const answerChange = input.answered === undefined || input.answered === wasAnswered ? null : input.answered ? 'answered' : 'open again';
     if (answerChange) {
-      await q.query('update notes set answered_at = case when $2 then now() end where id = $1', [id, input.answered]);
+      await q.query('update notes set answered_at = case when $2 then now() end where id = $1 and user_id = $3', [id, input.answered, uid(q)]);
     }
     const action =
       wasToTry && !toTry
@@ -416,13 +433,13 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
 
 /** Removes one note and returns how to put it back; null if it doesn't exist. */
 async function removeNote(q: Queryable, id: number): Promise<UndoOp | null> {
-  const row = (await q.query<NoteRowSnapshot>(NOTE_SNAPSHOT_SQL, [id])).rows[0];
+  const row = (await q.query<NoteRowSnapshot>(NOTE_SNAPSHOT_SQL, [id, uid(q)])).rows[0];
   if (!row) return null;
   const techniqueIds = (
     await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [id])
   ).rows.map(r => r.technique_id);
   const attachmentIds = (await q.query<{ id: number }>('select id from attachments where note_id = $1', [id])).rows.map(r => r.id);
-  await q.query('delete from notes where id = $1', [id]);
+  await q.query('delete from notes where id = $1 and user_id = $2', [id, uid(q)]);
   return { kind: 'restore_note', row, techniqueIds, ...(attachmentIds.length ? { attachmentIds } : {}) };
 }
 

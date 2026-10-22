@@ -45,11 +45,11 @@ class DbClientsStore implements OAuthRegisteredClientsStore {
 }
 
 /**
- * Single-user OAuth 2.1 authorization server for the Claude connector:
- * dynamic client registration, PKCE (checked by the SDK), a password login page,
- * rotating refresh tokens. Only hashes of codes and tokens are stored.
+ * OAuth 2.1 authorization server for the Claude connector: dynamic client registration, PKCE (checked
+ * by the SDK), an email and password sign-in page, rotating refresh tokens. Codes and tokens belong to
+ * the person who signed in; only their hashes are stored.
  */
-export class OwnerOAuthProvider implements OAuthServerProvider {
+export class NotesOAuthProvider implements OAuthServerProvider {
   readonly clientsStore: DbClientsStore;
 
   constructor(
@@ -83,19 +83,20 @@ export class OwnerOAuthProvider implements OAuthServerProvider {
     );
   }
 
-  /** Called by the login form handler once the password checks out. */
+  /** Called by the login form handler once the email and password check out. */
   async issueCode(input: {
     clientId: string;
     redirectUri: string;
     codeChallenge: string;
     scopes: string[];
     resource: string | null;
+    userId: number;
   }): Promise<string> {
     const code = newSecret();
     await this.db.query(
-      `insert into oauth_codes (code_hash, client_id, redirect_uri, code_challenge, scopes, resource, expires_at)
-       values ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7))`,
-      [sha256(code), input.clientId, input.redirectUri, input.codeChallenge, input.scopes, input.resource, CODE_TTL_S],
+      `insert into oauth_codes (code_hash, client_id, redirect_uri, code_challenge, scopes, resource, expires_at, user_id)
+       values ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7), $8)`,
+      [sha256(code), input.clientId, input.redirectUri, input.codeChallenge, input.scopes, input.resource, CODE_TTL_S, input.userId],
     );
     return code;
   }
@@ -109,8 +110,9 @@ export class OwnerOAuthProvider implements OAuthServerProvider {
       resource: string | null;
       expired: boolean;
       used: boolean;
+      user_id: number;
     }>(
-      `select client_id, redirect_uri, code_challenge, scopes, resource, used, expires_at < now() as expired
+      `select client_id, redirect_uri, code_challenge, scopes, resource, used, expires_at < now() as expired, user_id
        from oauth_codes where code_hash = $1`,
       [sha256(code)],
     );
@@ -139,7 +141,7 @@ export class OwnerOAuthProvider implements OAuthServerProvider {
       [sha256(code)],
     );
     if (!rows.length) throw new InvalidGrantError('Authorization code already used');
-    return this.issueTokens(client.client_id, row.scopes);
+    return this.issueTokens(client.client_id, row.scopes, row.user_id);
   }
 
   async exchangeRefreshToken(
@@ -150,25 +152,25 @@ export class OwnerOAuthProvider implements OAuthServerProvider {
   ): Promise<OAuthTokens> {
     if (resource && !sameResource(resource.href, this.resourceUrl.href)) throw new InvalidTargetError('Unknown resource');
     // Rotate: the presented refresh token is revoked atomically and a new pair is issued.
-    const { rows } = await this.db.query<{ scopes: string[] }>(
+    const { rows } = await this.db.query<{ scopes: string[]; user_id: number }>(
       `update oauth_tokens set revoked = true
        where token_hash = $1 and kind = 'refresh' and client_id = $2 and not revoked and expires_at > now()
-       returning scopes`,
+       returning scopes, user_id`,
       [sha256(refreshToken), client.client_id],
     );
     const row = rows[0];
     if (!row) throw new InvalidGrantError('Invalid refresh token');
     const granted = scopes?.length ? scopes.filter(s => row.scopes.includes(s)) : row.scopes;
-    return this.issueTokens(client.client_id, granted);
+    return this.issueTokens(client.client_id, granted, row.user_id);
   }
 
-  private async issueTokens(clientId: string, scopes: string[]): Promise<OAuthTokens> {
+  private async issueTokens(clientId: string, scopes: string[], userId: number): Promise<OAuthTokens> {
     const access = newSecret();
     const refresh = newSecret();
-    const insert = `insert into oauth_tokens (token_hash, kind, client_id, scopes, resource, expires_at)
-                    values ($1, $2, $3, $4, $5, now() + make_interval(secs => $6))`;
-    await this.db.query(insert, [sha256(access), 'access', clientId, scopes, this.resourceUrl.href, ACCESS_TTL_S]);
-    await this.db.query(insert, [sha256(refresh), 'refresh', clientId, scopes, this.resourceUrl.href, REFRESH_TTL_S]);
+    const insert = `insert into oauth_tokens (token_hash, kind, client_id, scopes, resource, expires_at, user_id)
+                    values ($1, $2, $3, $4, $5, now() + make_interval(secs => $6), $7)`;
+    await this.db.query(insert, [sha256(access), 'access', clientId, scopes, this.resourceUrl.href, ACCESS_TTL_S, userId]);
+    await this.db.query(insert, [sha256(refresh), 'refresh', clientId, scopes, this.resourceUrl.href, REFRESH_TTL_S, userId]);
     return {
       access_token: access,
       token_type: 'bearer',
@@ -179,8 +181,8 @@ export class OwnerOAuthProvider implements OAuthServerProvider {
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
-    const { rows } = await this.db.query<{ client_id: string; scopes: string[]; resource: string | null; exp: number }>(
-      `select client_id, scopes, resource, extract(epoch from expires_at)::bigint as exp
+    const { rows } = await this.db.query<{ client_id: string; scopes: string[]; resource: string | null; exp: number; user_id: number }>(
+      `select client_id, scopes, resource, extract(epoch from expires_at)::bigint as exp, user_id
        from oauth_tokens where token_hash = $1 and kind = 'access' and not revoked and expires_at > now()`,
       [sha256(token)],
     );
@@ -192,6 +194,7 @@ export class OwnerOAuthProvider implements OAuthServerProvider {
       scopes: row.scopes,
       expiresAt: Number(row.exp),
       resource: row.resource ? new URL(row.resource) : undefined,
+      extra: { userId: Number(row.user_id) },
     };
   }
 

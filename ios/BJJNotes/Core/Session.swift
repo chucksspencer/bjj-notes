@@ -16,6 +16,9 @@ enum Session {
     static func remember(_ token: String?) {
         guard let token, !token.isEmpty, token != Keychain.read(account, sharedOnly: true) else { return }
         Keychain.write(token, for: account)
+        // A new sign-in may be someone else's: forget the focus list and Lab Siri kept for offline answers.
+        Cache.focus = nil
+        Cache.lab = nil
     }
 
     /// Versions before the share sheet kept the sign-in where only the app could see it; move it.

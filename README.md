@@ -1,16 +1,16 @@
 # BJJ Notes
 
-A personal jiu-jitsu notebook you can talk to. Techniques are organised as a **position graph** (a sweep takes you from the bottom of a guard to the top; a pass from a guard to a pin; an escape from the bottom of a pin), with dated notes from class, videos and rolling, training sessions, and a ranked **focus list** whose history is kept.
+A jiu-jitsu notebook you can talk to, for you and the people you invite: everyone gets their own. Techniques are organised as a **position graph** (a sweep takes you from the bottom of a guard to the top; a pass from a guard to a pin; an escape from the bottom of a pin), with dated notes from class, videos and rolling, training sessions, and a ranked **focus list** whose history is kept.
 
 It is one small Node service with three front doors:
 
 | Door | For | Auth |
 | --- | --- | --- |
-| `/mcp` | Claude (chat or voice) as a custom connector | OAuth 2.1, your password |
-| `/api/capture`, `/api/focus` | Siri Shortcuts ("Hey Siri, BJJ note") | Bearer token |
-| `/` | The web app: Lab and focus list, technique library, notes, positions, inbox | Your password (stays signed in 90 days) |
+| `/mcp` | Claude (chat or voice) as a custom connector | OAuth 2.1, your email and password |
+| `/api/capture`, `/api/focus` | Siri Shortcuts ("Hey Siri, BJJ note") | Your bearer token |
+| `/` | The web app: Lab and focus list, technique library, notes, positions, inbox | Your email and password (stays signed in 90 days) |
 
-The database starts with ~30 positions and your working list from 2026-10-09 (Baratoplata through ankle lock adjustments) as the active focus list, each linked to a technique card.
+The database starts with ~30 positions (shared by everyone) and, for the owner, the working list from 2026-10-09 (Baratoplata through ankle lock adjustments) as the active focus list, each linked to a technique card. People you invite start with an empty notebook of their own.
 
 ## Set it up from your phone
 
@@ -23,8 +23,9 @@ Everything below works in a phone browser. Expect about 30 minutes the first tim
 
 ### 2. Two secrets you make up
 
-- **OWNER_PASSWORD**: 12+ characters. You'll type it once when connecting Claude.
+- **OWNER_PASSWORD**: 12+ characters. Your password, as the owner: the person who invites everyone else.
 - **API_TOKEN**: 32+ random characters, used by your Siri Shortcuts. A password manager's generator works.
+  (Everyone, you included, can also make Shortcut tokens on their Account page.)
 
 ### 3. GitHub secrets
 
@@ -57,25 +58,26 @@ From then on, every push to `main` tests, builds and deploys. The deploy copies 
 
 ### 6. Connect Claude
 
-On claude.ai in a browser, add a **custom connector** in settings with the connector URL. Claude opens a sign-in page from this server; enter `OWNER_PASSWORD`. Connectors added on the web also show up in the iOS app. Try it in voice mode first: that's the main thing this first version needs to prove.
+On claude.ai in a browser, add a **custom connector** in settings with the connector URL. Claude opens a sign-in page from this server; enter your email and `OWNER_PASSWORD`. (The first email you sign in with becomes yours; you can change it on the Account page.) Connectors added on the web also show up in the iOS app. Try it in voice mode first: that's the main thing this first version needs to prove.
 
 Try: *"What's on my BJJ focus list?"*, *"Add a note to ghost escape: turn to the knees before the hips"*, *"Move body lock passing to the top of my focus"*, *"What do I have from deep half bottom?"*, *"Undo that."*
 
 ### 7. The web app on your phone
 
-Open the server's address in Safari and sign in with `OWNER_PASSWORD`. Then **Share → Add to Home Screen** for an app icon that opens full screen.
+Open the server's address in Safari and sign in with your email and `OWNER_PASSWORD`. Then **Share → Add to Home Screen** for an app icon that opens full screen.
 
 - **Focus**: your ranked list. Tap an item to open its technique card; the ••• button moves, pauses, completes, renames or removes it.
 - **Library**: every technique, searchable by name, alias or detail (typos are fine), filterable by type and top/bottom. The black bar on each row is its rank bar: one stripe for learning, two for drilling, three for hitting it live, four for reliable.
 - **Technique card**: tap the belt's stripes to change status; positions, key details, common mistakes, related techniques and notes, with YouTube videos that play from the saved timestamp.
 - **+**: a new note from anywhere. Notes without a technique land in the **Inbox** to file later.
 - **Positions**: what you have from each position, top or bottom, the ways in, and the gaps.
+- **Account** (the person icon at the top of Focus): your name (Claude uses it), email, password, Siri Shortcut tokens and, for the owner, People.
 
 Every change shows an **Undo** button, the same undo Claude uses when you say "undo that".
 
 ### 8. Siri Shortcuts
 
-Create these in the Shortcuts app. Replace `HOST` with your server address and `TOKEN` with `API_TOKEN`.
+Create these in the Shortcuts app. Replace `HOST` with your server address and `TOKEN` with `API_TOKEN` or a token from **Account → Siri Shortcuts** (anyone you invite makes their own there; notes land in the notebook of whoever the token belongs to).
 
 **BJJ note** (say "Hey Siri, BJJ note")
 1. *Dictate Text*
@@ -95,6 +97,29 @@ The server tidies what it's given: share-tracking is stripped (`?igsh=…`, `?si
 
 Shortcuts also run on Apple Watch.
 
+## More people
+
+Everyone has their own notebook: techniques, notes, sessions, sources, the focus list, the Lab, photos and
+undo history. Only the starter positions are shared. Nobody, the owner included, can read anyone else's notes.
+
+- **Inviting.** Account → People → **Invite**. You get a one-time link (good for 7 days) to send however you
+  like. They open it, pick their email and password, and land in an empty notebook. Pending links are listed
+  under People until they're used, and you can cancel them.
+- **Their Claude and Siri.** They add the same connector URL in their own Claude settings and sign in with their
+  email and password; their Shortcuts use a token they make on their own Account page.
+- **Forgotten passwords.** There's no email sending, so you make the reset: People → ••• → **Make a password
+  reset link**, and send it to them. Using it signs them out everywhere else.
+- **Removing someone.** People → ••• → **Remove**. Their account and whole notebook are deleted; their sign-ins,
+  Claude connection and tokens stop working at once.
+- **Your password** stays the `OWNER_PASSWORD` secret. Everyone else changes theirs on their Account page.
+- **The iPhone app** reaches them through a public TestFlight link: no developer account needed on their side,
+  just an iPhone on iOS 18+ and the free TestFlight app. One-time setup in App Store Connect is in
+  [ios/README.md](ios/README.md#sharing-it-with-other-people). Until then, the web app works from their home screen.
+
+Upgrading from the single-user version needs nothing in GitHub: on the first start, everything that was there
+becomes the owner's, and existing sign-ins, the Claude connector and Siri Shortcuts keep working. The next time
+you sign in, enter your email with `OWNER_PASSWORD` (or add it on the Account page first).
+
 ## Your own domain on DreamHost (optional)
 
 The `run.app` address works fine. To use something like `bjj.example.com` with DNS at DreamHost (Cloud Run domain mapping, free certificate; Google labels it preview):
@@ -103,12 +128,15 @@ The `run.app` address works fine. To use something like `bjj.example.com` with D
 2. `gcloud beta run domain-mappings create --service bjj-notes --domain bjj.example.com --region us-central1`
 3. Add the **CNAME** it prints (`bjj` → `ghs.googlehosted.com.`) at DreamHost. The certificate can take up to an hour.
 4. Add a repository variable `PUBLIC_URL` = `https://bjj.example.com`, re-run the workflow, then remove and re-add the Claude connector with the new URL (tokens are bound to the URL they were issued for), and update the Siri Shortcuts.
+5. Set `BJJ_SERVER_URL` in `ios/project.yml` to the new address, so the iPhone app uses it (sign in once more in the app afterwards). This repo's is `https://bjjnotes.chuckspencer.com`.
+
+The `run.app` address keeps working alongside the new one.
 
 ## Costs
 
 Expected bill: $0 apart from optional Anthropic API usage for parsed Siri captures (cents a month).
 
-- **Cloud Run** scales to zero; one person's use is a small fraction of the monthly free allowance (2 million requests, 180,000 vCPU-seconds). It's capped at one instance.
+- **Cloud Run** scales to zero; a handful of people's use is a small fraction of the monthly free allowance (2 million requests, 180,000 vCPU-seconds). It's capped at one instance.
 - **Neon** free plan for the database.
 - **Artifact Registry** keeps the three newest images, about 0.1 GB, inside the 0.5 GB free allowance.
 - **Secret Manager**: 3–4 secrets, inside the free 6 active versions; old versions are destroyed on change.
@@ -124,12 +152,12 @@ The image is also built for Arm, so it runs as-is on a cheap VM with Docker Comp
 src/
   server.ts          entry point: config, database, migrations, HTTP
   app.ts             routes: OAuth, /mcp (stateless Streamable HTTP), /api, the web app, /healthz
-  http/              the web app's sign-in (cookie sessions), JSON API (/api/v1) and static hosting
+  http/              the web app's sign-in (cookie sessions), JSON API (/api/v1), account and invites, static hosting
   shared/api.ts      types shared by the JSON API and the web app
   mcp/server.ts      the 12 MCP tools and the instructions Claude sees
   services/          notes, techniques, focus list, search/positions/review, undo log; views.ts is the read side
   resolve.ts         fuzzy name matching tuned for voice transcription
-  auth/              single-user OAuth server (dynamic registration, PKCE, rotating refresh tokens)
+  auth/              OAuth server (dynamic registration, PKCE, rotating refresh tokens); users, passwords, invites, Siri tokens
   capture.ts         Siri endpoints and the optional Claude parser
 web/                 the web app (React, Vite); built into dist/public
 db/migrations/       schema, starter positions, your working list
@@ -137,7 +165,7 @@ infra/               Google Cloud bootstrap (run once) and deploy (run by CI) sc
 test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture, JSON API) and the web app in Chromium
 ```
 
-**Data model.** `positions` (with aliases like "100 kilos") · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, inbox flag) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `focus_items` + `focus_events` (every add, move, pause and completion, for focus over time) · `activity_log` (powers `undo_last`).
+**Data model.** `users` (the owner and everyone invited) · `invites` (join and password-reset links) · `api_tokens` (Siri Shortcuts) · `positions` (with aliases like "100 kilos"; shared) · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, inbox flag) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `focus_items` + `focus_events` (every add, move, pause and completion, for focus over time) · `activity_log` (powers `undo_last`). Every notebook table has a `user_id`; each request reads and writes only its signed-in user's rows (the handle services get carries the user, and a query without one throws), and composite foreign keys mean a row can only ever point at the same person's notes, techniques, sessions and sources.
 
 **Name matching.** Voice transcription mangles names, so lookups combine trigram similarity, edit distance and word matching: "barra toe plata" finds Baratoplata, "ghost" finds Ghost escape, but "omoplata" is not mistaken for Baratoplata. Exact names and aliases always win; uncertain matches are reported back rather than guessed.
 
@@ -186,8 +214,9 @@ GitHub account is the root of trust. Around that:
 - **Deploys.** Keyless: Google Cloud trusts only this repository's `main` branch (Workload Identity
   Federation), and deploys the exact image digest that was built. The app runs as its own service
   account that can only read its secrets, which live in Secret Manager.
-- **The app.** Passwords and tokens are compared in constant time and stored only as hashes; sign-in is
-  rate-limited; OAuth uses PKCE; every response sends `nosniff`, no framing and HSTS; the web app has a
+- **The app.** Passwords are stored as scrypt hashes; tokens and invite links only as SHA-256 hashes, and the
+  owner password and tokens are compared in constant time; failed sign-ins are rate-limited; each person's
+  notebook is separate down to the database's foreign keys (see the data model); OAuth uses PKCE; every response sends `nosniff`, no framing and HSTS; the web app has a
   strict Content Security Policy; stills must be JPEGs.
 - **The phone.** TestFlight installs only Apple-signed builds. Inside the app, the web view loads pages
   only from this server and frames only from the YouTube and Instagram players, and sends nothing but

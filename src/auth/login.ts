@@ -1,12 +1,14 @@
 import express, { type Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { redirectUriMatches } from '@modelcontextprotocol/sdk/server/auth/handlers/authorize.js';
-import { loginHeaders, secretsMatch, type OwnerOAuthProvider } from './provider.js';
+import type { Db } from '../db.js';
+import { loginHeaders, type NotesOAuthProvider } from './provider.js';
+import { authenticate } from './users.js';
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-export function loginPage(opts: { clientName: string; fields: Record<string, string>; error?: string }): string {
+export function loginPage(opts: { clientName: string; fields: Record<string, string>; error?: string; email?: string }): string {
   const hidden = Object.entries(opts.fields)
     .map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`)
     .join('\n      ');
@@ -25,8 +27,8 @@ export function loginPage(opts: { clientName: string; fields: Record<string, str
     main { width: 100%; max-width: 360px; background: var(--card); border-radius: 14px; padding: 28px 24px; box-shadow: 0 1px 3px rgb(0 0 0 / .12); }
     h1 { font-size: 20px; margin: 0 0 4px; }
     p { margin: 0 0 20px; color: var(--muted); }
-    label { display: block; font-weight: 600; margin-bottom: 6px; }
-    input[type=password] { width: 100%; font-size: 17px; padding: 12px; border-radius: 10px; border: 1px solid var(--muted); background: transparent; color: inherit; }
+    label { display: block; font-weight: 600; margin: 14px 0 6px; }
+    input[type=password], input[type=email] { width: 100%; font-size: 17px; padding: 12px; border-radius: 10px; border: 1px solid var(--muted); background: transparent; color: inherit; }
     button { width: 100%; margin-top: 16px; padding: 12px; font-size: 17px; font-weight: 600; border: 0; border-radius: 10px; background: var(--accent); color: var(--card); }
     .error { color: var(--err); margin: 12px 0 0; }
   </style>
@@ -37,8 +39,10 @@ export function loginPage(opts: { clientName: string; fields: Record<string, str
     <p>${esc(opts.clientName)} wants access to your notes.</p>
     <form method="post" action="/oauth/login">
       ${hidden}
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="username" autocapitalize="none" value="${esc(opts.email ?? '')}"${opts.email ? '' : ' autofocus'}>
       <label for="password">Password</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
+      <input id="password" name="password" type="password" autocomplete="current-password"${opts.email ? ' autofocus' : ''} required>
       ${opts.error ? `<p class="error" role="alert">${esc(opts.error)}</p>` : ''}
       <button type="submit">Allow access</button>
     </form>
@@ -47,10 +51,17 @@ export function loginPage(opts: { clientName: string; fields: Record<string, str
 </html>`;
 }
 
-/** POST /oauth/login: checks the owner password and completes the authorization redirect. */
-export function loginRouter(provider: OwnerOAuthProvider, ownerPassword: string): Router {
+/** POST /oauth/login: checks the email and password and completes the authorization redirect for that person. */
+export function loginRouter(provider: NotesOAuthProvider, db: Db, ownerPassword: string): Router {
   const router = express.Router();
-  const limiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false });
+  // Wrong passwords count (a success is the redirect back to Claude), so people sharing a network don't lock each other out.
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+  });
 
   router.post('/oauth/login', limiter, express.urlencoded({ extended: false }), async (req, res) => {
     const f = req.body as Record<string, string | undefined>;
@@ -74,12 +85,14 @@ export function loginRouter(provider: OwnerOAuthProvider, ownerPassword: string)
       scope: f.scope ?? '',
       resource: f.resource ?? '',
     };
-    if (!secretsMatch(f.password ?? '', ownerPassword)) {
+    const email = (f.email ?? '').slice(0, 254);
+    const user = await authenticate(db, email, f.password ?? '', ownerPassword);
+    if (!user) {
       res
         .status(401)
         .type('html')
         .set(loginHeaders(redirectUri))
-        .send(loginPage({ clientName: client.client_name ?? 'An app', fields, error: 'Wrong password.' }));
+        .send(loginPage({ clientName: client.client_name ?? 'An app', fields, email, error: 'Wrong email or password.' }));
       return;
     }
     const code = await provider.issueCode({
@@ -88,6 +101,7 @@ export function loginRouter(provider: OwnerOAuthProvider, ownerPassword: string)
       codeChallenge: f.code_challenge,
       scopes: (f.scope ?? '').split(' ').filter(Boolean),
       resource: f.resource || null,
+      userId: user.id,
     });
     const target = new URL(redirectUri);
     target.searchParams.set('code', code);

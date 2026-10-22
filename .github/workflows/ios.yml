@@ -38,13 +38,15 @@ jobs:
           xcodebuild -version
 
       # XcodeGen writes the project that gets signed, so it's built from a pinned commit (with its
-      # own pinned dependencies) rather than whatever Homebrew has today. Cached after the first build.
+      # own pinned dependencies) rather than whatever Homebrew has today. Cached after the first build,
+      # with its setting presets: the defaults every target starts from (PRODUCT_NAME, ONLY_ACTIVE_ARCH,
+      # ALWAYS_SEARCH_USER_PATHS...). Without them it still writes a project, just a broken one.
       - name: XcodeGen 2.46.0 (cached)
         id: xcodegen
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/xcodegen
-          key: xcodegen-8445e778451c7e44237b90281bde622d764b0084-${{ runner.os }}-${{ runner.arch }}
+          key: xcodegen-8445e778451c7e44237b90281bde622d764b0084-presets-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build XcodeGen from its pinned commit
         if: steps.xcodegen.outputs.cache-hit != 'true'
@@ -55,10 +57,23 @@ jobs:
           swift build -c release --package-path "$SRC" --product xcodegen
           mkdir -p ~/xcodegen
           cp "$SRC/.build/release/xcodegen" ~/xcodegen/
-          cp -R "$SRC"/.build/release/*.bundle ~/xcodegen/ 2>/dev/null || true
+          # XcodeGen looks for its presets next to itself. (Its resource bundle only holds a link back to
+          # this source tree, which a cached copy doesn't have.)
+          cp -RL "$SRC/SettingPresets" ~/xcodegen/SettingPresets
+          test -f ~/xcodegen/SettingPresets/base.yml
+          # Generate from exactly what gets cached, even on this first run, so a gap shows up now.
+          rm -rf "$SRC"
 
       - name: Generate the Xcode project
-        run: ~/xcodegen/xcodegen generate
+        run: |
+          set -o pipefail
+          ~/xcodegen/xcodegen generate 2>&1 | tee "$RUNNER_TEMP/xcodegen.log"
+          # Without its presets XcodeGen only prints this and carries on; the build then fails in
+          # confusing ways (an unnamed test bundle, both simulator architectures). Stop here instead.
+          if grep -q 'settings found' "$RUNNER_TEMP/xcodegen.log"; then
+            echo "::error title=XcodeGen presets missing::XcodeGen couldn't find its setting presets, so the project would be wrong. Change the cache key in ios.yml to rebuild XcodeGen."
+            exit 1
+          fi
 
       - name: Unit tests
         run: |
@@ -169,7 +184,7 @@ jobs:
             <key>signingStyle</key><string>automatic</string>
             <key>teamID</key><string>$APPLE_TEAM_ID</string>
             <key>manageAppVersionAndBuildNumber</key><false/>
-            <key>testFlightInternalTestingOnly</key><true/>
+            <key>testFlightInternalTestingOnly</key><false/>
             <key>uploadSymbols</key><true/>
           </dict>
           </plist>

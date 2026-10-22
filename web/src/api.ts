@@ -1,6 +1,11 @@
 import { QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  AccountView,
+  ApiTokenView,
   FocusAction,
+  InviteCheck,
+  InviteView,
+  Me,
   FocusView,
   LabView,
   MessageResult,
@@ -12,6 +17,7 @@ import type {
   PositionListItem,
   PositionView,
   Role,
+  SessionInfo,
   SessionView,
   Status,
   TechniqueListItem,
@@ -67,6 +73,7 @@ export const queryClient = new QueryClient({
 
 export const keys = {
   session: ['session'] as const,
+  account: ['account'] as const,
   focus: ['focus'] as const,
   lab: ['lab'] as const,
   techniques: (f: TechniqueFilters = {}) => ['techniques', f] as const,
@@ -87,13 +94,28 @@ function invalidateAll(qc: ReturnType<typeof useQueryClient>) {
 // ---------- session ----------
 
 export const useSession = () =>
-  useQuery({ queryKey: keys.session, queryFn: () => request<{ signedIn: boolean }>('GET', '/api/v1/session'), staleTime: Infinity });
+  useQuery({ queryKey: keys.session, queryFn: () => request<SessionInfo>('GET', '/api/v1/session'), staleTime: Infinity });
+
+/**
+ * Signed in or out as someone: nothing of the previous person's stays in the cache, and the session the
+ * app's gate is watching changes in place (clearing the whole cache would detach it from that query).
+ */
+function switchSession(qc: ReturnType<typeof useQueryClient>, info: SessionInfo) {
+  qc.removeQueries({ predicate: q => q.queryKey[0] !== keys.session[0] });
+  qc.setQueryData(keys.session, info);
+}
+
+/** The signed-in person (only called inside the signed-in app). */
+export function useMe(): Me | null {
+  const session = useSession();
+  return session.data?.signedIn ? session.data.user : null;
+}
 
 export function useSignIn() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (password: string) => request<void>('POST', '/api/v1/session', { password }),
-    onSuccess: () => qc.setQueryData(keys.session, { signedIn: true }),
+    mutationFn: (v: { email: string; password: string }) => request<SessionInfo>('POST', '/api/v1/session', v),
+    onSuccess: info => switchSession(qc, info),
   });
 }
 
@@ -101,10 +123,7 @@ export function useSignOut() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => request<void>('DELETE', '/api/v1/session'),
-    onSuccess: () => {
-      qc.clear();
-      qc.setQueryData(keys.session, { signedIn: false });
-    },
+    onSuccess: () => switchSession(qc, { signedIn: false }),
   });
 }
 
@@ -346,5 +365,61 @@ export function useUndo() {
   return useMutation({
     mutationFn: () => request<MessageResult>('POST', '/api/v1/undo'),
     onSuccess: () => invalidateAll(qc),
+  });
+}
+
+// ---------- account and people ----------
+
+export const useAccount = () => useQuery({ queryKey: keys.account, queryFn: () => request<AccountView>('GET', '/api/v1/account') });
+
+function useAccountWrite<V, R>(fn: (v: V) => Promise<R>) {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: fn, onSuccess: () => void qc.invalidateQueries({ queryKey: keys.account }) });
+}
+
+export function useUpdateProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { name?: string | null; email?: string | null }) => request<Me>('PATCH', '/api/v1/account', v),
+    onSuccess: me => {
+      qc.setQueryData(keys.session, { signedIn: true, user: me } satisfies SessionInfo);
+      void qc.invalidateQueries({ queryKey: keys.account });
+    },
+  });
+}
+
+export const useChangePassword = () =>
+  useMutation({ mutationFn: (v: { current: string; password: string }) => request<MessageResult>('POST', '/api/v1/account/password', v) });
+
+export const useCreateToken = () =>
+  useAccountWrite((v: { label?: string }) => request<{ token: string; row: ApiTokenView }>('POST', '/api/v1/account/tokens', v));
+
+export const useRevokeToken = () => useAccountWrite((id: number) => request<MessageResult>('DELETE', `/api/v1/account/tokens/${id}`));
+
+export const useCreateInvite = () =>
+  useAccountWrite((v: { name?: string; email?: string }) => request<{ url: string; invite: InviteView }>('POST', '/api/v1/invites', v));
+
+export const useRevokeInvite = () => useAccountWrite((id: number) => request<MessageResult>('DELETE', `/api/v1/invites/${id}`));
+
+export const useResetLink = () =>
+  useAccountWrite((userId: number) => request<{ url: string; invite: InviteView }>('POST', `/api/v1/people/${userId}/reset`));
+
+export const useRemovePerson = () => useAccountWrite((userId: number) => request<MessageResult>('DELETE', `/api/v1/people/${userId}`));
+
+/** What a join or reset link is for (no sign-in needed). */
+export const useInviteCheck = (token: string) =>
+  useQuery({
+    queryKey: ['invite', token],
+    queryFn: () => request<InviteCheck>('POST', '/api/v1/invites/check', { token }),
+    enabled: token.length > 0,
+    staleTime: Infinity,
+  });
+
+export function useAcceptInvite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { token: string; name?: string; email?: string; password: string }) =>
+      request<SessionInfo>('POST', '/api/v1/invites/accept', v),
+    onSuccess: info => switchSession(qc, info),
   });
 }

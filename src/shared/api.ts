@@ -270,3 +270,56 @@ export interface TechniquePatch {
   mistakes?: string[];
   starred?: boolean;
 }
+
+// ---------- people and sign-in ----------
+
+export interface Me {
+  id: number;
+  name: string | null;
+  email: string | null;
+  isOwner: boolean;
+}
+
+export type SessionInfo = { signedIn: false } | { signedIn: true; user: Me };
+
+/** A Siri Shortcut token (the token itself is shown only once, when made). */
+export interface ApiTokenView {
+  id: number;
+  label: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export interface PersonView extends Me {
+  createdAt: string;
+  lastActiveAt: string | null;
+}
+
+/** A one-time link to join, or to set a new password. */
+export interface InviteView {
+  id: number;
+  purpose: 'join' | 'reset';
+  name: string | null;
+  email: string | null;
+  userId: number | null;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface AccountView {
+  me: Me;
+  tokens: ApiTokenView[];
+  /** The owner's API_TOKEN secret also works for their Shortcuts. */
+  ownerApiToken: boolean;
+  /** Only for the owner. */
+  people?: PersonView[];
+  invites?: InviteView[];
+}
+
+/** What an invite or reset link is for, before it's used. */
+export interface InviteCheck {
+  purpose: 'join' | 'reset';
+  name: string | null;
+  email: string | null;
+  expiresAt: string;
+}
