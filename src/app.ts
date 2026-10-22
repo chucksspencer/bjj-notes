@@ -3,17 +3,23 @@ import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middlew
 import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { loginRouter } from './auth/login.js';
-import { OwnerOAuthProvider } from './auth/provider.js';
+import { NotesOAuthProvider } from './auth/provider.js';
+import { getUser } from './auth/users.js';
 import { appCaptureRouter, captureRouter, type Structurer } from './capture.js';
 import type { Config } from './config.js';
 import { buildMcpServer } from './mcp/server.js';
-import type { Ctx } from './services/context.js';
+import { userCtx, type Ctx } from './services/context.js';
+import { accountRouter } from './http/account.js';
 import { apiRouter } from './http/api.js';
 import { webAuth } from './http/auth.js';
 import { webAppRouter } from './http/static.js';
 
 const SCOPES = ['notes'];
 
+/**
+ * The whole server. `ctx` is the base context (the plain database pool): each request is given a
+ * context for the person it's signed in as, and only that person's notebook is read or written.
+ */
 export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structurer | null; webDir?: string }): Express {
   const { ctx, config, structurer } = opts;
   const app = express();
@@ -34,7 +40,7 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
   });
 
   const mcpUrl = new URL('/mcp', config.publicUrl);
-  const provider = new OwnerOAuthProvider(ctx.db, mcpUrl);
+  const provider = new NotesOAuthProvider(ctx.db, mcpUrl);
 
   // OAuth: /.well-known/*, /authorize, /token, /register, /revoke
   app.use(
@@ -55,7 +61,7 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
       resource_name: 'BJJ Notes',
     });
   });
-  app.use(loginRouter(provider, config.ownerPassword));
+  app.use(loginRouter(provider, ctx.db, config.ownerPassword));
 
   const bearer = requireBearerAuth({
     verifier: provider,
@@ -65,7 +71,13 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
 
   // Stateless Streamable HTTP: a fresh server + transport per request, plain JSON responses.
   app.post('/mcp', bearer, express.json({ limit: '1mb' }), async (req, res) => {
-    const server = buildMcpServer(ctx);
+    const userId = Number(req.auth?.extra?.userId);
+    const user = Number.isInteger(userId) ? await getUser(ctx.db, userId) : null;
+    if (!user) {
+      res.status(401).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Sign in again.' }, id: null });
+      return;
+    }
+    const server = buildMcpServer(userCtx(ctx, user.id), user.name);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => {
       void transport.close();
@@ -92,6 +104,15 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
     secureCookies: config.publicUrl.protocol === 'https:',
   });
   app.use(web.router);
+  app.use(
+    accountRouter({
+      base: ctx,
+      publicUrl: config.publicUrl,
+      requireAuth: web.requireAuth,
+      startSession: web.startSession,
+      limiter: web.limiter,
+    }),
+  );
   app.use(appCaptureRouter(ctx, structurer, web.requireAuth));
   app.use(apiRouter(ctx, web.requireAuth));
 

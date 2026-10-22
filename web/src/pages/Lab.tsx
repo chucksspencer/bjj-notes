@@ -25,7 +25,12 @@ export function FocusHeader({ title, summary, action }: { title: string; summary
       <div className="band-text">
         <div className="band-top">
           <h1 className="display page-title">{title}</h1>
-          {action}
+          <div className="band-actions">
+            {action}
+            <Link className="btn band-account" to="/account" aria-label="Account">
+              <Icon name="person" size={24} />
+            </Link>
+          </div>
         </div>
         <FocusTabs />
         <p className="band-summary">{summary}</p>

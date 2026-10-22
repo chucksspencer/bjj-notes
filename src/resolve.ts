@@ -1,4 +1,4 @@
-import type { Queryable } from './db.js';
+import { uid, type Queryable } from './db.js';
 
 export interface Candidate {
   id: number;
@@ -30,8 +30,8 @@ function decide(rows: Candidate[]): Resolution {
   return { match: null, candidates: rows.filter(r => r.score >= CANDIDATE_FLOOR).slice(0, 3) };
 }
 
-async function rank(q: Queryable, sql: string, name: string): Promise<Candidate[]> {
-  const { rows } = await q.query<{ id: number; name: string; score: number; exact: boolean }>(sql, [name]);
+async function rank(q: Queryable, sql: string, params: unknown[]): Promise<Candidate[]> {
+  const { rows } = await q.query<{ id: number; name: string; score: number; exact: boolean }>(sql, params);
   return rows.map(r => ({ id: r.id, name: r.name, score: Number(r.score), exact: r.exact }));
 }
 
@@ -43,10 +43,11 @@ export async function resolveTechnique(q: Queryable, name: string): Promise<Reso
               max(bjj_name_score(c, $1)) as score,
               bool_or(bjj_norm(c) = bjj_norm($1)) as exact
        from techniques t, unnest(array_prepend(t.name, t.aliases)) as c
+       where t.user_id = $2
        group by t.id, t.name
        order by exact desc, score desc
        limit 5`,
-      name,
+      [name, uid(q)],
     ),
   );
 }
@@ -62,7 +63,7 @@ export async function resolvePosition(q: Queryable, name: string): Promise<Resol
        group by p.id, p.name
        order by exact desc, score desc
        limit 5`,
-      name,
+      [name],
     ),
   );
 }
@@ -72,11 +73,11 @@ export async function techniquesMentionedIn(q: Queryable, text: string, limit = 
   const { rows } = await q.query<{ id: number; name: string }>(
     `select t.id, t.name
      from techniques t, unnest(array_prepend(t.name, t.aliases)) as c
-     where length(bjj_norm(c)) >= 4 and position(bjj_words(c) in bjj_words($1)) > 0
+     where t.user_id = $3 and length(bjj_norm(c)) >= 4 and position(bjj_words(c) in bjj_words($1)) > 0
      group by t.id, t.name
      order by max(length(c)) desc
      limit $2`,
-    [text, limit],
+    [text, limit, uid(q)],
   );
   return rows;
 }
@@ -93,11 +94,11 @@ export async function resolveFocusItem(q: Queryable, name: string, includeClosed
        left join focus_item_techniques ft on ft.focus_item_id = f.id
        left join techniques t on t.id = ft.technique_id
        cross join lateral unnest(array_remove(array[f.label, t.name], null)) as c
-       where ${includeClosed ? 'true' : "f.status in ('active', 'paused', 'backlog')"}
+       where f.user_id = $2 and ${includeClosed ? 'true' : "f.status in ('active', 'paused', 'backlog')"}
        group by f.id, f.label
        order by exact desc, score desc
        limit 5`,
-      name,
+      [name, uid(q)],
     ),
   );
 }

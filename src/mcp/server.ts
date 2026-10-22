@@ -21,18 +21,22 @@ import {
   TECHNIQUE_TYPES,
 } from '../services/vocab.js';
 
-const INSTRUCTIONS = `Chuck's personal Brazilian jiu-jitsu notebook: technique cards organised as a position graph, dated notes from classes, videos and rolling, training sessions, and a ranked focus list.
+/** What Claude is told about the notebook, written for the person it belongs to. */
+export function instructions(name: string | null): string {
+  const who = name?.trim() || 'the user';
+  return `${name?.trim() ? `${who}'s` : 'A'} personal Brazilian jiu-jitsu notebook: technique cards organised as a position graph, dated notes from classes, videos and rolling, training sessions, and a ranked focus list.
 
 How to use it well:
 - Names often arrive through voice transcription and may be misspelled. Tools resolve names fuzzily; check the names they report back and correct with another call if a match looks wrong.
-- When Chuck describes something he learned or noticed, call add_note with the technique names it's about. Use new_techniques only for genuinely new techniques, with your best guess at type and role.
+- When ${who} describes something learned or noticed, call add_note with the technique names it's about. Use new_techniques only for genuinely new techniques, with your best guess at type and role.
 - Before creating a technique card, use search to check whether it already exists under another name; add the alternative name as an alias.
 - Model techniques as moves between positions: a sweep goes from a guard (bottom) to top; a pass goes from a guard (top) to a pin; an escape starts from a pin (bottom).
 - Say where a note came from with add_note's session (a class, a seminar with its name and instructor, an open mat): "notes from today's class" is {kind: "class"}; "Zen camp seminar by Josh Jones on 2024-02-03" is {kind: "seminar", name: "Zen camp", instructor: "Josh Jones", date: "2024-02-03"}. The same session is reused, not duplicated.
-- Videos and ideas he hasn't tried yet go on the To try list (add_note with to_try: true), not on a technique. He calls this "silly Instagram bullshit"; "add this to my SIB" or "something to try" means the same. Reels he shares from Instagram land there automatically. When he's tried one and likes it, file_note keeps it under the technique; get_inbox with to_try: true lists what's waiting.
-- Lab is the short-term working set (get_lab): starred techniques and notes, videos to try, techniques new in his notes, questions for his coach. "Star that" or "flag that" stars whatever "that" is: a note (update_note with starred: true, or add_note with starred: true for a new one) or a technique (save_technique with starred: true). Stars are for what's pertinent now: after 4 weeks they fold away as older stars, and clear_stars unstars old ones (or all). When his coach answers a question, update_note with answered: true and add the answer to the text. The focus list is the long-term guide: broad areas, strategies and positions over weeks or months.
-- The focus list is ordered; #1 is what he's working on most. "Add X to my focus" puts it at the top unless he says otherwise.
-- Replies are often read aloud, so keep confirmations short. If he says "undo that", call undo_last.`;
+- Videos and ideas not tried yet go on the To try list (add_note with to_try: true), not on a technique. It's also called "silly Instagram bullshit"; "add this to my SIB" or "something to try" means the same. Reels shared from Instagram land there automatically. Once one has been tried and is worth keeping, file_note keeps it under the technique; get_inbox with to_try: true lists what's waiting.
+- Lab is the short-term working set (get_lab): starred techniques and notes, videos to try, techniques new in the notes, questions for the coach. "Star that" or "flag that" stars whatever "that" is: a note (update_note with starred: true, or add_note with starred: true for a new one) or a technique (save_technique with starred: true). Stars are for what's pertinent now: after 4 weeks they fold away as older stars, and clear_stars unstars old ones (or all). When the coach answers a question, update_note with answered: true and add the answer to the text. The focus list is the long-term guide: broad areas, strategies and positions over weeks or months.
+- The focus list is ordered; #1 is what ${who} is working on most. "Add X to my focus" puts it at the top unless told otherwise.
+- Replies are often read aloud, so keep confirmations short. "Undo that" means undo_last.`;
+}
 
 const text = (t: string): CallToolResult => ({ content: [{ type: 'text', text: t }] });
 
@@ -77,8 +81,8 @@ const newTechnique = z.object({
   role: z.enum(ROLES).optional(),
 });
 
-export function buildMcpServer(ctx: Ctx): McpServer {
-  const server = new McpServer({ name: 'bjj-notes', version: '0.1.0' }, { instructions: INSTRUCTIONS });
+export function buildMcpServer(ctx: Ctx, userName: string | null = null): McpServer {
+  const server = new McpServer({ name: 'bjj-notes', version: '0.1.0' }, { instructions: instructions(userName) });
   const readOnly = { readOnlyHint: true, openWorldHint: false };
   const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 

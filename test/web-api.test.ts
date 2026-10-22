@@ -53,14 +53,15 @@ describe('web sign-in', () => {
 
   it('signs in with the owner password and sets a locked-down cookie', async () => {
     const res = await api('POST', '/api/v1/session', { password: OWNER_PASSWORD }, { auth: 'none' });
-    expect(res.status).toBe(204);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ signedIn: true, user: { id: 1, name: 'Chuck', email: null, isOwner: true } });
     const setCookie = res.headers.get('set-cookie')!;
     expect(setCookie).toMatch(/^bjj_session=[\w-]{20,};/);
     expect(setCookie).toContain('HttpOnly');
     expect(setCookie).toContain('SameSite=Lax');
     expect(setCookie).not.toContain('Secure'); // http://localhost in tests
     cookie = setCookie.split(';')[0]!;
-    expect((await api('GET', '/api/v1/session')).body).toEqual({ signedIn: true });
+    expect((await api('GET', '/api/v1/session')).body).toMatchObject({ signedIn: true, user: { name: 'Chuck', isOwner: true } });
   });
 
   it('requires the app header on writes made with the cookie, but not with the API token', async () => {

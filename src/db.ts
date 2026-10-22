@@ -6,11 +6,35 @@ export interface Queryable {
   query<T = Record<string, any>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
   /** Run one or more statements without parameters (used for migrations). */
   exec(sql: string): Promise<void>;
+  /** The signed-in user whose notebook this handle reads and writes (see forUser). */
+  readonly uid?: number;
 }
 
 export interface Db extends Queryable {
   tx<T>(fn: (q: Queryable) => Promise<T>): Promise<T>;
   close(): Promise<void>;
+}
+
+/**
+ * The same database, for one user's requests: the handle (and every transaction it opens) carries the
+ * user's id, which every notebook query filters and writes by. Services read it with uid().
+ */
+export function forUser(db: Db, userId: number): Db {
+  return {
+    uid: userId,
+    query: (sql, params) => db.query(sql, params),
+    exec: sql => db.exec(sql),
+    tx: fn => db.tx(q => fn({ query: (sql, params) => q.query(sql, params), exec: sql => q.exec(sql), uid: userId })),
+    close: async () => {
+      throw new Error('A per-user handle does not own the connection.');
+    },
+  };
+}
+
+/** The user a notebook query is for. Throws rather than ever reading or writing without one. */
+export function uid(q: Queryable): number {
+  if (typeof q.uid !== 'number') throw new Error('Notebook query without a signed-in user.');
+  return q.uid;
 }
 
 /** Production: node-postgres against Neon (or any Postgres 15+). */

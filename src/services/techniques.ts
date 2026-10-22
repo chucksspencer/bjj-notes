@@ -1,4 +1,4 @@
-import type { Queryable } from '../db.js';
+import { uid, type Queryable } from '../db.js';
 import { describeMiss, resolvePosition, resolveTechnique } from '../resolve.js';
 import { noteOrigin } from '../shared/sessions.js';
 import { mediaTag } from './attachments.js';
@@ -73,15 +73,18 @@ export interface SaveResult {
 const SNAPSHOT_COLS = 'id, name, aliases, type, role, gi, status, summary, key_details, mistakes, starred_at::text as starred_at';
 
 async function snapshot(q: Queryable, id: number): Promise<TechniqueSnapshot> {
-  const { rows } = await q.query<TechniqueSnapshot>(`select ${SNAPSHOT_COLS} from techniques where id = $1`, [id]);
+  const { rows } = await q.query<TechniqueSnapshot>(`select ${SNAPSHOT_COLS} from techniques where id = $1 and user_id = $2`, [
+    id,
+    uid(q),
+  ]);
   return rows[0]!;
 }
 
 /** Creates a bare technique card; returns its id. Used when a note or link mentions something new. */
 export async function createStub(q: Queryable, name: string, type: TechniqueType = 'concept', role?: Role): Promise<number> {
   const { rows } = await q.query<{ id: number }>(
-    'insert into techniques (name, type, role) values ($1, $2, $3) returning id',
-    [name.trim(), type, role ?? null],
+    'insert into techniques (name, type, role, user_id) values ($1, $2, $3, $4) returning id',
+    [name.trim(), type, role ?? null, uid(q)],
   );
   return rows[0]!.id;
 }
@@ -106,7 +109,8 @@ export async function saveTechniqueResult(ctx: Ctx, input: SaveTechniqueInput): 
     let before: TechniqueSnapshot | null = null;
 
     if (input.id !== undefined) {
-      const exists = (await q.query<{ id: number }>('select id from techniques where id = $1', [input.id])).rows[0];
+      const exists = (await q.query<{ id: number }>('select id from techniques where id = $1 and user_id = $2', [input.id, uid(q)]))
+        .rows[0];
       if (!exists) return { id: null, message: `No technique #${input.id}.` };
       id = input.id;
       before = await snapshot(q, id);
@@ -141,7 +145,11 @@ export async function saveTechniqueResult(ctx: Ctx, input: SaveTechniqueInput): 
     };
     if (input.rename_to && input.rename_to.trim().toLowerCase() !== cur.name.toLowerCase()) {
       const clash = (
-        await q.query<{ id: number }>('select id from techniques where lower(name) = lower($1) and id <> $2', [next.name, id])
+        await q.query<{ id: number }>('select id from techniques where lower(name) = lower($1) and id <> $2 and user_id = $3', [
+          next.name,
+          id,
+          uid(q),
+        ])
       ).rows[0];
       if (clash) throw new UserError(`Another technique is already called ${next.name}.`);
       next.aliases = mergeList(next.aliases, [cur.name], false); // keep the old name findable
@@ -152,13 +160,15 @@ export async function saveTechniqueResult(ctx: Ctx, input: SaveTechniqueInput): 
     if (edits) {
       await q.query(
         `update techniques set name = $2, aliases = $3, type = $4, role = $5, gi = $6, status = $7,
-           summary = $8, key_details = $9, mistakes = $10, updated_at = now() where id = $1`,
-        [id, next.name, next.aliases, next.type, next.role, next.gi, next.status, next.summary, next.key_details, next.mistakes],
+           summary = $8, key_details = $9, mistakes = $10, updated_at = now() where id = $1 and user_id = $11`,
+        [id, next.name, next.aliases, next.type, next.role, next.gi, next.status, next.summary, next.key_details, next.mistakes, uid(q)],
       );
     }
     const wasStarred = cur.starred_at != null;
     const starChange = input.starred === undefined || input.starred === wasStarred ? null : input.starred ? 'starred' : 'unstarred';
-    if (starChange) await q.query('update techniques set starred_at = case when $2 then now() end where id = $1', [id, input.starred]);
+    if (starChange) {
+      await q.query('update techniques set starred_at = case when $2 then now() end where id = $1 and user_id = $3', [id, input.starred, uid(q)]);
+    }
     if (before && !edits && !starChange) {
       const already = input.starred === undefined ? `Nothing to change on ${next.name}` : `${next.name} is already ${wasStarred ? 'starred' : 'not starred'}`;
       return { id, message: `${already}.` };
@@ -189,7 +199,13 @@ export async function saveTechniqueResult(ctx: Ctx, input: SaveTechniqueInput): 
     const addedLinks: { from: number; to: number; kind: string }[] = [];
     for (const l of input.links ?? []) {
       let targetId = l.technique_id;
-      if (targetId === undefined) {
+      if (targetId !== undefined) {
+        const mine = (await q.query('select 1 from techniques where id = $1 and user_id = $2', [targetId, uid(q)])).rows[0];
+        if (!mine) {
+          notes.push(`no technique #${targetId}`);
+          continue;
+        }
+      } else {
         if (!l.technique?.trim()) continue;
         const target = await resolveTechnique(q, l.technique);
         targetId = target.match?.id;
@@ -201,9 +217,9 @@ export async function saveTechniqueResult(ctx: Ctx, input: SaveTechniqueInput): 
       }
       if (targetId === id) continue;
       const { rows } = await q.query<{ from_id: number }>(
-        `insert into technique_links (from_id, to_id, kind, note) values ($1, $2, $3, $4)
+        `insert into technique_links (from_id, to_id, kind, note, user_id) values ($1, $2, $3, $4, $5)
          on conflict do nothing returning from_id`,
-        [id, targetId, l.kind, l.note ?? null],
+        [id, targetId, l.kind, l.note ?? null, uid(q)],
       );
       if (rows[0]) addedLinks.push({ from: id, to: targetId, kind: l.kind });
     }
@@ -282,12 +298,15 @@ export async function removeEdge(ctx: Ctx, techniqueId: number, edgeId: number):
   return ctx.db.tx(async q => {
     const edge = (
       await q.query<EdgeSnapshot>(
-        'delete from technique_edges where id = $1 and technique_id = $2 returning id, technique_id, from_position_id, from_role, to_position_id, to_role',
-        [edgeId, techniqueId],
+        `delete from technique_edges where id = $1 and technique_id = $2
+           and exists (select 1 from techniques t where t.id = $2 and t.user_id = $3)
+         returning id, technique_id, from_position_id, from_role, to_position_id, to_role`,
+        [edgeId, techniqueId, uid(q)],
       )
     ).rows[0];
     if (!edge) return 'That position link was already gone.';
-    const name = (await q.query<{ name: string }>('select name from techniques where id = $1', [techniqueId])).rows[0]!.name;
+    const name = (await q.query<{ name: string }>('select name from techniques where id = $1 and user_id = $2', [techniqueId, uid(q)]))
+      .rows[0]!.name;
     await logActivity(q, 'remove_edge', `removed a position from ${name}`, { kind: 'restore_edge', edge });
     return `Removed the position from ${name}.`;
   });
@@ -298,8 +317,8 @@ export async function removeLink(ctx: Ctx, fromId: number, toId: number, kind: s
   return ctx.db.tx(async q => {
     const link = (
       await q.query<LinkSnapshot>(
-        'delete from technique_links where from_id = $1 and to_id = $2 and kind = $3 returning from_id, to_id, kind, note',
-        [fromId, toId, kind],
+        'delete from technique_links where from_id = $1 and to_id = $2 and kind = $3 and user_id = $4 returning from_id, to_id, kind, note',
+        [fromId, toId, kind, uid(q)],
       )
     ).rows[0];
     if (!link) return 'That link was already gone.';
@@ -312,8 +331,8 @@ export async function removeLink(ctx: Ctx, fromId: number, toId: number, kind: s
 async function removeTechnique(q: Queryable, id: number): Promise<{ name: string; inboxed: number; undo: UndoOp } | null> {
   const row = (
     await q.query<TechniqueSnapshot & { created_at: string; updated_at: string }>(
-      `select ${SNAPSHOT_COLS}, created_at::text as created_at, updated_at::text as updated_at from techniques where id = $1`,
-      [id],
+      `select ${SNAPSHOT_COLS}, created_at::text as created_at, updated_at::text as updated_at from techniques where id = $1 and user_id = $2`,
+      [id, uid(q)],
     )
   ).rows[0];
   if (!row) return null;
@@ -324,23 +343,31 @@ async function removeTechnique(q: Queryable, id: number): Promise<{ name: string
     )
   ).rows;
   const links = (
-    await q.query<LinkSnapshot>('select from_id, to_id, kind, note from technique_links where from_id = $1 or to_id = $1', [id])
+    await q.query<LinkSnapshot>('select from_id, to_id, kind, note from technique_links where (from_id = $1 or to_id = $1) and user_id = $2', [
+      id,
+      uid(q),
+    ])
   ).rows;
-  const noteIds = (await q.query<{ note_id: number }>('select note_id from note_techniques where technique_id = $1', [id])).rows.map(
+  const noteIds = (
+    await q.query<{ note_id: number }>('select note_id from note_techniques where technique_id = $1 and user_id = $2', [id, uid(q)])
+  ).rows.map(
     r => r.note_id,
   );
   const focusItemIds = (
-    await q.query<{ focus_item_id: number }>('select focus_item_id from focus_item_techniques where technique_id = $1', [id])
+    await q.query<{ focus_item_id: number }>('select focus_item_id from focus_item_techniques where technique_id = $1 and user_id = $2', [
+      id,
+      uid(q),
+    ])
   ).rows.map(r => r.focus_item_id);
   const orphaned = (
     await q.query<{ id: number }>(
-      `select n.id from notes n where n.id = any($1::int[]) and not n.inbox
+      `select n.id from notes n where n.id = any($1::int[]) and n.user_id = $3 and not n.inbox
          and not exists (select 1 from note_techniques x where x.note_id = n.id and x.technique_id <> $2)`,
-      [noteIds, id],
+      [noteIds, id, uid(q)],
     )
   ).rows.map(r => r.id);
-  await q.query('delete from techniques where id = $1', [id]);
-  if (orphaned.length) await q.query('update notes set inbox = true where id = any($1::int[])', [orphaned]);
+  await q.query('delete from techniques where id = $1 and user_id = $2', [id, uid(q)]);
+  if (orphaned.length) await q.query('update notes set inbox = true where id = any($1::int[]) and user_id = $2', [orphaned, uid(q)]);
   return {
     name: row.name,
     inboxed: orphaned.length,

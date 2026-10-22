@@ -1,10 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import express, { type Router } from 'express';
-import { secretsMatch } from './auth/provider.js';
+import { userForApiToken } from './auth/users.js';
+import { uid } from './db.js';
+import { userIdOf } from './http/auth.js';
 import { clipPlaceholder, placeholderFor, splitLink } from './shared/links.js';
 import { MAX_THUMB_BYTES, type AttachmentInput } from './services/attachments.js';
 import { techniquesMentionedIn } from './resolve.js';
-import type { Ctx } from './services/context.js';
+import { userCtx, type Ctx } from './services/context.js';
 import { getFocus } from './services/focus.js';
 import { addNote, type AddNoteInput } from './services/notes.js';
 import { NOTE_KINDS, ROLES, SESSION_KINDS, SOURCE_KINDS, TECHNIQUE_TYPES } from './services/vocab.js';
@@ -212,7 +214,9 @@ export async function captureNote(
   if (structurer && text) {
     try {
       const known = {
-        techniques: (await ctx.db.query<{ name: string }>('select name from techniques order by name')).rows.map(r => r.name),
+        techniques: (
+          await ctx.db.query<{ name: string }>('select name from techniques where user_id = $1 order by name', [uid(ctx.db)])
+        ).rows.map(r => r.name),
         positions: (await ctx.db.query<{ name: string }>('select name from positions order by name')).rows.map(r => r.name),
       };
       const s = await structurer(text, known);
@@ -266,47 +270,54 @@ export async function captureNote(
   }
 }
 
-/** The same capture for the iPhone app, signed in like the web app (session cookie) or with the API token. */
-export function appCaptureRouter(ctx: Ctx, structurer: Structurer | null, requireAuth: express.RequestHandler): Router {
+/** The same capture for the iPhone app, signed in like the web app (session cookie) or with an API token. */
+export function appCaptureRouter(base: Ctx, structurer: Structurer | null, requireAuth: express.RequestHandler): Router {
   const router = express.Router();
   // Room for a note's still images (each a small JPEG).
   router.post('/api/v1/capture', express.json({ limit: '6mb' }), requireAuth, async (req, res) => {
-    const out = await captureNote(ctx, structurer, req.body);
+    const out = await captureNote(userCtx(base, userIdOf(res)), structurer, req.body);
     res.status(out.status).json(out.body);
   });
   return router;
 }
 
 /**
- * Plain HTTPS endpoints for Siri Shortcuts, authenticated with a static bearer token.
+ * Plain HTTPS endpoints for Siri Shortcuts, authenticated with a bearer token: the owner's API_TOKEN,
+ * or a token someone made on their Account page. Each token reads and writes its own person's notebook.
  *   POST /api/capture  { "text": "...", "url"?: "..." }  -> { speech, note_id }
  *   GET  /api/focus                                     -> { speech }
  */
-export function captureRouter(ctx: Ctx, apiToken: string, structurer: Structurer | null): Router {
+export function captureRouter(base: Ctx, apiToken: string, structurer: Structurer | null): Router {
   const router = express.Router();
   // The token goes in the Authorization header, or (for POSTs) as a "token" field in the JSON body:
   // headers are fiddly to set in the Shortcuts app, and a body field isn't written to request logs.
-  const auth: express.RequestHandler = (req, res, next) => {
-    const header = req.get('authorization') ?? '';
-    const bodyToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
-    const token = header.replace(/^Bearer\s+/i, '').trim() || bodyToken;
-    if (!token || !secretsMatch(token, apiToken)) {
-      res.status(401).json({
-        error: 'unauthorized',
-        speech: token ? "BJJ Notes didn't accept that token. Check the token in the shortcut." : 'The shortcut sent no token.',
-      });
-      return;
+  const auth: express.RequestHandler = async (req, res, next) => {
+    try {
+      const header = req.get('authorization') ?? '';
+      const bodyToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+      const token = header.replace(/^Bearer\s+/i, '').trim() || bodyToken;
+      const userId = token ? await userForApiToken(base.db, token, apiToken) : null;
+      if (userId === null) {
+        res.status(401).json({
+          error: 'unauthorized',
+          speech: token ? "BJJ Notes didn't accept that token. Check the token in the shortcut." : 'The shortcut sent no token.',
+        });
+        return;
+      }
+      res.locals.userId = userId;
+      next();
+    } catch (err) {
+      next(err);
     }
-    next();
   };
 
   router.post('/api/capture', express.json({ limit: '64kb' }), auth, async (req, res) => {
-    const out = await captureNote(ctx, structurer, req.body);
+    const out = await captureNote(userCtx(base, userIdOf(res)), structurer, req.body);
     res.status(out.status).json(out.body);
   });
 
   router.get('/api/focus', auth, async (_req, res) => {
-    const text = await getFocus(ctx);
+    const text = await getFocus(userCtx(base, userIdOf(res)));
     // Drop the "last note" detail for speech; keep rank and label.
     const speech = text
       .split('\n')

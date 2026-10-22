@@ -11,7 +11,7 @@ A small native app around the web app, there for what a web page can't do:
 - **Everything else** is the web app, full screen inside the app. Links to Instagram and YouTube open
   in their own apps.
 
-You sign in once, in the app, with your usual password. Siri and background sync reuse that sign-in,
+You sign in once, in the app, with your email and password. Siri and background sync reuse that sign-in,
 which stays valid for 90 days after it was last used.
 
 ## Getting it onto your phone

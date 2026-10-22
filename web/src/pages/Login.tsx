@@ -3,11 +3,12 @@ import { ApiError, useSignIn } from '../api';
 import { BeltMark } from '../components/Belt';
 
 export function Login() {
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const signIn = useSignIn();
   const error =
     signIn.error instanceof ApiError && signIn.error.status === 401
-      ? 'Wrong password.'
+      ? 'Wrong email or password.'
       : signIn.error instanceof ApiError && signIn.error.status === 429
         ? 'Too many tries. Wait a few minutes and try again.'
         : signIn.error
@@ -19,7 +20,7 @@ export function Login() {
       <form
         onSubmit={e => {
           e.preventDefault();
-          if (password) signIn.mutate(password);
+          if (password) signIn.mutate({ email: email.trim(), password });
         }}
       >
         <BeltMark />
@@ -28,12 +29,25 @@ export function Login() {
           Your techniques, notes and focus list.
         </p>
         <label className="field">
+          <span className="label">Email</span>
+          <input
+            className="input"
+            type="email"
+            autoComplete="username"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            autoFocus
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+          />
+        </label>
+        <label className="field">
           <span className="label">Password</span>
           <input
             className="input"
             type="password"
             autoComplete="current-password"
-            autoFocus
             value={password}
             onChange={e => setPassword(e.target.value)}
           />
@@ -46,6 +60,9 @@ export function Login() {
             {error}
           </p>
         )}
+        <p className="muted small" style={{ marginTop: 20 }}>
+          New here? Ask for an invite link.
+        </p>
       </form>
     </main>
   );

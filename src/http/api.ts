@@ -14,8 +14,10 @@ import type {
   TechniqueView,
 } from '../shared/api.js';
 import { undoLast } from '../services/activity.js';
-import { NotFoundError as NotFound, UserError } from '../services/errors.js';
-import type { Ctx } from '../services/context.js';
+import { ForbiddenError as Forbidden, NotFoundError as NotFound, UserError } from '../services/errors.js';
+import { userCtx, type Ctx } from '../services/context.js';
+import { uid } from '../db.js';
+import { userIdOf } from './auth.js';
 import { editFocusItem, updateFocus } from '../services/focus.js';
 import { attachmentThumb, linkAttachment } from '../services/attachments.js';
 import { clearStars, markAnswered } from '../services/marks.js';
@@ -129,32 +131,38 @@ const focusActionBody = z.object({
 });
 const focusPatch = z.object({ label: z.string().trim().min(1).max(200).optional(), goal: z.string().trim().max(300).nullable().optional() });
 
-/** Wraps an async handler so errors reach the error middleware. */
-const h =
-  <T>(fn: (req: Request, res: Response) => Promise<T>): RequestHandler =>
+/**
+ * Wraps an async handler: it gets the signed-in user's context (set up by requireAuth), its result is sent
+ * as JSON, and errors reach the error middleware.
+ */
+export const handler =
+  (base: Ctx) =>
+  <T>(fn: (ctx: Ctx, req: Request, res: Response) => Promise<T>): RequestHandler =>
   (req, res, next) => {
-    fn(req, res)
+    Promise.resolve()
+      .then(() => fn(userCtx(base, userIdOf(res)), req, res))
       .then(body => {
         if (!res.headersSent) res.set('Cache-Control', 'no-store').json(body);
       })
       .catch(next);
   };
 
-export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
+export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
   const r = express.Router();
+  const h = handler(base);
   r.use('/api/v1', requireAuth, express.json({ limit: '256kb' }));
 
-  const loadTechnique = async (techniqueId: number): Promise<TechniqueView> => {
+  const loadTechnique = async (ctx: Ctx, techniqueId: number): Promise<TechniqueView> => {
     const t = await techniqueView(ctx.db, techniqueId, 50);
     if (!t) throw new NotFound(`No technique #${techniqueId}.`);
     return t;
   };
 
   // Focus list
-  r.get('/api/v1/focus', h(async (): Promise<FocusView> => focusView(ctx)));
+  r.get('/api/v1/focus', h(async (ctx): Promise<FocusView> => focusView(ctx)));
   r.post(
     '/api/v1/focus',
-    h(async (req): Promise<MessageResult & { focus: FocusView }> => {
+    h(async (ctx, req): Promise<MessageResult & { focus: FocusView }> => {
       const b = focusCreate.parse(req.body);
       const message = await updateFocus(ctx, {
         action: 'add',
@@ -168,7 +176,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
   );
   r.post(
     '/api/v1/focus/:id/actions',
-    h(async (req): Promise<MessageResult & { focus: FocusView }> => {
+    h(async (ctx, req): Promise<MessageResult & { focus: FocusView }> => {
       const b = focusActionBody.parse(req.body);
       const message = await updateFocus(ctx, { action: b.action, item: '', item_id: id.parse(req.params.id), position: b.position });
       return { message, focus: await focusView(ctx) };
@@ -176,7 +184,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
   );
   r.patch(
     '/api/v1/focus/:id',
-    h(async (req): Promise<MessageResult & { focus: FocusView }> => {
+    h(async (ctx, req): Promise<MessageResult & { focus: FocusView }> => {
       const b = focusPatch.parse(req.body);
       const message = await editFocusItem(ctx, id.parse(req.params.id), b);
       return { message, focus: await focusView(ctx) };
@@ -186,6 +194,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
   // Photos and videos: the still image, and recording where the original is in Photos
   r.get('/api/v1/attachments/:id/thumb', async (req, res, next) => {
     try {
+      const ctx = userCtx(base, userIdOf(res));
       const thumb = await attachmentThumb(ctx.db, id.parse(req.params.id));
       if (!thumb) throw new NotFound('No such photo or video.');
       res.type('image/jpeg').set('Cache-Control', 'private, max-age=31536000, immutable').send(thumb);
@@ -195,7 +204,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
   });
   r.patch(
     '/api/v1/attachments/:id',
-    h(async (req): Promise<AttachmentView> => {
+    h(async (ctx, req): Promise<AttachmentView> => {
       const b = z
         .object({ photosLocalId: z.string().trim().min(1).max(300).optional(), photosCloudId: z.string().trim().min(1).max(600).optional() })
         .parse(req.body);
@@ -206,7 +215,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
   // The Lab: the short-term working set
   r.get(
     '/api/v1/lab',
-    h(async (req): Promise<LabView> => {
+    h(async (ctx, req): Promise<LabView> => {
       const qs = z.object({ days: z.coerce.number().int().min(1).max(365).optional() }).parse(req.query);
       return labView(ctx, qs.days);
     }),
@@ -214,7 +223,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
 
   r.post(
     '/api/v1/stars/clear',
-    h(async (req): Promise<MessageResult> => {
+    h(async (ctx, req): Promise<MessageResult> => {
       const b = z.object({ olderThanDays: z.number().int().min(1).max(3650).optional() }).parse(req.body ?? {});
       return { message: await clearStars(ctx, b.olderThanDays) };
     }),
@@ -223,7 +232,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
   // Techniques
   r.get(
     '/api/v1/techniques',
-    h(async (req): Promise<TechniqueListItem[]> => {
+    h(async (ctx, req): Promise<TechniqueListItem[]> => {
       const qs = z
         .object({
           q: z.string().max(200).optional(),
@@ -242,9 +251,11 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
   );
   r.post(
     '/api/v1/techniques',
-    h(async (req, res): Promise<TechniqueView> => {
+    h(async (ctx, req, res): Promise<TechniqueView> => {
       const b = techniqueCreate.parse(req.body);
-      const exists = (await ctx.db.query<{ id: number }>('select id from techniques where lower(name) = lower($1)', [b.name])).rows[0];
+      const exists = (
+        await ctx.db.query<{ id: number }>('select id from techniques where lower(name) = lower($1) and user_id = $2', [b.name, uid(ctx.db)])
+      ).rows[0];
       if (exists) {
         res.status(409).json({ error: 'exists', message: `${b.name} already exists.`, id: exists.id });
         return undefined as never;
@@ -252,13 +263,13 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
       const saved = await saveTechniqueResult(ctx, { name: b.name, type: b.type, role: b.role, summary: b.summary });
       if (!saved.id) throw new UserError(saved.message);
       res.status(201);
-      return loadTechnique(saved.id);
+      return loadTechnique(ctx, saved.id);
     }),
   );
-  r.get('/api/v1/techniques/:id', h(async (req): Promise<TechniqueView> => loadTechnique(id.parse(req.params.id))));
+  r.get('/api/v1/techniques/:id', h(async (ctx, req): Promise<TechniqueView> => loadTechnique(ctx, id.parse(req.params.id))));
   r.patch(
     '/api/v1/techniques/:id',
-    h(async (req): Promise<TechniqueView> => {
+    h(async (ctx, req): Promise<TechniqueView> => {
       const techniqueId = id.parse(req.params.id);
       const b = techniquePatch.parse(req.body);
       const saved = await saveTechniqueResult(ctx, {
@@ -277,20 +288,20 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
         starred: b.starred,
       });
       if (!saved.id) throw new NotFound(saved.message);
-      return loadTechnique(techniqueId);
+      return loadTechnique(ctx, techniqueId);
     }),
   );
   r.delete(
     '/api/v1/techniques/:id',
-    h(async (req): Promise<MessageResult> => ({ message: await deleteTechnique(ctx, id.parse(req.params.id)) })),
+    h(async (ctx, req): Promise<MessageResult> => ({ message: await deleteTechnique(ctx, id.parse(req.params.id)) })),
   );
   r.post(
     '/api/v1/techniques/delete',
-    h(async (req): Promise<MessageResult> => ({ message: await deleteTechniques(ctx, idList.parse(req.body).ids) })),
+    h(async (ctx, req): Promise<MessageResult> => ({ message: await deleteTechniques(ctx, idList.parse(req.body).ids) })),
   );
   r.post(
     '/api/v1/techniques/:id/edges',
-    h(async (req): Promise<TechniqueView> => {
+    h(async (ctx, req): Promise<TechniqueView> => {
       const techniqueId = id.parse(req.params.id);
       const b = edgeCreate.parse(req.body);
       if (!b.fromPositionId && !b.toPositionId) throw new UserError('Pick a starting or ending position.');
@@ -305,20 +316,20 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
           },
         ],
       });
-      return loadTechnique(techniqueId);
+      return loadTechnique(ctx, techniqueId);
     }),
   );
   r.delete(
     '/api/v1/techniques/:id/edges/:edgeId',
-    h(async (req): Promise<TechniqueView> => {
+    h(async (ctx, req): Promise<TechniqueView> => {
       const techniqueId = id.parse(req.params.id);
       await removeEdge(ctx, techniqueId, id.parse(req.params.edgeId));
-      return loadTechnique(techniqueId);
+      return loadTechnique(ctx, techniqueId);
     }),
   );
   r.post(
     '/api/v1/techniques/:id/links',
-    h(async (req): Promise<TechniqueView> => {
+    h(async (ctx, req): Promise<TechniqueView> => {
       const techniqueId = id.parse(req.params.id);
       const b = linkCreate.parse(req.body);
       if (b.techniqueId === undefined && !b.name) throw new UserError('Pick a technique to link.');
@@ -326,25 +337,25 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
         id: techniqueId,
         links: [{ kind: b.kind, technique_id: b.techniqueId, technique: b.name, note: b.note }],
       });
-      return loadTechnique(techniqueId);
+      return loadTechnique(ctx, techniqueId);
     }),
   );
   r.delete(
     '/api/v1/techniques/:id/links/:otherId/:kind',
-    h(async (req): Promise<TechniqueView> => {
+    h(async (ctx, req): Promise<TechniqueView> => {
       const techniqueId = id.parse(req.params.id);
       const otherId = id.parse(req.params.otherId);
       const kind = z.enum(LINK_KINDS).parse(req.params.kind);
       const incoming = req.query.direction === 'in';
       await removeLink(ctx, incoming ? otherId : techniqueId, incoming ? techniqueId : otherId, kind);
-      return loadTechnique(techniqueId);
+      return loadTechnique(ctx, techniqueId);
     }),
   );
 
   // Notes
   r.get(
     '/api/v1/notes',
-    h(async (req): Promise<NoteView[]> => {
+    h(async (ctx, req): Promise<NoteView[]> => {
       const qs = z
         .object({
           inbox: z.enum(['1', '0']).optional(),
@@ -371,7 +382,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
   );
   r.post(
     '/api/v1/notes',
-    h(async (req, res): Promise<NoteCreateResult> => {
+    h(async (ctx, req, res): Promise<NoteCreateResult> => {
       const b = noteCreate.parse(req.body);
       const result = await addNote(ctx, {
         text: b.text,
@@ -392,7 +403,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
   );
   r.patch(
     '/api/v1/notes/:id',
-    h(async (req): Promise<NoteView> => {
+    h(async (ctx, req): Promise<NoteView> => {
       const noteId = id.parse(req.params.id);
       const b = notePatch.parse(req.body);
       await updateNote(ctx, noteId, {
@@ -414,7 +425,7 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
   );
   r.post(
     '/api/v1/notes/:id/file',
-    h(async (req): Promise<NoteView> => {
+    h(async (ctx, req): Promise<NoteView> => {
       const noteId = id.parse(req.params.id);
       const b = z
         .object({ techniqueIds: z.array(z.number().int()).max(20).optional(), newTechniques: z.array(newTechnique).max(10).optional() })
@@ -427,28 +438,28 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
   );
   r.post(
     '/api/v1/notes/answered',
-    h(async (req): Promise<MessageResult> => ({ message: await markAnswered(ctx, idList.parse(req.body).ids) })),
+    h(async (ctx, req): Promise<MessageResult> => ({ message: await markAnswered(ctx, idList.parse(req.body).ids) })),
   );
   r.post(
     '/api/v1/notes/delete',
-    h(async (req): Promise<MessageResult> => ({ message: await deleteNotes(ctx, idList.parse(req.body).ids) })),
+    h(async (ctx, req): Promise<MessageResult> => ({ message: await deleteNotes(ctx, idList.parse(req.body).ids) })),
   );
-  r.delete('/api/v1/notes/:id', h(async (req): Promise<MessageResult> => ({ message: await deleteNote(ctx, id.parse(req.params.id)) })));
+  r.delete('/api/v1/notes/:id', h(async (ctx, req): Promise<MessageResult> => ({ message: await deleteNote(ctx, id.parse(req.params.id)) })));
 
   // Sessions: where notes came from
   r.get(
     '/api/v1/sessions',
-    h(async (req): Promise<SessionView[]> => {
+    h(async (ctx, req): Promise<SessionView[]> => {
       const qs = z.object({ limit: z.coerce.number().int().min(1).max(100).optional(), date: date.optional() }).parse(req.query);
       return sessionList(ctx.db, { limit: qs.limit ?? 12, date: qs.date });
     }),
   );
 
   // Positions
-  r.get('/api/v1/positions', h(async (): Promise<PositionListItem[]> => positionList(ctx.db)));
+  r.get('/api/v1/positions', h(async (ctx): Promise<PositionListItem[]> => positionList(ctx.db)));
   r.get(
     '/api/v1/positions/:slug',
-    h(async (req): Promise<PositionView> => {
+    h(async (ctx, req): Promise<PositionView> => {
       const role = z.enum(ROLES).optional().parse(req.query.role || undefined);
       const pos = (await ctx.db.query<{ id: number }>('select id from positions where slug = $1', [String(req.params.slug)])).rows[0];
       if (!pos) throw new NotFound('No such position.');
@@ -457,28 +468,31 @@ export function apiRouter(ctx: Ctx, requireAuth: RequestHandler): Router {
   );
 
   // Undo
-  r.post('/api/v1/undo', h(async (): Promise<MessageResult> => ({ message: await undoLast(ctx.db) })));
+  r.post('/api/v1/undo', h(async (ctx): Promise<MessageResult> => ({ message: await undoLast(ctx.db) })));
 
   r.use('/api/v1', (_req, res) => {
     res.status(404).json({ error: 'not_found', message: 'No such endpoint.' });
   });
 
-  // Errors: validation and service messages are the caller's to fix; anything else is ours.
-  r.use('/api/v1', (err: unknown, _req: Request, res: Response, next: NextFunction) => {
-    if (res.headersSent) return next(err);
-    if (err instanceof z.ZodError) {
-      res.status(400).json({ error: 'invalid', message: err.issues.map(i => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ') });
-    } else if (err instanceof NotFound) {
-      res.status(404).json({ error: 'not_found', message: err.message });
-    } else if (err instanceof UserError) {
-      res.status(400).json({ error: 'rejected', message: err.message });
-    } else if ((err as { type?: string }).type === 'entity.parse.failed') {
-      res.status(400).json({ error: 'invalid_json', message: 'Request body is not valid JSON.' });
-    } else {
-      console.error('api error', err);
-      res.status(500).json({ error: 'server', message: 'Something went wrong on the server.' });
-    }
-  });
-
+  r.use('/api/v1', apiErrors);
   return r;
+}
+
+/** Errors: validation and service messages are the caller's to fix; anything else is ours. */
+export function apiErrors(err: unknown, _req: Request, res: Response, next: NextFunction) {
+  if (res.headersSent) return next(err);
+  if (err instanceof z.ZodError) {
+    res.status(400).json({ error: 'invalid', message: err.issues.map(i => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ') });
+  } else if (err instanceof Forbidden) {
+    res.status(403).json({ error: 'forbidden', message: err.message });
+  } else if (err instanceof NotFound) {
+    res.status(404).json({ error: 'not_found', message: err.message });
+  } else if (err instanceof UserError) {
+    res.status(400).json({ error: 'rejected', message: err.message });
+  } else if ((err as { type?: string }).type === 'entity.parse.failed') {
+    res.status(400).json({ error: 'invalid_json', message: 'Request body is not valid JSON.' });
+  } else {
+    console.error('api error', err);
+    res.status(500).json({ error: 'server', message: 'Something went wrong on the server.' });
+  }
 }

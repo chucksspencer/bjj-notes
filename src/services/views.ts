@@ -17,7 +17,7 @@ import type {
   TechniqueType,
   TechniqueView,
 } from '../shared/api.js';
-import type { Queryable } from '../db.js';
+import { uid, type Queryable } from '../db.js';
 import { today, type Ctx } from './context.js';
 import { ATTACHMENTS_JSON } from './attachments.js';
 import { EXPECTED_BY_CATEGORY, minusDays } from './vocab.js';
@@ -147,6 +147,7 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
     params.push(v);
     return `$${params.length}`;
   };
+  where.push(`n.user_id = ${p(uid(q))}`);
   if (opts.inbox !== undefined) where.push(`n.inbox = ${p(opts.inbox)}`);
   if (opts.toTry !== undefined) where.push(`n.to_try = ${p(opts.toTry)}`);
   if (opts.starred !== undefined) where.push(`n.starred_at is ${opts.starred ? 'not ' : ''}null`);
@@ -165,14 +166,14 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
   if (opts.beforeId !== undefined) where.push(`n.id < ${p(opts.beforeId)}`);
   const limit = p(Math.min(Math.max(opts.limit ?? 30, 1), 200));
   const { rows } = await q.query<NoteRow>(
-    `${NOTE_SELECT} ${where.length ? `where ${where.join(' and ')}` : ''} order by ${order} limit ${limit}`,
+    `${NOTE_SELECT} where ${where.join(' and ')} order by ${order} limit ${limit}`,
     params,
   );
   return rows.map(toNote);
 }
 
 export async function noteView(q: Queryable, id: number): Promise<NoteView | null> {
-  const { rows } = await q.query<NoteRow>(`${NOTE_SELECT} where n.id = $1`, [id]);
+  const { rows } = await q.query<NoteRow>(`${NOTE_SELECT} where n.id = $1 and n.user_id = $2`, [id, uid(q)]);
   return rows[0] ? toNote(rows[0]) : null;
 }
 
@@ -225,8 +226,8 @@ export async function techniqueView(q: Queryable, id: number, noteLimit = 20): P
       starred_at: string | null;
     }>(
       `select id, name, aliases, type, role, gi, status, summary, key_details, mistakes, updated_at, ${iso('starred_at')} as starred_at
-       from techniques where id = $1`,
-      [id],
+       from techniques where id = $1 and user_id = $2`,
+      [id, uid(q)],
     )
   ).rows[0];
   if (!t) return null;
@@ -340,7 +341,8 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
                       left join positions pt on pt.id = e.to_position_id
                       where e.technique_id = t.id), '[]'::json) as edges
      from techniques t
-     where ($2::text is null or t.type = $2)
+     where t.user_id = $9
+       and ($2::text is null or t.type = $2)
        and ($3::text is null or t.role = $3 or exists (
              select 1 from technique_edges e where e.technique_id = t.id and e.from_role = $3))
        and ($4::text is null or t.status = $4)
@@ -373,6 +375,7 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
       Math.min(f.limit ?? 200, 500),
       f.newSince ?? null,
       f.starred ?? null,
+      uid(q),
     ],
   );
   return rows.map(r => ({
@@ -412,8 +415,9 @@ export async function focusView(ctx: Ctx, q: Queryable = ctx.db): Promise<FocusV
                join focus_item_techniques ft2 on ft2.technique_id = nt.technique_id
               where ft2.focus_item_id = f.id) as last_note
      from focus_items f
-     where f.status in ('active', 'paused', 'backlog')
+     where f.user_id = $1 and f.status in ('active', 'paused', 'backlog')
      order by f.rank nulls last, f.updated_at desc`,
+    [uid(q)],
   );
   const items: FocusItemView[] = rows.map(r => ({
     id: r.id,
@@ -453,7 +457,7 @@ export async function labView(ctx: Ctx, days = LAB_DAYS, tryLimit = 10): Promise
     techniqueList(q, { starred: true, limit: 200 }),
     noteList(q, { starred: true, limit: 200 }),
     noteList(q, { toTry: true, limit: tryLimit }),
-    q.query<{ c: number }>('select count(*)::int as c from notes where to_try'),
+    q.query<{ c: number }>('select count(*)::int as c from notes where user_id = $1 and to_try', [uid(q)]),
     techniqueList(q, { sort: 'new', newSince: minusDays(now, days), limit: 25 }),
     noteList(q, { kind: 'question', toTry: false, answered: false, limit: 200 }),
   ]);
@@ -487,8 +491,10 @@ export async function positionList(q: Queryable): Promise<PositionListItem[]> {
   }>(
     `select p.id, p.slug, p.name, p.category, p.aliases,
             (select count(distinct e.technique_id)::int from technique_edges e
-              where e.from_position_id = p.id or e.to_position_id = p.id) as techniques
+               join techniques t on t.id = e.technique_id
+              where t.user_id = $1 and (e.from_position_id = p.id or e.to_position_id = p.id)) as techniques
      from positions p order by p.id`,
+    [uid(q)],
   );
   return rows.map(r => ({ id: r.id, slug: r.slug, name: r.name, category: r.category, aliases: r.aliases, techniqueCount: r.techniques }));
 }
@@ -512,16 +518,16 @@ export async function positionView(q: Queryable, positionId: number, role?: Role
   const toPT = (r: Row) => ({ id: r.t_id, name: r.t_name, type: r.t_type, role: r.t_role, status: r.t_status, edge: toEdge(r) });
   const from = (
     await q.query<Row>(
-      `${sel} where e.from_position_id = $1 and ($2::text is null or e.from_role is null or e.from_role = $2)
+      `${sel} where t.user_id = $3 and e.from_position_id = $1 and ($2::text is null or e.from_role is null or e.from_role = $2)
        order by t.type, t.name`,
-      [pos.id, role ?? null],
+      [pos.id, role ?? null, uid(q)],
     )
   ).rows.map(toPT);
   const into = (
     await q.query<Row>(
-      `${sel} where e.to_position_id = $1 and ($2::text is null or e.to_role is null or e.to_role = $2)
+      `${sel} where t.user_id = $3 and e.to_position_id = $1 and ($2::text is null or e.to_role is null or e.to_role = $2)
        order by t.name`,
-      [pos.id, role ?? null],
+      [pos.id, role ?? null, uid(q)],
     )
   ).rows.map(toPT);
 

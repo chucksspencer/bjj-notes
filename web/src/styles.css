@@ -1505,3 +1505,129 @@ button.clip:active {
 .clip-note {
   margin: 6px 0 0;
 }
+
+/* ---------- account and joining ---------- */
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+}
+
+.login-card h1 {
+  margin: 18px 0 4px;
+  font-size: 40px;
+}
+
+.login-card .btn {
+  margin-top: 20px;
+}
+
+.account-form {
+  padding: 16px var(--pad);
+}
+
+.account-form .btn {
+  margin-top: 2px;
+}
+
+.account-note {
+  margin: 0;
+  padding: 14px var(--pad);
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.account-form .account-note {
+  margin: -2px 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-small);
+  background: var(--belt-wash);
+  color: var(--ink);
+}
+
+.account-note + .row {
+  border-top: 1px solid var(--rule);
+}
+
+.account-note code,
+.panel code {
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+.account-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.account-inline .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.account-tag {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--belt-wash);
+  color: var(--belt);
+  font-size: 13px;
+  font-weight: 650;
+  font-variation-settings: normal;
+  vertical-align: 3px;
+}
+
+.account-subhead {
+  margin: 20px 0 8px;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.account-signout {
+  margin: 32px 0 8px;
+}
+
+.section-head .btn {
+  flex-shrink: 0;
+}
+
+.sheet-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.copy-field {
+  margin: 4px 0 18px;
+}
+
+.copy-field .input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 15px;
+}
+
+.copy-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.band-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.band .btn.band-account {
+  min-height: 40px;
+  padding: 0 8px;
+  background: none;
+  color: var(--on-belt);
+}
+
+.panel + .section-hint {
+  margin-top: 8px;
+}
