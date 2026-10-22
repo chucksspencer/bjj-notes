@@ -6,6 +6,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { OWNER_PASSWORD, startServer, type TestServer } from './helpers.js';
 
 const webDir = path.resolve('dist/public');
+// The browser's clock reads in the server's zone (as on a phone in Chicago), so "Today" means the same
+// day to both even when the test machine runs on UTC late in the evening.
+const TIME_ZONE = 'America/Chicago';
 const run = process.env.E2E === '1' && existsSync(path.join(webDir, 'index.html'));
 
 describe.runIf(run)('web app (end to end)', () => {
@@ -16,7 +19,7 @@ describe.runIf(run)('web app (end to end)', () => {
   beforeAll(async () => {
     s = await startServer(null, webDir);
     browser = await chromium.launch();
-    page = await (await browser.newContext({ viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true })).newPage();
+    page = await (await browser.newContext({ timezoneId: TIME_ZONE, viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true })).newPage();
     page.setDefaultTimeout(8000);
   });
   afterAll(async () => {
@@ -334,7 +337,7 @@ describe.runIf(run)('web app (end to end)', () => {
   });
 
   it('navigates on desktop Chrome 150+, where scrollTo returns a Promise', async () => {
-    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const ctx = await browser.newContext({ timezoneId: TIME_ZONE, viewport: { width: 1440, height: 900 } });
     await ctx.addInitScript(() => {
       const scrollTo = window.scrollTo.bind(window) as (x: number, y: number) => void;
       (window as unknown as { scrollTo: (x: number, y: number) => Promise<void> }).scrollTo = (x, y) => {
@@ -381,7 +384,7 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click();
     await page.getByText('Invite for Sam').waitFor();
 
-    const phone = await (await browser.newContext({ viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true })).newPage();
+    const phone = await (await browser.newContext({ timezoneId: TIME_ZONE, viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true })).newPage();
     phone.setDefaultTimeout(8000);
     await phone.goto(link);
     await phone.getByRole('heading', { name: 'Join BJJ Notes' }).waitFor();
