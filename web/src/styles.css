@@ -1857,3 +1857,22 @@ button.clip:active {
   display: flex;
   align-items: center;
 }
+
+/* ---------- saving what another app shared ---------- */
+
+.share-link {
+  margin-bottom: 16px;
+}
+
+.share-link .row-split > svg {
+  flex: none;
+  color: var(--belt);
+}
+
+.share-url {
+  overflow-wrap: anywhere;
+}
+
+.share-hint {
+  margin: -6px 0 16px;
+}

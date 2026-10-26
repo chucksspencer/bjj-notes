@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { AccountView, BeltRank, InviteView, PersonView } from '../../../src/shared/api';
 import {
@@ -18,6 +18,7 @@ import { Icon } from '../components/Icon';
 import { Sheet } from '../components/Sheet';
 import { useToast } from '../components/Toast';
 import { beltName } from '../lib/belt';
+import { installed, platform } from '../lib/share';
 import { agoText } from '../lib/format';
 
 /** Your name, email, belt and password, tokens for Siri Shortcuts, and (for the owner) who else can sign in. */
@@ -41,6 +42,7 @@ export function Account() {
           <Profile a={a} />
           <YourBelt a={a} />
           <Password a={a} />
+          <Sharing a={a} />
           <Tokens a={a} />
           {a.me.isOwner && <People a={a} />}
         </>
@@ -195,6 +197,52 @@ function Password({ a }: { a: AccountView }) {
   );
 }
 
+/** How to share reels and videos into BJJ Notes from this phone: it depends on the phone, and on whether it's our iPhone app. */
+function Sharing({ a }: { a: AccountView }) {
+  const where = platform();
+  const paste = 'Or copy the link in Instagram or YouTube, then tap + here and paste it into “Add a video or post link”.';
+  let body: ReactNode;
+  if (where === 'app') {
+    body = <p className="account-note">BJJ Notes is in your share sheet: in Instagram or YouTube, tap Share and pick BJJ Notes.</p>;
+  } else if (where === 'android') {
+    body = installed() ? (
+      <p className="account-note">BJJ Notes is installed, so it's in your share sheet: in Instagram or YouTube, tap Share and pick BJJ Notes.</p>
+    ) : (
+      <p className="account-note">
+        Install BJJ Notes from Chrome's menu (<strong>⋮ → Add to Home screen → Install</strong>). Then it shows up when you tap
+        Share in Instagram or YouTube. {paste}
+      </p>
+    );
+  } else if (where === 'ios') {
+    body = a.shareShortcutUrl ? (
+      <>
+        <p className="account-note">
+          Add the <strong>Save to BJJ Notes</strong> shortcut and it shows up when you tap Share in Instagram or YouTube. It asks for a
+          token when you add it: make one below, copy it, then get the shortcut.
+        </p>
+        <div className="row">
+          <a className="btn block" href={a.shareShortcutUrl} target="_blank" rel="noreferrer noopener">
+            Get the shortcut
+          </a>
+        </div>
+      </>
+    ) : (
+      <p className="account-note">
+        {paste}
+        {a.me.isOwner && ' To offer a one-tap shortcut here, set the SHARE_SHORTCUT_URL repository variable (see the README).'}
+      </p>
+    );
+  } else {
+    body = <p className="account-note">Open this page on your phone to see how to share reels and videos into BJJ Notes. {paste}</p>;
+  }
+  return (
+    <section>
+      <h2 className="section-title">Sharing videos</h2>
+      <div className="panel">{body}</div>
+    </section>
+  );
+}
+
 function Tokens({ a }: { a: AccountView }) {
   const create = useCreateToken();
   const revoke = useRevokeToken();
@@ -260,9 +308,23 @@ function Tokens({ a }: { a: AccountView }) {
         <Sheet title="Your new token" onClose={() => setMade(null)}>
           <p className="muted">Copy it into your shortcut now. It won't be shown again.</p>
           <CopyField value={made} label="Token" />
-          <button type="button" className="btn block" onClick={() => setMade(null)}>
-            Done
-          </button>
+          {a.shareShortcutUrl && platform() === 'ios' ? (
+            <>
+              <p className="muted small">Then get the shortcut, and paste the token when it asks.</p>
+              <div className="sheet-actions">
+                <a className="btn block" href={a.shareShortcutUrl} target="_blank" rel="noreferrer noopener">
+                  Get the shortcut
+                </a>
+                <button type="button" className="btn quiet block" onClick={() => setMade(null)}>
+                  Done
+                </button>
+              </div>
+            </>
+          ) : (
+            <button type="button" className="btn block" onClick={() => setMade(null)}>
+              Done
+            </button>
+          )}
         </Sheet>
       )}
     </section>

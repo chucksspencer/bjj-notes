@@ -426,3 +426,22 @@ export function useAcceptInvite() {
     onSuccess: info => switchSession(qc, info),
   });
 }
+
+// ---------- sharing in ----------
+
+export interface CaptureResult {
+  note_id: number;
+  to_try: boolean;
+  inbox: boolean;
+  duplicate: boolean;
+  speech: string;
+}
+
+/** Saves what another app shared (a link and maybe a takeaway), the same way the share sheet does on iPhone. */
+export function useSaveShared() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { text: string; url?: string; clientId: string }) => request<CaptureResult>('POST', '/api/v1/capture', v),
+    onSuccess: () => invalidateAll(qc),
+  });
+}

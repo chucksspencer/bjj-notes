@@ -80,6 +80,39 @@ export function isPlaceholder(body: string): boolean {
   return /^(Instagram reel|Video|Link) to (try|review)\.$/.test(text) || /^(\d+ )?(Video|Photo|Clip|video|photo|clip)s? from Photos\.$/.test(text);
 }
 
+export interface Shared {
+  /** The link that was shared, tidied (share-tracking removed). */
+  url?: string;
+  /** Words that came with it (a caption), or the text shared when there's no link. */
+  text: string;
+}
+
+/**
+ * What another app shared to BJJ Notes (/share?title=…&text=…&url=…, from the web app's share target).
+ * Android apps mostly put the link in "text", sometimes after a caption, and rarely use "url".
+ */
+export function readShare(search: string): Shared {
+  const q = new URLSearchParams(search);
+  const title = q.get('title')?.trim() ?? '';
+  const text = q.get('text')?.trim() ?? '';
+  const url = q.get('url')?.trim() ?? '';
+  for (const field of [url, text, title]) {
+    const found = field ? splitLink(field) : { rest: '' };
+    const link = cleanUrl(found.url);
+    if (link) return { url: link, text: field === text ? found.rest : '' };
+  }
+  return { text: [title, text].filter(Boolean).join('\n') };
+}
+
+/** "Instagram reel", "Instagram post", "YouTube video", or the site. */
+export function linkKind(url: string): string {
+  const ig = instagramPost(url);
+  if (ig) return `Instagram ${ig.kind === 'reel' ? 'reel' : 'post'}`;
+  const host = safeHost(url);
+  if (/(^|\.)(youtube\.com|youtu\.be)$/i.test(host)) return 'YouTube video';
+  return host.replace(/^www\./, '') || url;
+}
+
 function safeHost(url: string): string {
   try {
     return new URL(url).hostname;

@@ -111,6 +111,7 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
       requireAuth: web.requireAuth,
       startSession: web.startSession,
       limiter: web.limiter,
+      shareShortcutUrl: config.shareShortcutUrl,
     }),
   );
   app.use(appCaptureRouter(ctx, structurer, web.requireAuth));
