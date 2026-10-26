@@ -15,6 +15,8 @@ export interface Config {
   captureModel: string;
   /** IANA zone used to date notes ("today"). */
   timeZone: string;
+  /** iCloud link to the "Save to BJJ Notes" shortcut, offered on iPhones without the app. */
+  shareShortcutUrl?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -34,6 +36,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   } catch {
     problems.push(`TIME_ZONE "${timeZone}" is not a valid IANA time zone.`);
   }
+  const shareShortcutUrl = env.SHARE_SHORTCUT_URL?.trim() || undefined;
+  if (shareShortcutUrl && !/^https:\/\/www\.icloud\.com\/shortcuts\/[\w-]+\/?$/.test(shareShortcutUrl)) {
+    problems.push('SHARE_SHORTCUT_URL should be an iCloud shortcut link (https://www.icloud.com/shortcuts/…).');
+  }
   if (problems.length) throw new Error(`Configuration problems:\n- ${problems.join('\n- ')}`);
 
   return {
@@ -46,5 +52,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     anthropicApiKey: env.ANTHROPIC_API_KEY || undefined,
     captureModel: env.CAPTURE_MODEL || 'claude-haiku-5-5',
     timeZone,
+    shareShortcutUrl,
   };
 }

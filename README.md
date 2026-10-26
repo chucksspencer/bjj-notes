@@ -89,13 +89,31 @@ Create these in the Shortcuts app. Replace `HOST` with your server address and `
 
 **Save to BJJ Notes** (from the share sheet in Instagram, YouTube or Safari)
 1. In the shortcut's settings, turn on *Show in Share Sheet*; receive **URLs** and **Text**; if there's no input, **Continue**.
-2. *Ask for Input* (Text): "What's the takeaway?" Dictate with the keyboard's mic, or tap Done with nothing to save the link to review later.
-3. *Get Contents of URL* `https://HOST/api/capture`: Method **POST**; Request Body **JSON** with `text` = *Provided Input*, `url` = *Shortcut Input* and `token` = your `API_TOKEN` (or send it as the header `Authorization` = `Bearer TOKEN` instead of the `token` field)
-4. *Get Dictionary Value* `speech` from *Contents of URL* → *Show Notification*
+2. *Text*: your token. (Kept in its own action so it can be swapped for someone else's when you share the shortcut; see below.)
+3. *Ask for Input* (Text): "What's the takeaway?" Dictate with the keyboard's mic, or tap Done with nothing to save the link to review later.
+4. *Get Contents of URL* `https://HOST/api/capture`: Method **POST**; Request Body **JSON** with `text` = *Provided Input*, `url` = *Shortcut Input* and `token` = the *Text* from step 2
+5. *Get Dictionary Value* `speech` from *Contents of URL* → *Show Notification*
+
+**Sharing that shortcut with the people you invite** (iPhones without the BJJ Notes app; the app has its own share sheet):
+1. In the shortcut's settings (ⓘ) → **Import Questions** → **Add Question**, pick the token in step 2, and ask
+   "Paste your BJJ Notes token (Account → Siri Shortcuts → Make a token)". Leave the default answer empty.
+2. Share → **Copy iCloud Link**.
+3. In GitHub, add the repository variable `SHARE_SHORTCUT_URL` with that link, and run the CI workflow to deploy.
+   Account pages on iPhones then show **Get the shortcut**, and offer it again right after someone makes a token.
 
 The server tidies what it's given: share-tracking is stripped (`?igsh=…`, `?si=…`) so the same reel saved twice is one source; a link inside shared text or a dictated note is picked out. Anything shared with a link goes on the **To try** list (in the Lab, under the Focus tab), out of the way until you've tried it: **Keep** files it under a technique, **Toss** deletes it. Reels play in the note when tapped, with *Open in Instagram* beside them.
 
 Shortcuts also run on Apple Watch.
+
+### 9. Sharing from Android
+
+Android has no Shortcuts, but the web app can sit in its share sheet. In Chrome (or Samsung Internet), open the
+web app and use the menu: **⋮ → Add to Home screen** (or **Install app**) → **Install**. From then on,
+**BJJ Notes** shows up when you tap Share in Instagram or YouTube, and a reel or video goes on the To try list,
+with a takeaway if you type one. (Firefox for Android can't do this. If the app was installed before this
+feature, Chrome picks up the change after it's next opened, which can take a day; reinstalling is quicker.)
+
+Anywhere else, copy the link, tap **+** in the web app and paste it into "Add a video or post link".
 
 ## More people
 

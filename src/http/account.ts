@@ -59,6 +59,8 @@ export interface AccountRouterOptions {
   startSession: (req: Request, res: Response, userId: number) => Promise<void>;
   /** The sign-in rate limit (failed attempts), shared by password changes. */
   limiter: RequestHandler;
+  /** iCloud link to the shared "Save to BJJ Notes" shortcut. */
+  shareShortcutUrl?: string;
 }
 
 export function accountRouter(opts: AccountRouterOptions): Router {
@@ -136,7 +138,12 @@ export function accountRouter(opts: AccountRouterOptions): Router {
     requireAuth,
     h(async (_req, res): Promise<AccountView> => {
       const user = await me(res);
-      const view: AccountView = { me: toMe(user), tokens: await listApiTokens(db, user.id), ownerApiToken: user.isOwner };
+      const view: AccountView = {
+        me: toMe(user),
+        tokens: await listApiTokens(db, user.id),
+        ownerApiToken: user.isOwner,
+        shareShortcutUrl: opts.shareShortcutUrl ?? null,
+      };
       if (user.isOwner) {
         view.people = (await listPeople(db)).map(p => ({ ...toMe(p), createdAt: p.createdAt, lastActiveAt: p.lastActiveAt }));
         view.invites = await pendingInvites(db);

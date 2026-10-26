@@ -15,6 +15,7 @@ import { Lab } from './pages/Lab';
 import { Library } from './pages/Library';
 import { Login } from './pages/Login';
 import { Position, Positions } from './pages/Positions';
+import { Share } from './pages/Share';
 import { Technique } from './pages/Technique';
 import { ToTry } from './pages/ToTry';
 
@@ -75,6 +76,7 @@ function Shell() {
             <Route path="/inbox" element={<Inbox />} />
             <Route path="/inbox/try" element={<Navigate to="/try" replace />} />
             <Route path="/account" element={<Account />} />
+            <Route path="/share" element={<Share />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </ErrorBoundary>

@@ -6,7 +6,7 @@
 #           GCP_SERVICE_ACCOUNT (deploy account; gives the project id) or PROJECT_ID,
 #           GCP_WORKLOAD_IDENTITY_PROVIDER (gives the project number) or PROJECT_NUMBER
 # Optional: IMAGE_TAG (tag for the Artifact Registry copy, e.g. sha-abc), ANTHROPIC_API_KEY, PUBLIC_URL (custom domain),
-#           TIME_ZONE, GCP_REGION, SERVICE
+#           TIME_ZONE, GCP_REGION, SERVICE, SHARE_SHORTCUT_URL (iCloud link to the shared "Save to BJJ Notes" shortcut)
 set -Eeuo pipefail
 
 # In GitHub Actions, failures are also reported as an annotation on the run (readable without the logs).
@@ -91,10 +91,16 @@ fi
 # 3. Deploy. The run.app address is predictable, so PUBLIC_URL (the OAuth issuer) is set in the same revision.
 URL="${PUBLIC_URL:-https://$SERVICE-$PROJECT_NUMBER.$REGION.run.app}"
 URL="${URL%/}"
+ENV_VARS="PUBLIC_URL=$URL,TIME_ZONE=$TIME_ZONE"
+SHORTCUT="$(trim "${SHARE_SHORTCUT_URL:-}")"
+if [ -n "$SHORTCUT" ]; then
+  [[ "$SHORTCUT" =~ ^https://www\.icloud\.com/shortcuts/[A-Za-z0-9_-]+/?$ ]] || fail "SHARE_SHORTCUT_URL should be an iCloud shortcut link (https://www.icloud.com/shortcuts/…)"
+  ENV_VARS="$ENV_VARS,SHARE_SHORTCUT_URL=$SHORTCUT"
+fi
 gcloud run deploy "$SERVICE" --project="$PROJECT_ID" --region="$REGION" --image="$TARGET" \
   --service-account="$RUN_SA" --allow-unauthenticated \
   --port=8080 --cpu=1 --memory=512Mi --concurrency=80 --min-instances=0 --max-instances=1 --cpu-boost --timeout=300 \
-  --set-env-vars="PUBLIC_URL=$URL,TIME_ZONE=$TIME_ZONE" --set-secrets="$SECRETS" --quiet
+  --set-env-vars="$ENV_VARS" --set-secrets="$SECRETS" --quiet
 
 # If the predictable address isn't one of the service's addresses, fall back to the one it reports.
 DESCRIBE="$(gcloud run services describe "$SERVICE" --project="$PROJECT_ID" --region="$REGION" --format=json)"

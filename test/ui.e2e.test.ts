@@ -9,6 +9,9 @@ const webDir = path.resolve('dist/public');
 // The browser's clock reads in the server's zone (as on a phone in Chicago), so "Today" means the same
 // day to both even when the test machine runs on UTC late in the evening.
 const TIME_ZONE = 'America/Chicago';
+const ANDROID = 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36';
+const IPHONE =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1';
 const run = process.env.E2E === '1' && existsSync(path.join(webDir, 'index.html'));
 
 describe.runIf(run)('web app (end to end)', () => {
@@ -437,5 +440,73 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.locator('.row-title', { hasText: 'Sam' }).waitFor();
     await page.getByText(/^Brown belt · sam@example.com/).waitFor();
     expect(await page.evaluate(() => document.documentElement.dataset.belt)).toBe('purple');
+  });
+
+  it('saves a reel shared from Instagram on Android, signing in first if need be', async () => {
+    const android = await browser.newContext({ timezoneId: TIME_ZONE, viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, userAgent: ANDROID });
+    const phone = await android.newPage();
+    phone.setDefaultTimeout(8000);
+    // What Android hands the installed web app: the link (with share-tracking) as the text.
+    await phone.goto(`${s.base}/share?${new URLSearchParams({ title: 'Leg lock entry', text: 'https://www.instagram.com/reel/SHARE123/?igsh=abc' })}`);
+    await phone.getByLabel('Email').fill('owner@example.com');
+    await phone.getByLabel('Password').fill(OWNER_PASSWORD);
+    await phone.getByRole('button', { name: 'Sign in' }).click();
+    await phone.getByRole('heading', { name: 'Save to try' }).waitFor();
+    await phone.getByText('Instagram reel', { exact: true }).waitFor();
+    await phone.getByText('https://www.instagram.com/reel/SHARE123/', { exact: true }).waitFor();
+    await phone.getByLabel("What's the takeaway? (optional)").fill('Knee line entry from single leg X');
+    await phone.getByRole('button', { name: 'Save to To try' }).click();
+    await phone.getByRole('heading', { name: 'To try' }).waitFor();
+    await phone.getByText('Knee line entry from single leg X').waitFor();
+    // The save screen is replaced, so Back leaves BJJ Notes instead of saving again.
+    expect(await phone.evaluate(() => location.pathname)).toBe('/try');
+
+    // Text shared without a link becomes a note.
+    await phone.goto(`${s.base}/share?${new URLSearchParams({ text: 'Frame on the hip before shrimping' })}`);
+    await phone.getByRole('heading', { name: 'Save a note' }).waitFor();
+    expect(await phone.getByRole('textbox', { name: 'Note' }).inputValue()).toBe('Frame on the hip before shrimping');
+    await phone.getByRole('button', { name: 'Save note' }).click();
+    await phone.getByRole('heading', { name: 'Inbox' }).waitFor();
+    await phone.getByText('Frame on the hip before shrimping').waitFor();
+
+    await phone.goto(`${s.base}/share`);
+    await phone.getByRole('heading', { name: 'Nothing to save' }).waitFor();
+
+    // The Account page says how to get BJJ Notes into Android's share sheet.
+    await phone.goto(`${s.base}/account`);
+    await phone.getByText("Install BJJ Notes from Chrome's menu").waitFor();
+    await android.close();
+  });
+
+  it('offers the shared shortcut on iPhones without the app', async () => {
+    const LINK = 'https://www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef';
+    const other = await startServer(null, webDir, { SHARE_SHORTCUT_URL: LINK });
+    try {
+      const signIn = async (userAgent: string) => {
+        const ctx = await browser.newContext({ timezoneId: TIME_ZONE, viewport: { width: 402, height: 874 }, isMobile: true, hasTouch: true, userAgent });
+        const p = await ctx.newPage();
+        p.setDefaultTimeout(8000);
+        await p.goto(`${other.base}/account`);
+        await p.getByLabel('Password').fill(OWNER_PASSWORD);
+        await p.getByRole('button', { name: 'Sign in' }).click();
+        await p.getByRole('heading', { name: 'Sharing videos' }).waitFor();
+        return p;
+      };
+      const safari = await signIn(IPHONE);
+      expect(await safari.getByRole('link', { name: 'Get the shortcut' }).getAttribute('href')).toBe(LINK);
+      // Making a token offers the shortcut straight after, since that's what the token is for.
+      await safari.getByPlaceholder("What it's for, e.g. iPhone").fill('iPhone');
+      await safari.getByRole('button', { name: 'Make a token' }).click();
+      await safari.getByRole('dialog').getByRole('link', { name: 'Get the shortcut' }).waitFor();
+      await safari.context().close();
+
+      // In the iPhone app, BJJ Notes is already in the share sheet: no shortcut needed.
+      const app = await signIn(`${IPHONE} BJJNotesApp/1.0`);
+      await app.getByText('BJJ Notes is in your share sheet').waitFor();
+      expect(await app.getByRole('link', { name: 'Get the shortcut' }).count()).toBe(0);
+      await app.context().close();
+    } finally {
+      await other.close();
+    }
   });
 });
