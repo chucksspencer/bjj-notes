@@ -2,8 +2,9 @@
 # One-time Google Cloud setup. Paste into Cloud Shell (console.cloud.google.com → the >_ icon).
 # Safe to re-run: every step checks before it creates.
 #
-# Creates a "BJJ Notes" project, links your billing account, turns on the APIs, and sets up
-# keyless deploys: GitHub Actions on this repo's main branch can deploy, nothing else can.
+# Creates a "BJJ Notes" project, links your billing account, turns on the APIs, sets up keyless deploys
+# (GitHub Actions on this repo's main branch can deploy, nothing else can) and a private bucket for the
+# nightly database backups.
 # Prints the two values to add as GitHub repository variables.
 set -euo pipefail
 
@@ -49,7 +50,8 @@ echo "linked"
 say "APIs (a minute or two the first time)"
 gcloud services enable --project="$PROJECT_ID" \
   run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com \
-  iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com cloudresourcemanager.googleapis.com
+  iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com cloudresourcemanager.googleapis.com \
+  storage.googleapis.com
 echo "enabled"
 
 say "Container registry"
@@ -88,6 +90,23 @@ done
 retry gcloud iam service-accounts add-iam-policy-binding "$RUN_SA" --project="$PROJECT_ID" \
   --member="serviceAccount:$DEPLOY_SA" --role=roles/iam.serviceAccountUser
 echo "ready"
+
+say "Backups"
+# A private bucket for the nightly database backups (.github/workflows/backup.yml). Each copy is deleted
+# after 30 days; in us-central1 they stay inside Cloud Storage's free 5 GB. The deploy account may add
+# copies, not read or delete them.
+BUCKET="$PROJECT_ID-backups"
+if ! gcloud storage buckets describe "gs://$BUCKET" --project="$PROJECT_ID" >/dev/null 2>&1; then
+  gcloud storage buckets create "gs://$BUCKET" --project="$PROJECT_ID" --location="$REGION" \
+    --uniform-bucket-level-access --public-access-prevention --default-storage-class=STANDARD
+fi
+LIFECYCLE="$(mktemp)"
+echo '{"rule": [{"action": {"type": "Delete"}, "condition": {"age": 30}}]}' >"$LIFECYCLE"
+gcloud storage buckets update "gs://$BUCKET" --lifecycle-file="$LIFECYCLE" >/dev/null
+rm -f "$LIFECYCLE"
+retry gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
+  --member="serviceAccount:$DEPLOY_SA" --role=roles/storage.objectCreator
+echo "gs://$BUCKET (copies kept 30 days)"
 
 say "GitHub Actions trust (Workload Identity Federation)"
 gcloud iam workload-identity-pools describe github --location=global --project="$PROJECT_ID" >/dev/null 2>&1 ||
