@@ -69,7 +69,7 @@ echo "Dumped $NOTES notes, $TECHNIQUES techniques, $PEOPLE people: $NAME ($SIZE)
 # 3. Upload. The bucket deletes copies after 30 days by itself.
 gcloud storage cp --quiet "$WORK/$NAME" "gs://$BUCKET/$NAME" >/dev/null 2>"$WORK/upload.log" || {
   cat "$WORK/upload.log" >&2
-  fail "Couldn't upload to gs://$BUCKET. If that bucket doesn't exist yet, run infra/gcp-bootstrap.sh again in Cloud Shell: it creates the bucket and lets the backups write to it."
+  fail "Couldn't upload to gs://$BUCKET. If that bucket doesn't exist yet, or this is a permission error, run infra/gcp-bootstrap.sh again in Cloud Shell: it creates the bucket and lets the backups write to it."
 }
 echo "Saved to gs://$BUCKET/$NAME"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then

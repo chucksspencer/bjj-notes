@@ -93,8 +93,8 @@ echo "ready"
 
 say "Backups"
 # A private bucket for the nightly database backups (.github/workflows/backup.yml). Each copy is deleted
-# after 30 days; in us-central1 they stay inside Cloud Storage's free 5 GB. The deploy account may add
-# copies, not read or delete them.
+# after 30 days; in us-central1 they stay inside Cloud Storage's free 5 GB. The deploy account may add copies,
+# and see what's there (gcloud storage cp checks before it uploads), but can't delete or overwrite any.
 BUCKET="$PROJECT_ID-backups"
 if ! gcloud storage buckets describe "gs://$BUCKET" --project="$PROJECT_ID" >/dev/null 2>&1; then
   gcloud storage buckets create "gs://$BUCKET" --project="$PROJECT_ID" --location="$REGION" \
@@ -104,8 +104,10 @@ LIFECYCLE="$(mktemp)"
 echo '{"rule": [{"action": {"type": "Delete"}, "condition": {"age": 30}}]}' >"$LIFECYCLE"
 gcloud storage buckets update "gs://$BUCKET" --lifecycle-file="$LIFECYCLE" >/dev/null
 rm -f "$LIFECYCLE"
-retry gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
-  --member="serviceAccount:$DEPLOY_SA" --role=roles/storage.objectCreator
+for ROLE in roles/storage.objectCreator roles/storage.objectViewer; do
+  retry gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
+    --member="serviceAccount:$DEPLOY_SA" --role="$ROLE"
+done
 echo "gs://$BUCKET (copies kept 30 days)"
 
 say "GitHub Actions trust (Workload Identity Federation)"
