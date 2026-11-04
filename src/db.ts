@@ -78,7 +78,8 @@ export async function pgliteDb(dataDir?: string): Promise<Db> {
   const { PGlite } = await import('@electric-sql/pglite');
   const { pg_trgm } = await import('@electric-sql/pglite/contrib/pg_trgm');
   const { fuzzystrmatch } = await import('@electric-sql/pglite/contrib/fuzzystrmatch');
-  const db = new PGlite({ dataDir, extensions: { pg_trgm, fuzzystrmatch } });
+  const { vector } = await import('@electric-sql/pglite-pgvector');
+  const db = new PGlite({ dataDir, extensions: { pg_trgm, fuzzystrmatch, vector } });
   await db.waitReady;
   return {
     async query(sql, params) {

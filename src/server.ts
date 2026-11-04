@@ -1,6 +1,6 @@
 import { buildApp } from './app.js';
 import { claudeStructurer } from './capture.js';
-import { loadConfig } from './config.js';
+import { embedderFor, loadConfig } from './config.js';
 import { migrate, pgDb, pgliteDb } from './db.js';
 
 try {
@@ -19,7 +19,9 @@ const ran = await migrate(db);
 if (ran.length) console.log(`Applied migrations: ${ran.join(', ')}`);
 
 const structurer = config.anthropicApiKey ? claudeStructurer(config.anthropicApiKey, config.captureModel) : null;
-const app = buildApp({ ctx: { db, timeZone: config.timeZone }, config, structurer });
+const embedder = await embedderFor(config);
+if (!embedder) console.log('Search by meaning is off (no VOYAGE_API_KEY).');
+const app = buildApp({ ctx: { db, timeZone: config.timeZone, embedder }, config, structurer });
 
 const server = app.listen(config.port, '0.0.0.0', () => {
   console.log(`BJJ Notes listening on :${config.port}; MCP endpoint ${new URL('/mcp', config.publicUrl).href}`);

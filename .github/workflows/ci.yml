@@ -45,6 +45,10 @@ jobs:
         run: npm run build
       - name: Tests (embedded PGlite)
         run: npm test
+      # Neon has pgvector (search by meaning); the plain Postgres image doesn't, so it's added from the
+      # PostgreSQL project's own apt repository, which that image already uses.
+      - name: Add pgvector to the Postgres service
+        run: docker exec ${{ job.services.postgres.id }} sh -c 'apt-get update -qq && apt-get install -y -qq postgresql-16-pgvector >/dev/null'
       - name: Tests (Postgres 16, production driver)
         run: npm test
         env:
@@ -132,6 +136,7 @@ jobs:
           OWNER_PASSWORD: ${{ secrets.OWNER_PASSWORD }}
           API_TOKEN: ${{ secrets.API_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
           PUBLIC_URL: ${{ vars.PUBLIC_URL }}
           TIME_ZONE: ${{ vars.TIME_ZONE }}
           SHARE_SHORTCUT_URL: ${{ vars.SHARE_SHORTCUT_URL }}

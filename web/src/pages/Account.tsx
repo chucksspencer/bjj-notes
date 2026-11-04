@@ -44,6 +44,7 @@ export function Account() {
           <Password a={a} />
           <Sharing a={a} />
           <Tokens a={a} />
+          {a.search && <SearchStatus s={a.search} />}
           {a.me.isOwner && <People a={a} />}
         </>
       )}
@@ -193,6 +194,38 @@ function Password({ a }: { a: AccountView }) {
           Change password
         </button>
       </form>
+    </section>
+  );
+}
+
+/** For the owner: whether search by meaning is on, how far along this notebook is, and what went wrong if anything. */
+function SearchStatus({ s }: { s: NonNullable<AccountView['search']> }) {
+  const count = (n: number) => `${n} note${n === 1 ? '' : 's'} and card${n === 1 ? '' : 's'}`;
+  let text: ReactNode;
+  if (!s.enabled) {
+    text = (
+      <>
+        Off: searches match words only. To also find notes by what they're about, add a Voyage AI key as the{' '}
+        <code>VOYAGE_API_KEY</code> secret in GitHub and deploy (see the README).
+      </>
+    );
+  } else if (s.lastError) {
+    text = <>On, but the last try failed: {s.lastError} Searches match words only until it works again.</>;
+  } else if (s.indexed >= s.total) {
+    text = <>On ({s.model}). All {count(s.total)} are ready.</>;
+  } else {
+    text = (
+      <>
+        On ({s.model}). {s.indexed} of {count(s.total)} are ready; the rest catch up as you search.
+      </>
+    );
+  }
+  return (
+    <section>
+      <h2 className="section-title">Search by meaning</h2>
+      <div className="panel">
+        <p className="account-note">{text}</p>
+      </div>
     </section>
   );
 }

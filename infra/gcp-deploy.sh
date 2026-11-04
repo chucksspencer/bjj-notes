@@ -5,7 +5,8 @@
 # Required: IMAGE (built image, by digest: ghcr.io/owner/bjj-notes@sha256:…, or tag), DATABASE_URL, OWNER_PASSWORD, API_TOKEN,
 #           GCP_SERVICE_ACCOUNT (deploy account; gives the project id) or PROJECT_ID,
 #           GCP_WORKLOAD_IDENTITY_PROVIDER (gives the project number) or PROJECT_NUMBER
-# Optional: IMAGE_TAG (tag for the Artifact Registry copy, e.g. sha-abc), ANTHROPIC_API_KEY, PUBLIC_URL (custom domain),
+# Optional: IMAGE_TAG (tag for the Artifact Registry copy, e.g. sha-abc), ANTHROPIC_API_KEY, VOYAGE_API_KEY (search by
+#           meaning), PUBLIC_URL (custom domain),
 #           TIME_ZONE, GCP_REGION, SERVICE, SHARE_SHORTCUT_URL (iCloud link to the shared "Save to BJJ Notes" shortcut)
 set -Eeuo pipefail
 
@@ -86,6 +87,10 @@ SECRETS="DATABASE_URL=database-url:latest,OWNER_PASSWORD=owner-password:latest,A
 if [ -n "$(trim "${ANTHROPIC_API_KEY:-}")" ]; then
   sync_secret anthropic-api-key "$ANTHROPIC_API_KEY"
   SECRETS="$SECRETS,ANTHROPIC_API_KEY=anthropic-api-key:latest"
+fi
+if [ -n "$(trim "${VOYAGE_API_KEY:-}")" ]; then
+  sync_secret voyage-api-key "$VOYAGE_API_KEY"
+  SECRETS="$SECRETS,VOYAGE_API_KEY=voyage-api-key:latest"
 fi
 
 # 3. Deploy. The run.app address is predictable, so PUBLIC_URL (the OAuth issuer) is set in the same revision.

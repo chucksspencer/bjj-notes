@@ -28,7 +28,8 @@ import {
   updateProfile,
   type User,
 } from '../auth/users.js';
-import type { Ctx } from '../services/context.js';
+import { userCtx, type Ctx } from '../services/context.js';
+import { embeddingStatus } from '../services/semantic.js';
 import { ForbiddenError, NotFoundError, UserError } from '../services/errors.js';
 import { apiErrors } from './api.js';
 import { CSRF_HEADER, sessionInfo, userIdOf } from './auth.js';
@@ -145,6 +146,7 @@ export function accountRouter(opts: AccountRouterOptions): Router {
         shareShortcutUrl: opts.shareShortcutUrl ?? null,
       };
       if (user.isOwner) {
+        view.search = await embeddingStatus(userCtx(base, user.id));
         view.people = (await listPeople(db)).map(p => ({ ...toMe(p), createdAt: p.createdAt, lastActiveAt: p.lastActiveAt }));
         view.invites = await pendingInvites(db);
       }

@@ -37,6 +37,7 @@ In this repo: **Settings → Secrets and variables → Actions → New repositor
 | `OWNER_PASSWORD` | from step 2 |
 | `API_TOKEN` | from step 2 |
 | `ANTHROPIC_API_KEY` | *Optional.* Lets Siri captures be tidied and filed by Claude (Haiku). Without it, captures link techniques named word-for-word and the rest goes to the inbox. |
+| `VOYAGE_API_KEY` | *Optional.* Turns on search by meaning (see below). A key from [Voyage AI](https://dashboard.voyageai.com); the first 200 million tokens are free, which is years of notes. Without it, search matches words only. |
 
 ### 4. Google Cloud (Cloud Shell, once)
 
@@ -67,7 +68,7 @@ Try: *"What's on my BJJ focus list?"*, *"Add a note to ghost escape: turn to the
 Open the server's address in Safari and sign in with your email and `OWNER_PASSWORD`. Then **Share → Add to Home Screen** for an app icon that opens full screen.
 
 - **Focus**: your ranked list. Tap an item to open its technique card; the ••• button moves, pauses, completes, renames or removes it.
-- **Library**: every technique, searchable by name, alias or detail (typos are fine), filterable by type and top/bottom. The black bar on each row is its rank bar: one stripe for learning, two for drilling, three for hitting it live, four for reliable.
+- **Library**: every technique, searchable by name, alias or detail (typos are fine), filterable by type and top/bottom. The search finds notes too, and, with search by meaning on, a phrase like *stop them flattening me* finds notes and cards about it even when they use other words. The black bar on each row is its rank bar: one stripe for learning, two for drilling, three for hitting it live, four for reliable.
 - **Technique card**: tap the belt's stripes to change status; positions, key details, common mistakes, related techniques and notes, with YouTube videos that play from the saved timestamp.
 - **+**: a new note from anywhere. Notes without a technique land in the **Inbox** to file later.
 - **Positions**: what you have from each position, top or bottom, the ways in, and the gaps.
@@ -139,6 +140,36 @@ Upgrading from the single-user version needs nothing in GitHub: on the first sta
 becomes the owner's, and existing sign-ins, the Claude connector and Siri Shortcuts keep working. The next time
 you sign in, enter your email with `OWNER_PASSWORD` (or add it on the Account page first).
 
+## Search by meaning (optional)
+
+With `VOYAGE_API_KEY` set, Claude's searches and phrases of three words or more in the Library also find notes
+and technique cards by what they're about: *"how do I stop the knee cut"* finds "frame on the hip before they
+settle the crossface". Matches by words still come first. Each note and card is turned into an embedding (with
+[Voyage AI](https://www.voyageai.com), model `voyage-4`, or `EMBEDDING_MODEL`) the first time it's searched after
+it changes, so there's nothing to run and existing notes catch up by themselves. The owner's Account page shows
+whether it's on and how many notes are ready. If Voyage is down or the key stops working, search quietly goes back
+to words only. Everyone's note text is sent to Voyage to be embedded, and Voyage's terms let it use API data to
+improve its models unless you opt out, so look for that setting when you create the key (Voyage is now part of
+MongoDB; [this page](https://www.mongodb.com/docs/voyageai/management/model-training-data/) covers it).
+
+## Backups
+
+Neon's free plan can only rewind the last 6 hours, so every night at about 2–3am Central (08:17 UTC) GitHub Actions
+(**Backup** workflow) dumps the database, checks the dump, and saves it in a private Cloud Storage bucket,
+`<project id>-backups`, for 30 days. `infra/gcp-bootstrap.sh` creates the bucket; re-run it once if yours was set
+up before backups existed. Run **Actions → Backup → Run workflow** any time for one now. To pause them, set the
+repository variable `BACKUP_DISABLED` to `true`.
+
+To restore, in Cloud Shell (with the repo cloned there):
+
+```
+bash infra/restore-backup.sh                              # list the backups
+bash infra/restore-backup.sh latest 'postgresql://…'      # restore the newest
+```
+
+It replaces everything in the target database and asks you to type `RESTORE` first. Safest is restoring into a new
+Neon branch (Neon console → Branches → New branch), checking it, then pointing `DATABASE_URL` at it.
+
 ## Your own domain on DreamHost (optional)
 
 The `run.app` address works fine. To use something like `bjj.example.com` with DNS at DreamHost (Cloud Run domain mapping, free certificate; Google labels it preview):
@@ -158,7 +189,9 @@ Expected bill: $0 apart from optional Anthropic API usage for parsed Siri captur
 - **Cloud Run** scales to zero; a handful of people's use is a small fraction of the monthly free allowance (2 million requests, 180,000 vCPU-seconds). It's capped at one instance.
 - **Neon** free plan for the database.
 - **Artifact Registry** keeps the three newest images, about 0.1 GB, inside the 0.5 GB free allowance.
-- **Secret Manager**: 3–4 secrets, inside the free 6 active versions; old versions are destroyed on change.
+- **Secret Manager**: 3–5 secrets, inside the free 6 active versions; old versions are destroyed on change.
+- **Cloud Storage**: 30 nightly backups of a few MB each, far inside the free 5 GB.
+- **Voyage AI** (optional, search by meaning): each note is embedded once per change, and searches are a few words; a handful of people won't come close to the 200 million free tokens.
 - **Logging** stays inside the free allowance. Read logs with `gcloud run services logs read bjj-notes --region us-central1`.
 
 The first request after a quiet spell takes a couple of seconds while the container starts. If that bothers you in voice mode, `gcloud run services update bjj-notes --region us-central1 --min-instances 1` keeps one warm for roughly $10 a month.
@@ -174,17 +207,18 @@ src/
   http/              the web app's sign-in (cookie sessions), JSON API (/api/v1), account and invites, static hosting
   shared/api.ts      types shared by the JSON API and the web app
   mcp/server.ts      the 12 MCP tools and the instructions Claude sees
-  services/          notes, techniques, focus list, search/positions/review, undo log; views.ts is the read side
+  services/          notes, techniques, focus list, search/positions/review, undo log; views.ts is the read side;
+                     semantic.ts + embeddings.ts are search by meaning
   resolve.ts         fuzzy name matching tuned for voice transcription
   auth/              OAuth server (dynamic registration, PKCE, rotating refresh tokens); users, passwords, invites, Siri tokens
   capture.ts         Siri endpoints and the optional Claude parser
 web/                 the web app (React, Vite); built into dist/public
 db/migrations/       schema, starter positions, your working list
-infra/               Google Cloud bootstrap (run once) and deploy (run by CI) scripts
+infra/               Google Cloud bootstrap (run once), deploy (run by CI), nightly backup and restore scripts
 test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture, JSON API) and the web app in Chromium
 ```
 
-**Data model.** `users` (the owner and everyone invited, each with a belt) · `invites` (join and password-reset links) · `api_tokens` (Siri Shortcuts) · `positions` (with aliases like "100 kilos"; shared) · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, inbox flag) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `focus_items` + `focus_events` (every add, move, pause and completion, for focus over time) · `activity_log` (powers `undo_last`). Every notebook table has a `user_id`; each request reads and writes only its signed-in user's rows (the handle services get carries the user, and a query without one throws), and composite foreign keys mean a row can only ever point at the same person's notes, techniques, sessions and sources.
+**Data model.** `users` (the owner and everyone invited, each with a belt) · `invites` (join and password-reset links) · `api_tokens` (Siri Shortcuts) · `positions` (with aliases like "100 kilos"; shared) · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, inbox flag) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `focus_items` + `focus_events` (every add, move, pause and completion, for focus over time) · `activity_log` (powers `undo_last`) · `note_embeddings` + `technique_embeddings` (search by meaning: one vector per note or card, with the model and a hash of the text it was made from, so only changed ones are redone). Every notebook table has a `user_id`; each request reads and writes only its signed-in user's rows (the handle services get carries the user, and a query without one throws), and composite foreign keys mean a row can only ever point at the same person's notes, techniques, sessions and sources.
 
 **Name matching.** Voice transcription mangles names, so lookups combine trigram similarity, edit distance and word matching: "barra toe plata" finds Baratoplata, "ghost" finds Ghost escape, but "omoplata" is not mistaken for Baratoplata. Exact names and aliases always win; uncertain matches are reported back rather than guessed.
 
@@ -192,7 +226,7 @@ test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture,
 
 | Tool | Does |
 | --- | --- |
-| `search` | Techniques by fuzzy name / type / role / position / status; notes by full text or where they came from |
+| `search` | Techniques by fuzzy name / type / role / position / status; notes by full text or where they came from; with search by meaning on, both also by what they're about |
 | `get_technique` | A card: positions, details, mistakes, related techniques, focus status, recent notes |
 | `save_technique` | Create or update a card; add positions, aliases, details, links; star or unstar it |
 | `add_note` | Save a dated note linked to techniques and where it came from ("Zen camp seminar by Josh Jones"); unknown techniques go to the inbox |
@@ -251,6 +285,5 @@ and offline capture. It's built and sent to TestFlight by GitHub Actions; see [i
 
 1. iPhone app, continued: techniques and notes Siri can search and answer from, starring by voice,
    a share-sheet extension in place of the reel Shortcut, a Lock Screen focus widget.
-2. Semantic search on the server (pgvector embeddings), for Claude and the web app.
-3. Position graph view and focus timeline.
-4. Training sessions and a weekly review screen.
+2. Position graph view and focus timeline.
+3. Training sessions and a weekly review screen.

@@ -137,6 +137,8 @@ export interface NoteQuery {
   limit?: number;
   /** Notes with id lower than this (for paging newest-first). */
   beforeId?: number;
+  /** Only these notes. */
+  ids?: number[];
   oldestFirst?: boolean;
 }
 
@@ -164,6 +166,7 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
     order = `ts_rank(n.search, websearch_to_tsquery('english', ${tq})) desc, n.observed_on desc, n.id desc`;
   }
   if (opts.beforeId !== undefined) where.push(`n.id < ${p(opts.beforeId)}`);
+  if (opts.ids !== undefined) where.push(`n.id = any(${p(opts.ids)}::int[])`);
   const limit = p(Math.min(Math.max(opts.limit ?? 30, 1), 200));
   const { rows } = await q.query<NoteRow>(
     `${NOTE_SELECT} where ${where.join(' and ')} order by ${order} limit ${limit}`,
@@ -297,6 +300,8 @@ export interface TechniqueQuery {
   newSince?: string;
   /** Only starred (true) or unstarred (false) techniques; starred ones come most recently starred first. */
   starred?: boolean;
+  /** Only these techniques. */
+  ids?: number[];
 }
 
 /** When a technique first showed up in your notes (videos still on the To try list don't count yet). */
@@ -342,6 +347,7 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
                       where e.technique_id = t.id), '[]'::json) as edges
      from techniques t
      where t.user_id = $9
+       and ($10::int[] is null or t.id = any($10::int[]))
        and ($2::text is null or t.type = $2)
        and ($3::text is null or t.role = $3 or exists (
              select 1 from technique_edges e where e.technique_id = t.id and e.from_role = $3))
@@ -376,6 +382,7 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
       f.newSince ?? null,
       f.starred ?? null,
       uid(q),
+      f.ids ?? null,
     ],
   );
   return rows.map(r => ({

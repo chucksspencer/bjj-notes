@@ -4,7 +4,8 @@ import { noteOrigin } from '../shared/sessions.js';
 import { mediaTag } from './attachments.js';
 import { today, type Ctx } from './context.js';
 import type { NoteView, Status, TechniqueListItem, TechniqueType } from '../shared/api.js';
-import { LAB_DAYS, labView, noteList, positionView, techniqueList } from './views.js';
+import { searchNotes, searchTechniques } from './semantic.js';
+import { LAB_DAYS, labView, positionView, techniqueList } from './views.js';
 import { daysAgo, isoDate, type Role } from './vocab.js';
 
 /** What you can do from a position (optionally as top or bottom), what leads into it, and the gaps. */
@@ -53,7 +54,9 @@ export async function search(ctx: Ctx, input: SearchInput): Promise<string> {
     positionId = r.match.id;
   }
   const lines: string[] = [];
-  const techniques = await techniqueList(ctx.db, { q: query, type: input.type, role: input.role, status: input.status, positionId, limit });
+  // With a query, cards and notes are found by their words and, when search by meaning is on, by what they're about.
+  const filters = { type: input.type, role: input.role, status: input.status, positionId, limit };
+  const techniques = query ? await searchTechniques(ctx, { ...filters, q: query }, 'always') : await techniqueList(ctx.db, filters);
   if (techniques.length) {
     lines.push('Techniques:');
     for (const t of techniques) {
@@ -63,7 +66,7 @@ export async function search(ctx: Ctx, input: SearchInput): Promise<string> {
     }
   }
   if (query) {
-    const notes = await noteList(ctx.db, { q: query, limit });
+    const notes = await searchNotes(ctx, { q: query, limit }, 'always');
     if (notes.length) {
       lines.push('Notes:');
       for (const n of notes) {
