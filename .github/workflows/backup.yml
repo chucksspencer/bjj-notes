@@ -1,0 +1,42 @@
+name: Backup
+
+# Every night, a copy of the database goes to a private Cloud Storage bucket that keeps each copy for
+# 30 days (Neon's free plan can only rewind 6 hours). infra/gcp-bootstrap.sh makes the bucket; restore
+# with infra/restore-backup.sh. Run it by hand from Actions → Backup → Run workflow. A failed run emails you.
+# Set a repository variable BACKUP_DISABLED = true to pause it.
+
+on:
+  schedule:
+    - cron: '17 8 * * *' # 2:17 am in Chicago (3:17 in summer), when nobody's adding notes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    if: vars.BACKUP_DISABLED != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency: backup
+    env:
+      # The same keyless sign-in as deploys: only this repo's main branch can use it.
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER || 'projects/602476730933/locations/global/workloadIdentityPools/github/providers/github' }}
+      GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT || 'bjj-notes-deploy@bjj-notes-eaaeae.iam.gserviceaccount.com' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: Back up the database
+        run: bash infra/backup.sh
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}

@@ -40,6 +40,9 @@ export function uid(q: Queryable): number {
 /** Production: node-postgres against Neon (or any Postgres 15+). */
 export function pgDb(connectionString: string): Db {
   const pool = new pg.Pool({ connectionString, max: 5, idleTimeoutMillis: 30_000 });
+  // A connection that drops while idle (Neon suspending, a restart) is simply replaced by the next query;
+  // without a listener, node-postgres treats it as an unhandled error and the process stops.
+  pool.on('error', err => console.error(`database: an idle connection closed (${err.message})`));
   return {
     async query(sql, params) {
       return (await pool.query(sql, params as any[])) as any;

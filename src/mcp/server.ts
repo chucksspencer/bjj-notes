@@ -92,7 +92,11 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
     {
       title: 'Search techniques and notes',
       description:
-        'Find technique cards by (fuzzy) name, alias or content, and notes by full-text search. Both also match where notes came from (an event, instructor, gym or class notes, e.g. "Zen camp", "Josh Jones"). All filters are optional; with no query it lists techniques matching the filters.',
+        'Find technique cards by (fuzzy) name, alias or content, and notes by full-text search. Both also match where notes came from (an event, instructor, gym or class notes, e.g. "Zen camp", "Josh Jones"). ' +
+        (ctx.rewriter
+          ? 'Queries also match by meaning, so a question in plain words ("how do I stop the knee cut") finds notes and cards about it that use other words. '
+          : '') +
+        'All filters are optional; with no query it lists techniques matching the filters.',
       inputSchema: {
         query: z.string().optional(),
         type: z.enum(TECHNIQUE_TYPES).optional(),

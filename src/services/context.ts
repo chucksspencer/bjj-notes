@@ -1,4 +1,5 @@
 import { forUser, type Db } from '../db.js';
+import type { Rewriter } from './semantic.js';
 import { todayIn } from './vocab.js';
 
 export interface Ctx {
@@ -6,6 +7,8 @@ export interface Ctx {
   db: Db;
   /** IANA time zone used for "today" (e.g. America/Chicago). */
   timeZone: string;
+  /** For search by meaning (Claude rewrites the search); without one, search is by words only. */
+  rewriter?: Rewriter | null;
 }
 
 /** The context for one signed-in user's requests. */

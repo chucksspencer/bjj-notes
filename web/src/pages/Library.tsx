@@ -1,23 +1,42 @@
-import { useDeferredValue, useState } from 'react';
+import { useDeferredValue, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import type { Role, TechniqueType } from '../../../src/shared/api';
-import { useCreateTechnique, useDeleteTechniques, useTechniques, type TechniqueFilters } from '../api';
+import { useCreateTechnique, useDeleteTechniques, useNotes, useTechniques, type TechniqueFilters } from '../api';
 import { RankBar } from '../components/Belt';
 import { Icon } from '../components/Icon';
+import { NoteItem } from '../components/NoteItem';
 import { countOf, SelectionBar, useSelection } from '../components/Selection';
 import { Sheet } from '../components/Sheet';
 import { useToast } from '../components/Toast';
-import { ROLE_LABEL, ROLES, techniqueLine, TYPE_LABEL, TYPE_PLURAL, TYPES } from '../lib/format';
+import { localToday, ROLE_LABEL, ROLES, techniqueLine, TYPE_LABEL, TYPE_PLURAL, TYPES } from '../lib/format';
+
+/**
+ * The search as typed. Names (a word or two) search as you type; a phrase also searches by meaning on the
+ * server, so it waits for a pause in typing rather than asking about every half-typed word.
+ */
+function useSearchTerm(text: string): string {
+  const typed = useDeferredValue(text.trim());
+  const phrase = typed.split(/\s+/).filter(Boolean).length >= 3;
+  const [settled, setSettled] = useState(typed);
+  useEffect(() => {
+    if (!phrase) return setSettled(typed);
+    const t = setTimeout(() => setSettled(typed), 400);
+    return () => clearTimeout(t);
+  }, [typed, phrase]);
+  return phrase ? settled : typed;
+}
 
 export function Library() {
   const [params, setParams] = useSearchParams();
   const [text, setText] = useState(params.get('q') ?? '');
-  const q = useDeferredValue(text.trim());
+  const q = useSearchTerm(text);
   const type = (params.get('type') as TechniqueType | null) ?? undefined;
   const role = (params.get('role') as Role | null) ?? undefined;
   const sort = params.get('sort') === 'recent' ? 'recent' : 'name';
   const filters: TechniqueFilters = { q: q || undefined, type, role, sort };
   const list = useTechniques(filters);
+  // Searching finds notes too: by their words, and (for a phrase) by what they're about.
+  const notes = useNotes({ q, limit: 20 }, !!q);
   const [creating, setCreating] = useState(false);
   const selection = useSelection(list.data?.map(t => t.id) ?? []);
   const del = useDeleteTechniques();
@@ -71,8 +90,8 @@ export function Library() {
         <input
           className="input"
           type="search"
-          placeholder="Search names, details or events"
-          aria-label="Search techniques"
+          placeholder="Search techniques and notes"
+          aria-label="Search techniques and notes"
           value={text}
           onChange={e => {
             setText(e.target.value);
@@ -139,6 +158,17 @@ export function Library() {
           );
         })}
       </section>
+
+      {q && !selection.active && (
+        <section aria-label="Notes" aria-busy={notes.isFetching}>
+          <h2 className="section-title">Notes</h2>
+          <div className="panel">
+            {notes.isError && <div className="empty">Couldn't search notes. {notes.error.message}</div>}
+            {notes.data?.length === 0 && <div className="empty">No notes match.</div>}
+            {notes.data?.map(n => <NoteItem key={n.id} note={n} today={localToday()} />)}
+          </div>
+        </section>
+      )}
 
       <SelectionBar selection={selection} noun="techniques" busy={del.isPending} onAction={deleteSelected} />
 

@@ -135,3 +135,4 @@ jobs:
           PUBLIC_URL: ${{ vars.PUBLIC_URL }}
           TIME_ZONE: ${{ vars.TIME_ZONE }}
           SHARE_SHORTCUT_URL: ${{ vars.SHARE_SHORTCUT_URL }}
+          SEARCH_MODEL: ${{ vars.SEARCH_MODEL }}

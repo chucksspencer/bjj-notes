@@ -36,7 +36,7 @@ In this repo: **Settings → Secrets and variables → Actions → New repositor
 | `DATABASE_URL` | Neon connection string |
 | `OWNER_PASSWORD` | from step 2 |
 | `API_TOKEN` | from step 2 |
-| `ANTHROPIC_API_KEY` | *Optional.* Lets Siri captures be tidied and filed by Claude (Haiku). Without it, captures link techniques named word-for-word and the rest goes to the inbox. |
+| `ANTHROPIC_API_KEY` | *Optional.* Lets Siri captures be tidied and filed by Claude (Haiku), and turns on search by meaning (see below). Without it, captures link techniques named word-for-word and the rest goes to the inbox, and search matches words only. |
 
 ### 4. Google Cloud (Cloud Shell, once)
 
@@ -67,7 +67,7 @@ Try: *"What's on my BJJ focus list?"*, *"Add a note to ghost escape: turn to the
 Open the server's address in Safari and sign in with your email and `OWNER_PASSWORD`. Then **Share → Add to Home Screen** for an app icon that opens full screen.
 
 - **Focus**: your ranked list. Tap an item to open its technique card; the ••• button moves, pauses, completes, renames or removes it.
-- **Library**: every technique, searchable by name, alias or detail (typos are fine), filterable by type and top/bottom. The black bar on each row is its rank bar: one stripe for learning, two for drilling, three for hitting it live, four for reliable.
+- **Library**: every technique, searchable by name, alias or detail (typos are fine), filterable by type and top/bottom. The search finds notes too, and, with search by meaning on, a phrase like *how do I stop the knee cut* finds notes and cards about it even when they use other words. The black bar on each row is its rank bar: one stripe for learning, two for drilling, three for hitting it live, four for reliable.
 - **Technique card**: tap the belt's stripes to change status; positions, key details, common mistakes, related techniques and notes, with YouTube videos that play from the saved timestamp.
 - **+**: a new note from anywhere. Notes without a technique land in the **Inbox** to file later.
 - **Positions**: what you have from each position, top or bottom, the ways in, and the gaps.
@@ -139,6 +139,39 @@ Upgrading from the single-user version needs nothing in GitHub: on the first sta
 becomes the owner's, and existing sign-ins, the Claude connector and Siri Shortcuts keep working. The next time
 you sign in, enter your email with `OWNER_PASSWORD` (or add it on the Account page first).
 
+## Search by meaning (optional)
+
+With `ANTHROPIC_API_KEY` set, a search like *"how do I stop the knee cut"* finds "frame on the hip before they
+settle the crossface", though they share no words. Claude (Haiku) reads the search alongside your list of technique
+cards and says which cards it's about and which words a note about it would use (*knee slice, frame, crossface,
+knee shield*); the usual keyword search then runs on those too, and notes on the cards it named count as matches.
+Matches on your own words stay near the top.
+
+It's used for phrases of three words or more in the Library (typing a name stays instant), and for Claude's searches
+when they're three words or more or their words alone find nothing. Each costs one short Claude call: about a second, and a
+fraction of a cent. The same search within 10 minutes isn't asked again. If the call fails, search quietly goes back
+to words only, and the owner's Account page shows the error. A repository variable `SEARCH_MODEL` picks another model, or
+`off` turns it off while keeping Siri captures tidied. What's sent is the search and that person's card and position names, never
+their notes; Anthropic doesn't train on API data by default.
+
+## Backups
+
+Neon's free plan can only rewind the last 6 hours, so every night at about 2–3am Central (08:17 UTC) GitHub Actions
+(**Backup** workflow) dumps the database, checks the dump, and saves it in a private Cloud Storage bucket,
+`<project id>-backups`, for 30 days. `infra/gcp-bootstrap.sh` creates the bucket; re-run it once if yours was set
+up before backups existed. Run **Actions → Backup → Run workflow** any time for one now. To pause them, set the
+repository variable `BACKUP_DISABLED` to `true`.
+
+To restore, in Cloud Shell (with the repo cloned there):
+
+```
+bash infra/restore-backup.sh                              # list the backups
+bash infra/restore-backup.sh latest 'postgresql://…'      # restore the newest
+```
+
+It replaces everything in the target database and asks you to type `RESTORE` first. Safest is restoring into a new
+Neon branch (Neon console → Branches → New branch), checking it, then pointing `DATABASE_URL` at it.
+
 ## Your own domain on DreamHost (optional)
 
 The `run.app` address works fine. To use something like `bjj.example.com` with DNS at DreamHost (Cloud Run domain mapping, free certificate; Google labels it preview):
@@ -153,12 +186,14 @@ The `run.app` address keeps working alongside the new one.
 
 ## Costs
 
-Expected bill: $0 apart from optional Anthropic API usage for parsed Siri captures (cents a month).
+Expected bill: $0 apart from optional Anthropic API usage for parsed Siri captures and search by meaning (cents a month).
 
 - **Cloud Run** scales to zero; a handful of people's use is a small fraction of the monthly free allowance (2 million requests, 180,000 vCPU-seconds). It's capped at one instance.
 - **Neon** free plan for the database.
 - **Artifact Registry** keeps the three newest images, about 0.1 GB, inside the 0.5 GB free allowance.
 - **Secret Manager**: 3–4 secrets, inside the free 6 active versions; old versions are destroyed on change.
+- **Cloud Storage**: 30 nightly backups of a few MB each, far inside the free 5 GB.
+- **Anthropic API** (optional): a Siri capture or a search by meaning is one Haiku call, a fraction of a cent each.
 - **Logging** stays inside the free allowance. Read logs with `gcloud run services logs read bjj-notes --region us-central1`.
 
 The first request after a quiet spell takes a couple of seconds while the container starts. If that bothers you in voice mode, `gcloud run services update bjj-notes --region us-central1 --min-instances 1` keeps one warm for roughly $10 a month.
@@ -174,13 +209,14 @@ src/
   http/              the web app's sign-in (cookie sessions), JSON API (/api/v1), account and invites, static hosting
   shared/api.ts      types shared by the JSON API and the web app
   mcp/server.ts      the 12 MCP tools and the instructions Claude sees
-  services/          notes, techniques, focus list, search/positions/review, undo log; views.ts is the read side
+  services/          notes, techniques, focus list, search/positions/review, undo log; views.ts is the read side;
+                     semantic.ts is search by meaning
   resolve.ts         fuzzy name matching tuned for voice transcription
   auth/              OAuth server (dynamic registration, PKCE, rotating refresh tokens); users, passwords, invites, Siri tokens
   capture.ts         Siri endpoints and the optional Claude parser
 web/                 the web app (React, Vite); built into dist/public
 db/migrations/       schema, starter positions, your working list
-infra/               Google Cloud bootstrap (run once) and deploy (run by CI) scripts
+infra/               Google Cloud bootstrap (run once), deploy (run by CI), nightly backup and restore scripts
 test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture, JSON API) and the web app in Chromium
 ```
 
@@ -192,7 +228,7 @@ test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture,
 
 | Tool | Does |
 | --- | --- |
-| `search` | Techniques by fuzzy name / type / role / position / status; notes by full text or where they came from |
+| `search` | Techniques by fuzzy name / type / role / position / status; notes by full text or where they came from; with search by meaning on, both also by what they're about |
 | `get_technique` | A card: positions, details, mistakes, related techniques, focus status, recent notes |
 | `save_technique` | Create or update a card; add positions, aliases, details, links; star or unstar it |
 | `add_note` | Save a dated note linked to techniques and where it came from ("Zen camp seminar by Josh Jones"); unknown techniques go to the inbox |
@@ -251,6 +287,5 @@ and offline capture. It's built and sent to TestFlight by GitHub Actions; see [i
 
 1. iPhone app, continued: techniques and notes Siri can search and answer from, starring by voice,
    a share-sheet extension in place of the reel Shortcut, a Lock Screen focus widget.
-2. Semantic search on the server (pgvector embeddings), for Claude and the web app.
-3. Position graph view and focus timeline.
-4. Training sessions and a weekly review screen.
+2. Position graph view and focus timeline.
+3. Training sessions and a weekly review screen.

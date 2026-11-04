@@ -10,13 +10,17 @@ export interface Config {
   ownerPassword: string;
   /** Bearer token for the Siri Shortcut endpoints under /api. */
   apiToken: string;
-  /** Enables Claude-powered parsing of dictated notes in /api/capture. */
+  /** Enables Claude-powered parsing of dictated notes in /api/capture, and search by meaning. */
   anthropicApiKey?: string;
   captureModel: string;
   /** IANA zone used to date notes ("today"). */
   timeZone: string;
   /** iCloud link to the "Save to BJJ Notes" shortcut, offered on iPhones without the app. */
   shareShortcutUrl?: string;
+  /** The Claude model that rewrites searches so they find things by meaning; null when turned off (SEARCH_MODEL=off). */
+  searchModel: string | null;
+  /** Another address for the Anthropic API (tests). */
+  anthropicBaseUrl?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -53,5 +57,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     captureModel: env.CAPTURE_MODEL || 'claude-haiku-5-5',
     timeZone,
     shareShortcutUrl,
+    searchModel: env.SEARCH_MODEL?.trim().toLowerCase() === 'off' ? null : env.SEARCH_MODEL?.trim() || 'claude-haiku-5-5',
+    anthropicBaseUrl: env.ANTHROPIC_BASE_URL?.trim() || undefined,
   };
 }

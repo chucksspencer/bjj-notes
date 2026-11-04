@@ -34,6 +34,7 @@ import {
   TECHNIQUE_TYPES,
 } from '../services/vocab.js';
 import { sessionList } from '../services/sessions.js';
+import { searchNotes, searchTechniques } from '../services/semantic.js';
 import { focusView, labView, noteList, noteView, positionList, positionView, techniqueList, techniqueView } from '../services/views.js';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -246,7 +247,9 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
           limit: z.coerce.number().int().min(1).max(500).optional(),
         })
         .parse(req.query);
-      return techniqueList(ctx.db, { ...qs, positionId: qs.position, starred: qs.starred === undefined ? undefined : qs.starred === '1' });
+      const f = { ...qs, positionId: qs.position, starred: qs.starred === undefined ? undefined : qs.starred === '1' };
+      // Typing a phrase (three words or more) also finds cards by what they're about.
+      return f.q?.trim() ? searchTechniques(ctx, { ...f, q: f.q }, 'phrase') : techniqueList(ctx.db, f);
     }),
   );
   r.post(
@@ -368,7 +371,7 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
           before: id.optional(),
         })
         .parse(req.query);
-      return noteList(ctx.db, {
+      const f = {
         inbox: qs.inbox === undefined ? undefined : qs.inbox === '1',
         toTry: qs.toTry === undefined ? undefined : qs.toTry === '1',
         starred: qs.starred === undefined ? undefined : qs.starred === '1',
@@ -377,7 +380,8 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
         q: qs.q,
         limit: qs.limit,
         beforeId: qs.before,
-      });
+      };
+      return f.q?.trim() ? searchNotes(ctx, { ...f, q: f.q }, 'phrase') : noteList(ctx.db, f);
     }),
   );
   r.post(

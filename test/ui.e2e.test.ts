@@ -138,6 +138,21 @@ describe.runIf(run)('web app (end to end)', () => {
     await sheet.waitFor({ state: 'detached' });
   });
 
+  it('finds notes as well as techniques when searching the library', async () => {
+    await page.getByRole('navigation').getByRole('link', { name: 'Library' }).click();
+    await page.getByLabel('Search techniques and notes').fill('near arm');
+    const notes = page.getByRole('region', { name: 'Notes' });
+    await notes.getByText('Hide the near arm before the turn.').waitFor();
+    await page.getByLabel('Search techniques and notes').fill('nothing like this at all');
+    await notes.getByText('No notes match.').waitFor();
+    // Without a Voyage AI key, the owner's Account page says search matches words only, and how to change that.
+    await page.goto(`${s.base}/account`);
+    await page.getByRole('heading', { name: 'Search by meaning' }).waitFor();
+    await page.getByText(/^Off: searches match words only/).waitFor();
+    await page.getByRole('navigation').getByRole('link', { name: 'Library' }).click();
+    await page.getByLabel('Search techniques and notes').fill('');
+  });
+
   it('deletes several techniques at once, and undoes it in one step', async () => {
     page.on('dialog', d => void d.accept()); // the "Delete 2 techniques?" confirmation
     await page.getByRole('navigation').getByRole('link', { name: 'Library' }).click();
