@@ -319,12 +319,10 @@ export interface AccountView {
   ownerApiToken: boolean;
   /** iCloud link to the shared "Save to BJJ Notes" shortcut, if one has been set up. */
   shareShortcutUrl: string | null;
-  /** Only for the owner: whether search by meaning is on, and how far along your notebook is. */
+  /** Only for the owner: whether search by meaning is on, and its most recent failure if the last try failed. */
   search?: {
     enabled: boolean;
     model: string | null;
-    indexed: number;
-    total: number;
     lastError: string | null;
   };
   /** Only for the owner. */

@@ -9,7 +9,6 @@ import { appCaptureRouter, captureRouter, type Structurer } from './capture.js';
 import type { Config } from './config.js';
 import { buildMcpServer } from './mcp/server.js';
 import { userCtx, type Ctx } from './services/context.js';
-import { refreshSoon } from './services/semantic.js';
 import { accountRouter } from './http/account.js';
 import { apiRouter } from './http/api.js';
 import { webAuth } from './http/auth.js';
@@ -39,19 +38,6 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
     });
     next();
   });
-
-  // After someone changes their notebook, catch its embeddings up shortly after (for search by meaning).
-  if (ctx.embedder) {
-    app.use((req, res, next) => {
-      if (req.method !== 'GET' && req.method !== 'HEAD' && /^\/(api|mcp)(\/|$)/.test(req.path)) {
-        res.on('finish', () => {
-          const userId = res.locals.userId;
-          if (res.statusCode < 400 && typeof userId === 'number') refreshSoon(userCtx(ctx, userId));
-        });
-      }
-      next();
-    });
-  }
 
   const mcpUrl = new URL('/mcp', config.publicUrl);
   const provider = new NotesOAuthProvider(ctx.db, mcpUrl);
@@ -91,7 +77,6 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
       res.status(401).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Sign in again.' }, id: null });
       return;
     }
-    res.locals.userId = user.id;
     const server = buildMcpServer(userCtx(ctx, user.id), user);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => {

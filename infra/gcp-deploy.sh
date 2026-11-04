@@ -5,9 +5,9 @@
 # Required: IMAGE (built image, by digest: ghcr.io/owner/bjj-notes@sha256:…, or tag), DATABASE_URL, OWNER_PASSWORD, API_TOKEN,
 #           GCP_SERVICE_ACCOUNT (deploy account; gives the project id) or PROJECT_ID,
 #           GCP_WORKLOAD_IDENTITY_PROVIDER (gives the project number) or PROJECT_NUMBER
-# Optional: IMAGE_TAG (tag for the Artifact Registry copy, e.g. sha-abc), ANTHROPIC_API_KEY, VOYAGE_API_KEY (search by
-#           meaning), PUBLIC_URL (custom domain),
-#           TIME_ZONE, GCP_REGION, SERVICE, SHARE_SHORTCUT_URL (iCloud link to the shared "Save to BJJ Notes" shortcut)
+# Optional: IMAGE_TAG (tag for the Artifact Registry copy, e.g. sha-abc), ANTHROPIC_API_KEY, PUBLIC_URL (custom domain),
+#           TIME_ZONE, GCP_REGION, SERVICE, SHARE_SHORTCUT_URL (iCloud link to the shared "Save to BJJ Notes" shortcut),
+#           SEARCH_MODEL (the Claude model for search by meaning, or off)
 set -Eeuo pipefail
 
 # In GitHub Actions, failures are also reported as an annotation on the run (readable without the logs).
@@ -88,10 +88,6 @@ if [ -n "$(trim "${ANTHROPIC_API_KEY:-}")" ]; then
   sync_secret anthropic-api-key "$ANTHROPIC_API_KEY"
   SECRETS="$SECRETS,ANTHROPIC_API_KEY=anthropic-api-key:latest"
 fi
-if [ -n "$(trim "${VOYAGE_API_KEY:-}")" ]; then
-  sync_secret voyage-api-key "$VOYAGE_API_KEY"
-  SECRETS="$SECRETS,VOYAGE_API_KEY=voyage-api-key:latest"
-fi
 
 # 3. Deploy. The run.app address is predictable, so PUBLIC_URL (the OAuth issuer) is set in the same revision.
 URL="${PUBLIC_URL:-https://$SERVICE-$PROJECT_NUMBER.$REGION.run.app}"
@@ -101,6 +97,11 @@ SHORTCUT="$(trim "${SHARE_SHORTCUT_URL:-}")"
 if [ -n "$SHORTCUT" ]; then
   [[ "$SHORTCUT" =~ ^https://www\.icloud\.com/shortcuts/[A-Za-z0-9_-]+/?$ ]] || fail "SHARE_SHORTCUT_URL should be an iCloud shortcut link (https://www.icloud.com/shortcuts/…)"
   ENV_VARS="$ENV_VARS,SHARE_SHORTCUT_URL=$SHORTCUT"
+fi
+SEARCH="$(trim "${SEARCH_MODEL:-}")"
+if [ -n "$SEARCH" ]; then
+  [[ "$SEARCH" =~ ^[A-Za-z0-9._-]+$ ]] || fail "SEARCH_MODEL should be a Claude model id (claude-haiku-5-5) or off"
+  ENV_VARS="$ENV_VARS,SEARCH_MODEL=$SEARCH"
 fi
 gcloud run deploy "$SERVICE" --project="$PROJECT_ID" --region="$REGION" --image="$TARGET" \
   --service-account="$RUN_SA" --allow-unauthenticated \

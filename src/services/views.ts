@@ -137,8 +137,8 @@ export interface NoteQuery {
   limit?: number;
   /** Notes with id lower than this (for paging newest-first). */
   beforeId?: number;
-  /** Only these notes. */
-  ids?: number[];
+  /** Only notes about any of these techniques. */
+  techniqueIds?: number[];
   oldestFirst?: boolean;
 }
 
@@ -166,7 +166,9 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
     order = `ts_rank(n.search, websearch_to_tsquery('english', ${tq})) desc, n.observed_on desc, n.id desc`;
   }
   if (opts.beforeId !== undefined) where.push(`n.id < ${p(opts.beforeId)}`);
-  if (opts.ids !== undefined) where.push(`n.id = any(${p(opts.ids)}::int[])`);
+  if (opts.techniqueIds !== undefined) {
+    where.push(`exists (select 1 from note_techniques x where x.note_id = n.id and x.technique_id = any(${p(opts.techniqueIds)}::int[]))`);
+  }
   const limit = p(Math.min(Math.max(opts.limit ?? 30, 1), 200));
   const { rows } = await q.query<NoteRow>(
     `${NOTE_SELECT} where ${where.join(' and ')} order by ${order} limit ${limit}`,

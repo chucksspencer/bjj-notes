@@ -198,25 +198,23 @@ function Password({ a }: { a: AccountView }) {
   );
 }
 
-/** For the owner: whether search by meaning is on, how far along this notebook is, and what went wrong if anything. */
+/** For the owner: whether search by meaning is on, and what went wrong if anything. */
 function SearchStatus({ s }: { s: NonNullable<AccountView['search']> }) {
-  const count = (n: number) => `${n} note${n === 1 ? '' : 's'} and card${n === 1 ? '' : 's'}`;
   let text: ReactNode;
   if (!s.enabled) {
     text = (
       <>
-        Off: searches match words only. To also find notes by what they're about, add a Voyage AI key as the{' '}
-        <code>VOYAGE_API_KEY</code> secret in GitHub and deploy (see the README).
+        Off: searches match words only. To also find notes by what they're about, add the <code>ANTHROPIC_API_KEY</code>{' '}
+        secret in GitHub (the same one that tidies Siri captures) and deploy.
       </>
     );
   } else if (s.lastError) {
     text = <>On, but the last try failed: {s.lastError} Searches match words only until it works again.</>;
-  } else if (s.indexed >= s.total) {
-    text = <>On ({s.model}). All {count(s.total)} are ready.</>;
   } else {
     text = (
       <>
-        On ({s.model}). {s.indexed} of {count(s.total)} are ready; the rest catch up as you search.
+        On ({s.model}). Searches of three words or more, and Claude's searches that find nothing by their words, also
+        look for notes and cards about the same thing.
       </>
     );
   }

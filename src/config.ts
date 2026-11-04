@@ -10,18 +10,17 @@ export interface Config {
   ownerPassword: string;
   /** Bearer token for the Siri Shortcut endpoints under /api. */
   apiToken: string;
-  /** Enables Claude-powered parsing of dictated notes in /api/capture. */
+  /** Enables Claude-powered parsing of dictated notes in /api/capture, and search by meaning. */
   anthropicApiKey?: string;
   captureModel: string;
   /** IANA zone used to date notes ("today"). */
   timeZone: string;
   /** iCloud link to the "Save to BJJ Notes" shortcut, offered on iPhones without the app. */
   shareShortcutUrl?: string;
-  /** Voyage AI key: turns on search by meaning. */
-  voyageApiKey?: string;
-  embeddingModel: string;
-  /** Another address for the Voyage API (tests). */
-  voyageBaseUrl?: string;
+  /** The Claude model that rewrites searches so they find things by meaning; null when turned off (SEARCH_MODEL=off). */
+  searchModel: string | null;
+  /** Another address for the Anthropic API (tests). */
+  anthropicBaseUrl?: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -58,15 +57,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     captureModel: env.CAPTURE_MODEL || 'claude-haiku-5-5',
     timeZone,
     shareShortcutUrl,
-    voyageApiKey: env.VOYAGE_API_KEY?.trim() || undefined,
-    embeddingModel: env.EMBEDDING_MODEL?.trim() || 'voyage-4',
-    voyageBaseUrl: env.VOYAGE_BASE_URL?.trim() || undefined,
+    searchModel: env.SEARCH_MODEL?.trim().toLowerCase() === 'off' ? null : env.SEARCH_MODEL?.trim() || 'claude-haiku-5-5',
+    anthropicBaseUrl: env.ANTHROPIC_BASE_URL?.trim() || undefined,
   };
-}
-
-/** The embeddings service the config asks for, if any. */
-export async function embedderFor(config: Config) {
-  if (!config.voyageApiKey) return null;
-  const { voyageEmbedder } = await import('./services/embeddings.js');
-  return voyageEmbedder(config.voyageApiKey, config.embeddingModel, { baseUrl: config.voyageBaseUrl });
 }

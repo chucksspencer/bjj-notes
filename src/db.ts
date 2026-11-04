@@ -40,6 +40,9 @@ export function uid(q: Queryable): number {
 /** Production: node-postgres against Neon (or any Postgres 15+). */
 export function pgDb(connectionString: string): Db {
   const pool = new pg.Pool({ connectionString, max: 5, idleTimeoutMillis: 30_000 });
+  // A connection that drops while idle (Neon suspending, a restart) is simply replaced by the next query;
+  // without a listener, node-postgres treats it as an unhandled error and the process stops.
+  pool.on('error', err => console.error(`database: an idle connection closed (${err.message})`));
   return {
     async query(sql, params) {
       return (await pool.query(sql, params as any[])) as any;
@@ -78,8 +81,7 @@ export async function pgliteDb(dataDir?: string): Promise<Db> {
   const { PGlite } = await import('@electric-sql/pglite');
   const { pg_trgm } = await import('@electric-sql/pglite/contrib/pg_trgm');
   const { fuzzystrmatch } = await import('@electric-sql/pglite/contrib/fuzzystrmatch');
-  const { vector } = await import('@electric-sql/pglite-pgvector');
-  const db = new PGlite({ dataDir, extensions: { pg_trgm, fuzzystrmatch, vector } });
+  const db = new PGlite({ dataDir, extensions: { pg_trgm, fuzzystrmatch } });
   await db.waitReady;
   return {
     async query(sql, params) {
