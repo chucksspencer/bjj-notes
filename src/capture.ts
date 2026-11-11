@@ -323,7 +323,7 @@ export function captureRouter(base: Ctx, apiToken: string, structurer: Structure
       .split('\n')
       .filter(l => /^\d+\. /.test(l))
       .slice(0, 5)
-      .map(l => l.replace(/ — .*$/, '').replace(/ \(goal: .*\)$/, ''))
+      .map(l => l.replace(/ — .*$/, ''))
       .join('. ');
     res.json({ speech: speech ? `Your focus: ${speech}.` : 'Your focus list is empty.', text });
   });

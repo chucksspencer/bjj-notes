@@ -9,6 +9,7 @@ import { applyBelt } from './lib/belt';
 import { ToastProvider } from './components/Toast';
 import { Account } from './pages/Account';
 import { Focus } from './pages/Focus';
+import { FocusItem } from './pages/FocusItem';
 import { Inbox } from './pages/Inbox';
 import { Join } from './pages/Join';
 import { Lab } from './pages/Lab';
@@ -68,6 +69,7 @@ function Shell() {
           <Routes>
             <Route path="/" element={<Lab />} />
             <Route path="/focus" element={<Focus />} />
+            <Route path="/focus/:id" element={<FocusItem />} />
             <Route path="/try" element={<ToTry />} />
             <Route path="/library" element={<Library />} />
             <Route path="/t/:id" element={<Technique />} />

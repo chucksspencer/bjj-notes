@@ -6,20 +6,24 @@ import { noteOrigin } from '../../../src/shared/sessions';
 import { datePhrase, friendlyDate, NOTE_KIND_LABEL } from '../lib/format';
 import { useCapture } from './Capture';
 import { Clips } from './Clips';
+import { Icon } from './Icon';
 import { NoteStar } from './Star';
 import { SourceLink } from './Video';
 
-/** One note: when, what kind, where it came from, the text, its source, and the techniques it's filed under. */
+/** One note: when, what kind, where it came from, the text, its source, the techniques it's filed under and its focus items. */
 export function NoteItem({
   note,
   today,
   hideTechnique,
+  hideFocus,
   actions,
   meta,
 }: {
   note: NoteView;
   today: string;
   hideTechnique?: number;
+  /** The focus item whose page this is (not repeated as a chip). */
+  hideFocus?: number;
   /** Extra buttons under the note. */
   actions?: ReactNode;
   /** An extra line under the date, e.g. when it was starred. */
@@ -27,6 +31,7 @@ export function NoteItem({
 }) {
   const capture = useCapture();
   const others = note.techniques.filter(t => t.id !== hideTechnique);
+  const focus = note.focus.filter(f => f.id !== hideFocus && f.status !== 'dropped');
   const origin = noteOrigin(note, d => datePhrase(d, today));
   return (
     <article className="row">
@@ -55,8 +60,14 @@ export function NoteItem({
       {!note.source?.url && (note.source?.author || note.source?.title) && (
         <div className="muted small note-foot">From {[note.source.title, note.source.author].filter(Boolean).join(' by ')}</div>
       )}
-      {others.length > 0 && (
+      {others.length + focus.length > 0 && (
         <div className="chips note-foot">
+          {focus.map(f => (
+            <Link key={`f${f.id}`} className="chip chip-focus" to={`/focus/${f.id}`} aria-label={`Focus: ${f.label}`}>
+              <Icon name="focus" size={16} />
+              {f.label}
+            </Link>
+          ))}
           {others.map(t => (
             <Link key={t.id} className="chip" to={`/t/${t.id}`}>
               {t.name}

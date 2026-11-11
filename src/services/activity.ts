@@ -19,7 +19,14 @@ export interface FocusSnapshot {
   id: number;
   status: string;
   rank: number | null;
-  goal: string | null;
+  /** Only in undo entries written before goals were folded into descriptions. */
+  goal?: string | null;
+}
+
+/** Links between a focus item and techniques or notes. */
+export interface FocusLinkIds {
+  techniques: number[];
+  notes: number[];
 }
 
 /** A session's details, to put back after they were filled in. */
@@ -68,6 +75,8 @@ export type UndoOp =
       createdTechniqueIds?: number[];
       /** Photos and videos to link to the note again. */
       attachmentIds?: number[];
+      /** The focus items it was linked to (absent in older entries, and when an edit left them alone). */
+      focusItemIds?: number[];
     }
   | { kind: 'restore_edge'; edge: EdgeSnapshot }
   | { kind: 'restore_link'; link: LinkSnapshot }
@@ -82,7 +91,10 @@ export type UndoOp =
       /** Notes that went to the inbox because this was their only technique. */
       inboxedNoteIds?: number[];
     }
-  | { kind: 'restore_focus_label'; itemId: number; label: string; goal: string | null }
+  /** Puts a focus item's title and description back (older entries carry a goal instead). */
+  | { kind: 'restore_focus_label'; itemId: number; label: string; description?: string | null; goal?: string | null }
+  /** Takes back links added to a focus item and puts back ones removed. */
+  | { kind: 'restore_focus_links'; itemId: number; added: FocusLinkIds; removed: FocusLinkIds }
   /** Puts stars (or answered marks) back as they were after clearing several at once. */
   | { kind: 'restore_marks'; mark: 'starred' | 'answered'; notes: MarkSnapshot[]; techniques: MarkSnapshot[] }
   /** Several writes made as one (e.g. deleting a selection); undone together, last first. */
@@ -231,13 +243,8 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       }
       if (op.deleteItemId !== null) await q.query('delete from focus_items where id = $1 and user_id = $2', [op.deleteItemId, me]);
       for (const s of op.items) {
-        await q.query('update focus_items set status = $2, rank = $3, goal = $4, updated_at = now() where id = $1 and user_id = $5', [
-          s.id,
-          s.status,
-          s.rank,
-          s.goal,
-          me,
-        ]);
+        await q.query('update focus_items set status = $2, rank = $3, updated_at = now() where id = $1 and user_id = $4', [s.id, s.status, s.rank, me]);
+        if (s.goal !== undefined) await q.query('update focus_items set goal = $2 where id = $1 and user_id = $3', [s.id, s.goal, me]);
       }
       return;
     case 'delete_session':
@@ -284,6 +291,10 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       await deleteTechniques(q, op.createdTechniqueIds ?? []);
       if (op.attachmentIds?.length) {
         await q.query('update attachments set note_id = $1 where id = any($2::int[]) and user_id = $3', [r.id, op.attachmentIds, me]);
+      }
+      if (op.focusItemIds) {
+        await q.query('delete from focus_item_notes where note_id = $1 and user_id = $2', [r.id, me]);
+        for (const f of op.focusItemIds) await insertFocusNote(q, f, r.id);
       }
       return;
     }
@@ -346,12 +357,37 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       return;
     }
     case 'restore_focus_label':
-      await q.query('update focus_items set label = $2, goal = $3, updated_at = now() where id = $1 and user_id = $4', [
-        op.itemId,
-        op.label,
-        op.goal,
-        me,
-      ]);
+      await q.query('update focus_items set label = $2, updated_at = now() where id = $1 and user_id = $3', [op.itemId, op.label, me]);
+      if (op.description !== undefined) {
+        await q.query('update focus_items set description = $2 where id = $1 and user_id = $3', [op.itemId, op.description, me]);
+      }
+      if (op.goal !== undefined) await q.query('update focus_items set goal = $2 where id = $1 and user_id = $3', [op.itemId, op.goal, me]);
+      return;
+    case 'restore_focus_links':
+      if (op.added.techniques.length) {
+        await q.query('delete from focus_item_techniques where focus_item_id = $1 and technique_id = any($2::int[]) and user_id = $3', [
+          op.itemId,
+          op.added.techniques,
+          me,
+        ]);
+      }
+      if (op.added.notes.length) {
+        await q.query('delete from focus_item_notes where focus_item_id = $1 and note_id = any($2::int[]) and user_id = $3', [
+          op.itemId,
+          op.added.notes,
+          me,
+        ]);
+      }
+      for (const t of op.removed.techniques) {
+        await q.query(
+          `insert into focus_item_techniques (focus_item_id, technique_id, user_id)
+           select $1, $2, $3
+           where exists (select 1 from focus_items where id = $1 and user_id = $3) and exists (select 1 from techniques where id = $2 and user_id = $3)
+           on conflict do nothing`,
+          [op.itemId, t, me],
+        );
+      }
+      for (const n of op.removed.notes) await insertFocusNote(q, op.itemId, n);
       return;
     case 'refile_note':
       await q.query('delete from note_techniques where note_id = $1 and user_id = $2', [op.noteId, me]);
@@ -360,6 +396,17 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       await deleteTechniques(q, op.createdTechniqueIds);
       return;
   }
+}
+
+/** Links a note to a focus item again, if both are still there. */
+async function insertFocusNote(q: Queryable, focusItemId: number, noteId: number) {
+  await q.query(
+    `insert into focus_item_notes (focus_item_id, note_id, user_id)
+     select $1, $2, $3
+     where exists (select 1 from focus_items where id = $1 and user_id = $3) and exists (select 1 from notes where id = $2 and user_id = $3)
+     on conflict do nothing`,
+    [focusItemId, noteId, uid(q)],
+  );
 }
 
 /** Links a note to a technique again, if both are still there. */

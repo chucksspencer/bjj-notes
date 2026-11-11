@@ -119,6 +119,8 @@ export interface NoteView {
   answered: boolean;
   /** Photos and videos, kept in Apple Photos; the still is at /api/v1/attachments/:id/thumb. */
   attachments: AttachmentView[];
+  /** Focus items the note is linked to. */
+  focus: FocusRef[];
   sessionId: number | null;
   /** Where the note came from. */
   session: SessionView | null;
@@ -155,14 +157,46 @@ export interface TechniqueListItem extends TechniqueRef {
   edges: { from: string | null; fromRole: Role | null; to: string | null; toRole: Role | null }[];
 }
 
+export interface FocusRef {
+  id: number;
+  /** The item's title. */
+  label: string;
+  status: FocusStatus;
+}
+
 export interface FocusItemView {
   id: number;
+  /** The item's title. */
   label: string;
-  goal: string | null;
+  /** What this is about: the strategy, cues, what success looks like. */
+  description: string | null;
   status: FocusStatus;
   rank: number | null;
   techniques: TechniqueRef[];
+  /** How many notes are linked to it directly. */
+  noteCount: number;
+  /** The latest note linked to it, or on one of its techniques. */
   lastNoteOn: string | null;
+}
+
+/** One focus item's page. */
+export interface FocusItemDetail extends FocusItemView {
+  /** ISO 8601 */
+  createdAt: string;
+  /** Linked notes, newest first. */
+  notes: NoteView[];
+  /** The newest notes on its techniques that aren't linked to it yet. */
+  relatedNotes: NoteView[];
+  /** How many notes on its techniques aren't linked to it. */
+  relatedCount: number;
+  /** Every add, move, pause and completion, oldest first. */
+  history: { at: string; event: string; toRank: number | null }[];
+}
+
+/** Links to add to or remove from a focus item. */
+export interface FocusLinksInput {
+  add?: { techniqueIds?: number[]; noteIds?: number[] };
+  remove?: { techniqueIds?: number[]; noteIds?: number[] };
 }
 
 export interface FocusView {
@@ -238,6 +272,8 @@ export interface NoteCreateInput {
   /** Put it on the To try list instead of filing it. */
   toTry?: boolean;
   starred?: boolean;
+  /** Focus items to link the new note to. */
+  focusItemIds?: number[];
 }
 
 export interface NotePatch {
@@ -252,6 +288,8 @@ export interface NotePatch {
   /** Mark a question answered (true) or open again (false). */
   answered?: boolean;
   newTechniques?: { name: string; type: TechniqueType; role?: Role }[];
+  /** The focus items the note is linked to (replaces the set). */
+  focusItemIds?: number[];
 }
 
 export interface NoteCreateResult extends MessageResult {

@@ -4,6 +4,8 @@ import type {
   ApiTokenView,
   BeltRank,
   FocusAction,
+  FocusItemDetail,
+  FocusLinksInput,
   InviteCheck,
   InviteView,
   Me,
@@ -76,6 +78,7 @@ export const keys = {
   session: ['session'] as const,
   account: ['account'] as const,
   focus: ['focus'] as const,
+  focusItem: (id: number) => ['focusItem', id] as const,
   lab: ['lab'] as const,
   techniques: (f: TechniqueFilters = {}) => ['techniques', f] as const,
   technique: (id: number) => ['technique', id] as const,
@@ -87,7 +90,7 @@ export const keys = {
 
 /** Everything that may show changed data after a write. */
 function invalidateAll(qc: ReturnType<typeof useQueryClient>) {
-  for (const k of ['focus', 'lab', 'techniques', 'technique', 'notes', 'positions', 'position', 'sessions']) {
+  for (const k of ['focus', 'focusItem', 'lab', 'techniques', 'technique', 'notes', 'positions', 'position', 'sessions']) {
     void qc.invalidateQueries({ queryKey: [k] });
   }
 }
@@ -132,36 +135,53 @@ export function useSignOut() {
 
 export const useFocus = () => useQuery({ queryKey: keys.focus, queryFn: () => request<FocusView>('GET', '/api/v1/focus') });
 
+/** One focus item's page. */
+export const useFocusItem = (id: number) =>
+  useQuery({ queryKey: keys.focusItem(id), queryFn: () => request<FocusItemDetail>('GET', `/api/v1/focus/${id}`) });
+
+/** A focus change: the list comes back with it; item pages, cards and notes may show it too. */
+function afterFocusWrite(qc: ReturnType<typeof useQueryClient>, focus: FocusView) {
+  qc.setQueryData(keys.focus, focus);
+  for (const k of ['focusItem', 'technique', 'notes', 'lab']) void qc.invalidateQueries({ queryKey: [k] });
+}
+
 export function useFocusAction() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { id: number; action: FocusAction; position?: number }) =>
       request<MessageResult & { focus: FocusView }>('POST', `/api/v1/focus/${v.id}/actions`, { action: v.action, position: v.position }),
-    onSuccess: r => {
-      qc.setQueryData(keys.focus, r.focus);
-      void qc.invalidateQueries({ queryKey: ['technique'] });
-    },
+    onSuccess: r => afterFocusWrite(qc, r.focus),
   });
 }
 
 export function useAddFocus() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { label: string; techniqueIds?: number[]; position?: number }) =>
+    mutationFn: (v: { label: string; description?: string; techniqueIds?: number[]; noteIds?: number[]; position?: number }) =>
       request<MessageResult & { focus: FocusView }>('POST', '/api/v1/focus', v),
-    onSuccess: r => {
-      qc.setQueryData(keys.focus, r.focus);
-      void qc.invalidateQueries({ queryKey: ['technique'] });
-    },
+    onSuccess: r => afterFocusWrite(qc, r.focus),
   });
 }
 
 export function useEditFocus() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: { id: number; label?: string; goal?: string | null }) =>
-      request<MessageResult & { focus: FocusView }>('PATCH', `/api/v1/focus/${v.id}`, { label: v.label, goal: v.goal }),
-    onSuccess: r => qc.setQueryData(keys.focus, r.focus),
+    mutationFn: (v: { id: number; label?: string; description?: string | null }) =>
+      request<MessageResult & { focus: FocusView }>('PATCH', `/api/v1/focus/${v.id}`, { label: v.label, description: v.description }),
+    onSuccess: r => afterFocusWrite(qc, r.focus),
+  });
+}
+
+/** Links techniques or notes to a focus item, or unlinks them. */
+export function useLinkFocus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...links }: FocusLinksInput & { id: number }) =>
+      request<MessageResult & { item: FocusItemDetail; focus: FocusView }>('POST', `/api/v1/focus/${id}/links`, links),
+    onSuccess: r => {
+      qc.setQueryData(keys.focusItem(r.item.id), r.item);
+      afterFocusWrite(qc, r.focus);
+    },
   });
 }
 

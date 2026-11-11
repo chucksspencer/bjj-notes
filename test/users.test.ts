@@ -188,6 +188,8 @@ describe('separate notebooks over the JSON API', () => {
     expect((await api(sam, 'POST', '/api/v1/notes/answered', { ids: [ownerNote.id] })).body.message).toBe('No open questions to mark.');
     expect((await api(sam, 'POST', `/api/v1/focus/1/actions`, { action: 'drop' })).body.message).toBe('No focus item #1.');
     expect((await api(sam, 'PATCH', `/api/v1/focus/1`, { label: 'hijacked' })).body.message).toBe('No focus item #1.');
+    expect((await api(sam, 'GET', '/api/v1/focus/1')).status).toBe(404);
+    expect((await api(sam, 'POST', '/api/v1/focus/1/links', { add: { noteIds: [ownerNote.id] } })).status).toBe(404);
     expect((await api(sam, 'POST', '/api/v1/stars/clear', {})).body.message).toBe('Nothing is starred.');
 
     // Everything of the owner's is as it was.
@@ -213,7 +215,19 @@ describe('separate notebooks over the JSON API', () => {
     expect((await api(sam, 'POST', '/api/v1/notes', { text: 'From their class', sessionId: ownerNote.sessionId })).status).toBe(404);
     const linked = await api<TechniqueView>(sam, 'POST', `/api/v1/techniques/${mine.body.id}/links`, { kind: 'related', techniqueId: ownerGhost.id });
     expect(linked.body.links).toEqual([]);
-    expect((await api(sam, 'POST', '/api/v1/focus', { label: 'Escapes', techniqueIds: [ownerGhost.id] })).body.focus.active[0].techniques).toEqual([]);
+    const escapes = (await api(sam, 'POST', '/api/v1/focus', { label: 'Escapes', techniqueIds: [ownerGhost.id], noteIds: [ownerNote.id] })).body
+      .focus.active[0];
+    expect(escapes).toMatchObject({ techniques: [], noteCount: 0 });
+    // Nor will the owner's note or card link to Sam's focus item, or Sam's note to the owner's.
+    const links = await api(sam, 'POST', `/api/v1/focus/${escapes.id}/links`, { add: { noteIds: [ownerNote.id], techniqueIds: [ownerGhost.id] } });
+    expect(links.body.message).toBe('Nothing changed on Escapes.');
+    expect(links.body.item).toMatchObject({ notes: [], techniques: [] });
+    expect((await api<NoteView>(sam, 'PATCH', `/api/v1/notes/${note.body.note.id}`, { focusItemIds: [1, escapes.id] })).body.focus.map(f => f.id)).toEqual([
+      escapes.id,
+    ]);
+    const frames = (await api<NoteCreateResult>(sam, 'POST', '/api/v1/notes', { text: 'Frames', focusItemIds: [1] })).body.note;
+    expect(frames.focus).toEqual([]);
+    await api(sam, 'DELETE', `/api/v1/notes/${frames.id}`);
     // Filing under it, or adding a position to it, does nothing either.
     const filed = await api<NoteView>(sam, 'POST', `/api/v1/notes/${note.body.note.id}/file`, { techniqueIds: [ownerGhost.id] });
     expect(filed.body.techniques).toEqual([]);
@@ -232,6 +246,9 @@ describe('separate notebooks over the JSON API', () => {
     ).rejects.toThrow(/foreign key/);
     await expect(
       s.db.query('insert into note_techniques (note_id, technique_id, user_id) values ($1, $2, $3)', [note.body.note.id, ownerGhost.id, 1]),
+    ).rejects.toThrow(/foreign key/);
+    await expect(
+      s.db.query('insert into focus_item_notes (focus_item_id, note_id, user_id) values ($1, $2, $3)', [escapes.id, ownerNote.id, samId]),
     ).rejects.toThrow(/foreign key/);
   });
 
@@ -362,7 +379,7 @@ describe('passwords and removing people', () => {
     expect(before).toBeGreaterThan(0);
 
     expect((await api(owner, 'DELETE', `/api/v1/people/${samId}`)).body.message).toBe('Removed Sam and their notebook.');
-    for (const table of ['techniques', 'notes', 'sessions', 'sources', 'focus_items', 'activity_log', 'web_sessions', 'oauth_tokens', 'api_tokens']) {
+    for (const table of ['techniques', 'notes', 'sessions', 'sources', 'focus_items', 'focus_item_notes', 'activity_log', 'web_sessions', 'oauth_tokens', 'api_tokens']) {
       const left = (await s.db.query<{ c: number }>(`select count(*)::int as c from ${table} where user_id = $1`, [samId])).rows[0]!.c;
       expect(left, table).toBe(0);
     }
