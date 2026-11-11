@@ -14,7 +14,8 @@ The database starts with ~30 positions (shared by everyone) and, for the owner, 
 
 ## Set it up from your phone
 
-Everything below works in a phone browser. Expect about 30 minutes the first time.
+Everything below works in a phone browser. Expect about 30 minutes the first time. Once it's running,
+[docs/operations.md](docs/operations.md) covers looking after it.
 
 ### 1. Database (Neon, free)
 
@@ -218,6 +219,7 @@ web/                 the web app (React, Vite); built into dist/public
 db/migrations/       schema, starter positions, your working list
 infra/               Google Cloud bootstrap (run once), deploy (run by CI), nightly backup and restore scripts
 test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture, JSON API) and the web app in Chromium
+docs/operations.md   running it: what's where, settings, what expires, rollbacks, restores, fixing the usual problems
 ```
 
 **Data model.** `users` (the owner and everyone invited, each with a belt) · `invites` (join and password-reset links) · `api_tokens` (Siri Shortcuts) · `positions` (with aliases like "100 kilos"; shared) · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, inbox flag) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `focus_items` + `focus_events` (every add, move, pause and completion, for focus over time) · `activity_log` (powers `undo_last`). Every notebook table has a `user_id`; each request reads and writes only its signed-in user's rows (the handle services get carries the user, and a query without one throws), and composite foreign keys mean a row can only ever point at the same person's notes, techniques, sessions and sources.
@@ -286,6 +288,6 @@ and offline capture. It's built and sent to TestFlight by GitHub Actions; see [i
 ## Next
 
 1. iPhone app, continued: techniques and notes Siri can search and answer from, starring by voice,
-   a share-sheet extension in place of the reel Shortcut, a Lock Screen focus widget.
+   a Lock Screen focus widget.
 2. Position graph view and focus timeline.
 3. Training sessions and a weekly review screen.
