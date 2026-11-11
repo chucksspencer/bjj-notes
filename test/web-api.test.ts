@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type {
+  FocusItemDetail,
   FocusView,
   LabView,
   NoteCreateResult,
@@ -265,8 +266,9 @@ describe('JSON API', () => {
     const added = await api('POST', '/api/v1/focus', { label: 'Kimura from guard', techniqueIds: [], position: 2 });
     expect(added.body.message).toBe('Added to focus at #2: Kimura from guard (linked to Kimura lock).');
     const item = added.body.focus.active[1];
-    const renamed = await api('PATCH', `/api/v1/focus/${item.id}`, { label: 'Kimura from closed guard', goal: 'Hit it live' });
-    expect(renamed.body.focus.active[1]).toMatchObject({ label: 'Kimura from closed guard', goal: 'Hit it live' });
+    const renamed = await api('PATCH', `/api/v1/focus/${item.id}`, { label: 'Kimura from closed guard', description: 'Hit it live' });
+    expect(renamed.body.focus.active[1]).toMatchObject({ label: 'Kimura from closed guard', description: 'Hit it live' });
+    expect(renamed.body.focus.active[1]).not.toHaveProperty('goal');
     expect((await api('POST', '/api/v1/undo')).body.message).toBe('Undid: edit to "Kimura from guard"');
     expect((await api('POST', `/api/v1/focus/99999/actions`, { action: 'pause' })).body.message).toBe('No focus item #99999.');
   });
@@ -488,6 +490,109 @@ describe('JSON API', () => {
     expect((await api('POST', '/api/v1/techniques/delete', { ids: [999_999] })).body.message).toBe('Nothing to delete.');
     await api('POST', '/api/v1/techniques/delete', { ids: [a.id, b.id, c.id] }); // tidy up for later tests
     await api('POST', '/api/v1/notes/delete', { ids: [n1.id, n2.id, both.id, ac.id] });
+  });
+
+  it('gives each focus item its own page, with a description and linked notes', async () => {
+    const item = async (id: number) => (await api<FocusItemDetail>('GET', `/api/v1/focus/${id}`)).body;
+    const undo = async () => (await api('POST', '/api/v1/undo')).body.message as string;
+
+    // A note with no technique, linked to a new item from the start (an id that isn't a note is skipped).
+    const calm = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Long exhale when pinned.', date: '2026-10-20' })).body.note;
+    const created = await api('POST', '/api/v1/focus', {
+      label: 'Breathe and stay calm',
+      description: 'Slow down under pressure.\nGoal: no panic taps.',
+      noteIds: [calm.id, 999_999],
+      position: 1,
+    });
+    expect(created.body.message).toBe('Added to focus at #1: Breathe and stay calm (not linked to a technique card yet; 1 note linked).');
+    const listed = created.body.focus.active[0] as FocusView['active'][number];
+    expect(listed).toMatchObject({
+      label: 'Breathe and stay calm',
+      description: 'Slow down under pressure.\nGoal: no panic taps.',
+      techniques: [],
+      noteCount: 1,
+      lastNoteOn: '2026-10-20', // a linked note counts, with no technique in common
+    });
+    const id = listed.id;
+
+    let page = await item(id);
+    expect(page).toMatchObject({ rank: 1, status: 'active', relatedNotes: [], relatedCount: 0 });
+    expect(page.notes.map(n => n.id)).toEqual([calm.id]);
+    expect(page.notes[0]!.focus).toEqual([{ id, label: 'Breathe and stay calm', status: 'active' }]);
+    expect(page.history.map(h => [h.event, h.toRank])).toEqual([['added', 1]]);
+    expect(Date.parse(page.createdAt)).not.toBeNaN();
+    expect((await api('GET', '/api/v1/focus/999999')).status).toBe(404);
+    // Linking a note doesn't file it: it's still in the inbox.
+    expect((await api<NoteView[]>('GET', '/api/v1/notes?inbox=1&limit=200')).body.map(n => n.id)).toContain(calm.id);
+
+    // Link a technique: its notes show as related until they're linked too.
+    const ghostNotes = (await api<TechniqueView>('GET', `/api/v1/techniques/${ghost.id}`)).body.noteCount;
+    let linked = await api('POST', `/api/v1/focus/${id}/links`, { add: { techniqueIds: [ghost.id] } });
+    expect(linked.body.message).toBe('Linked Ghost escape on Breathe and stay calm.');
+    page = linked.body.item;
+    expect(page.techniques.map(t => t.name)).toEqual(['Ghost escape']);
+    expect(page.relatedCount).toBe(ghostNotes);
+    const pin = page.relatedNotes[0]!;
+    linked = await api('POST', `/api/v1/focus/${id}/links`, { add: { noteIds: [pin.id] } });
+    expect(linked.body.message).toBe('Linked 1 note on Breathe and stay calm.');
+    expect(linked.body.item.notes.map((n: NoteView) => n.id).sort()).toEqual([calm.id, pin.id].sort());
+    expect(linked.body.item.relatedCount).toBe(ghostNotes - 1);
+    expect(linked.body.focus.active[0].noteCount).toBe(2);
+    expect((await api('POST', `/api/v1/focus/${id}/links`, { add: { noteIds: [pin.id] } })).body.message).toBe('Nothing changed on Breathe and stay calm.');
+
+    // Unlinking, and undoing each step.
+    linked = await api('POST', `/api/v1/focus/${id}/links`, { remove: { noteIds: [pin.id], techniqueIds: [ghost.id] } });
+    expect(linked.body.message).toBe('Unlinked Ghost escape, 1 note on Breathe and stay calm.');
+    expect(await undo()).toBe('Undid: links on "Breathe and stay calm"');
+    expect((await item(id)).notes).toHaveLength(2);
+    expect(await undo()).toBe('Undid: links on "Breathe and stay calm"'); // the note link
+    expect(await undo()).toBe('Undid: links on "Breathe and stay calm"'); // the technique link
+    page = await item(id);
+    expect([page.techniques, page.notes.map(n => n.id)]).toEqual([[], [calm.id]]);
+
+    // The title and description, undoably; an empty description clears it.
+    let edited = await api('PATCH', `/api/v1/focus/${id}`, { description: 'Exhale.' });
+    expect(edited.body.focus.active[0].description).toBe('Exhale.');
+    expect(await undo()).toBe('Undid: edit to "Breathe and stay calm"');
+    expect((await item(id)).description).toBe('Slow down under pressure.\nGoal: no panic taps.');
+    edited = await api('PATCH', `/api/v1/focus/${id}`, { label: 'Stay calm', description: '' });
+    expect(edited.body.focus.active[0]).toMatchObject({ label: 'Stay calm', description: null });
+    await undo();
+
+    // From the note's side: its focus items are replaced, undoably.
+    let note = (await api<NoteView>('PATCH', `/api/v1/notes/${calm.id}`, { focusItemIds: [] })).body;
+    expect(note.focus).toEqual([]);
+    expect((await item(id)).noteCount).toBe(0);
+    await undo();
+    expect((await item(id)).notes.map(n => n.id)).toEqual([calm.id]);
+    note = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Breathe through the nose.', techniqueIds: [ghost.id], focusItemIds: [id, 999_999] }))
+      .body.note;
+    expect(note.focus.map(f => f.id)).toEqual([id]);
+
+    // Deleting a note takes its link with it; undoing the delete brings both back.
+    await api('DELETE', `/api/v1/notes/${calm.id}`);
+    expect((await item(id)).notes.map(n => n.id)).toEqual([note.id]);
+    expect(await undo()).toBe(`Undid: deleting note #${calm.id}`);
+    expect((await item(id)).notes.map(n => n.id).sort()).toEqual([calm.id, note.id].sort());
+
+    // Undo entries written before goals were folded into descriptions still work.
+    const undoOld = async (op: object) => {
+      await s.db.query("insert into activity_log (action, summary, undo, user_id) values ('edit_focus', 'old entry', $1, 1)", [JSON.stringify(op)]);
+      return undo();
+    };
+    expect(await undoOld({ kind: 'restore_focus_label', itemId: id, label: 'Old title', goal: 'Old goal' })).toBe('Undid: old entry');
+    let row = (await s.db.query<{ label: string; goal: string | null; description: string | null }>('select label, goal, description from focus_items where id = $1', [id]))
+      .rows[0]!;
+    expect(row).toEqual({ label: 'Old title', goal: 'Old goal', description: 'Slow down under pressure.\nGoal: no panic taps.' });
+    expect(await undoOld({ kind: 'restore_focus', items: [{ id, status: 'paused', rank: null, goal: null }], deleteItemId: null, eventIds: [], addedLinks: [] })).toBe(
+      'Undid: old entry',
+    );
+    row = (await s.db.query<{ label: string; goal: string | null; description: string | null }>('select label, goal, description from focus_items where id = $1', [id])).rows[0]!;
+    expect(row.goal).toBeNull();
+
+    // Tidy up for later tests.
+    await api('POST', `/api/v1/focus/${id}/actions`, { action: 'drop' });
+    await api('POST', '/api/v1/notes/delete', { ids: [calm.id, note.id] });
   });
 
   it('explores positions', async () => {

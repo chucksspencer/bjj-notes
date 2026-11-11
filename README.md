@@ -61,13 +61,13 @@ From then on, every push to `main` tests, builds and deploys. The deploy copies 
 
 On claude.ai in a browser, add a **custom connector** in settings with the connector URL. Claude opens a sign-in page from this server; enter your email and `OWNER_PASSWORD`. (The first email you sign in with becomes yours; you can change it on the Account page.) Connectors added on the web also show up in the iOS app. Try it in voice mode first: that's the main thing this first version needs to prove.
 
-Try: *"What's on my BJJ focus list?"*, *"Add a note to ghost escape: turn to the knees before the hips"*, *"Move body lock passing to the top of my focus"*, *"What do I have from deep half bottom?"*, *"Undo that."*
+Try: *"What's on my BJJ focus list?"*, *"Add a note to ghost escape: turn to the knees before the hips"*, *"Move body lock passing to the top of my focus"*, *"Add a note to my half guard focus: frame on the hip before the underhook"*, *"What do I have from deep half bottom?"*, *"Undo that."*
 
 ### 7. The web app on your phone
 
 Open the server's address in Safari and sign in with your email and `OWNER_PASSWORD`. Then **Share → Add to Home Screen** for an app icon that opens full screen.
 
-- **Focus**: your ranked list. Tap an item to open its technique card; the ••• button moves, pauses, completes, renames or removes it.
+- **Focus**: your ranked list of broad things to work on. Each item has a title, a description (the strategy, the cues, what success looks like; its first line shows on the list), technique cards, and notes pinned to it. Tap an item for its page: the description, its techniques, its pinned notes, recent notes on its techniques (one tap pins one), and its history. The ••• button (and the item's page) moves, pauses, completes, edits or removes it. A note's edit sheet can put it on focus items too.
 - **Library**: every technique, searchable by name, alias or detail (typos are fine), filterable by type and top/bottom. The search finds notes too, and, with search by meaning on, a phrase like *how do I stop the knee cut* finds notes and cards about it even when they use other words. The black bar on each row is its rank bar: one stripe for learning, two for drilling, three for hitting it live, four for reliable.
 - **Technique card**: tap the belt's stripes to change status; positions, key details, common mistakes, related techniques and notes, with YouTube videos that play from the saved timestamp.
 - **+**: a new note from anywhere. Notes without a technique land in the **Inbox** to file later.
@@ -222,7 +222,7 @@ test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture,
 docs/operations.md   running it: what's where, settings, what expires, rollbacks, restores, fixing the usual problems
 ```
 
-**Data model.** `users` (the owner and everyone invited, each with a belt) · `invites` (join and password-reset links) · `api_tokens` (Siri Shortcuts) · `positions` (with aliases like "100 kilos"; shared) · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, inbox flag) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `focus_items` + `focus_events` (every add, move, pause and completion, for focus over time) · `activity_log` (powers `undo_last`). Every notebook table has a `user_id`; each request reads and writes only its signed-in user's rows (the handle services get carries the user, and a query without one throws), and composite foreign keys mean a row can only ever point at the same person's notes, techniques, sessions and sources.
+**Data model.** `users` (the owner and everyone invited, each with a belt) · `invites` (join and password-reset links) · `api_tokens` (Siri Shortcuts) · `positions` (with aliases like "100 kilos"; shared) · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, inbox flag) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `focus_items` (a title and description) + `focus_item_techniques` + `focus_item_notes` (notes pinned to an item) + `focus_events` (every add, move, pause and completion, for focus over time) · `activity_log` (powers `undo_last`). Every notebook table has a `user_id`; each request reads and writes only its signed-in user's rows (the handle services get carries the user, and a query without one throws), and composite foreign keys mean a row can only ever point at the same person's notes, techniques, sessions and sources.
 
 **Name matching.** Voice transcription mangles names, so lookups combine trigram similarity, edit distance and word matching: "barra toe plata" finds Baratoplata, "ghost" finds Ghost escape, but "omoplata" is not mistaken for Baratoplata. Exact names and aliases always win; uncertain matches are reported back rather than guessed.
 
@@ -233,14 +233,15 @@ docs/operations.md   running it: what's where, settings, what expires, rollbacks
 | `search` | Techniques by fuzzy name / type / role / position / status; notes by full text or where they came from; with search by meaning on, both also by what they're about |
 | `get_technique` | A card: positions, details, mistakes, related techniques, focus status, recent notes |
 | `save_technique` | Create or update a card; add positions, aliases, details, links; star or unstar it |
-| `add_note` | Save a dated note linked to techniques and where it came from ("Zen camp seminar by Josh Jones"); unknown techniques go to the inbox |
+| `add_note` | Save a dated note linked to techniques and where it came from ("Zen camp seminar by Josh Jones"), optionally pinned to a focus item; unknown techniques go to the inbox |
 | `update_note` | Change a note's text, kind, date or where it came from; star or unstar it; mark a question answered |
 | `get_inbox`, `file_note` | Triage notes that couldn't be placed; with `to_try`, the To try list ("silly Instagram bullshit") of videos to try before keeping |
 | `log_session` | Record a class/seminar/open mat/private; attaches that day's notes; saying the same session twice updates it |
 | `get_lab` | The Lab, the short-term working set: starred techniques and notes (stars over 4 weeks old fold away), the To try list, techniques new in the last N days, open questions for coach |
 | `clear_stars` | Unstar everything, or only stars older than N days, in one undoable step |
-| `get_focus` | Ranked focus list with time since each item's last note, or its history |
-| `update_focus` | add / move / resume / pause / backlog / complete / drop |
+| `get_focus` | Ranked focus list with time since each item's last note; one item's description, techniques and pinned notes; or the history |
+| `update_focus` | add (with a description) / move / resume / pause / backlog / complete / drop |
+| `edit_focus` | Change a focus item's title or description, link or unlink techniques and notes; one undo takes it all back |
 | `get_position` | What you have from a position, what leads into it, and the gaps |
 | `review` | Last N days: sessions, notes, most-noted techniques, quiet focus items |
 | `undo_last` | Reverse the most recent change |

@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
-import type { FocusAction, FocusItemView, TechniqueRef } from '../../../src/shared/api';
-import { useAddFocus, useEditFocus, useFocus, useFocusAction } from '../api';
+import type { FocusItemView, TechniqueRef } from '../../../src/shared/api';
+import { useAddFocus, useFocus, useFocusAction } from '../api';
+import { DescriptionField, FocusActions, FocusEditSheet } from '../components/FocusControls';
 import { Icon } from '../components/Icon';
 import { Sheet } from '../components/Sheet';
 import { TechniquePicker } from '../components/TechniquePicker';
 import { useToast } from '../components/Toast';
-import { isQuiet, lastNoteText } from '../lib/format';
+import { firstLine, isQuiet, lastNoteText } from '../lib/format';
 import { FocusHeader } from './Lab';
 
 export function Focus() {
@@ -56,7 +57,7 @@ export function Focus() {
       )}
 
       {adding && <AddFocus onClose={() => setAdding(false)} />}
-      {editing && <EditFocus item={editing} onClose={() => setEditing(null)} />}
+      {editing && <FocusEditSheet item={editing} onClose={() => setEditing(null)} />}
     </div>
   );
 }
@@ -78,15 +79,8 @@ function FocusRow({
   onToggle: () => void;
   onEdit: () => void;
 }) {
-  const act = useFocusAction();
-  const toast = useToast();
-  const run = (action: FocusAction, position?: number, done?: string) =>
-    act.mutate(
-      { id: item.id, action, position },
-      { onSuccess: r => toast.show(done ?? r.message.replace(/\.$/, ''), { undoable: true }), onError: toast.error },
-    );
   const quiet = isQuiet(item.lastNoteOn, today);
-  const [primary, ...more] = item.techniques;
+  const gist = firstLine(item.description);
 
   return (
     <div className={`row focus-row${quiet ? ' quiet' : ''}`}>
@@ -94,20 +88,14 @@ function FocusRow({
         {item.rank}
       </span>
       <div>
-        {primary ? (
-          <Link className="row-title" to={`/t/${primary.id}`}>
-            {item.label}
-          </Link>
-        ) : (
-          <span className="row-title">{item.label}</span>
-        )}
-        <span className="row-meta">
-          {lastNoteText(item.lastNoteOn, today)}
-          {item.goal ? `. Goal: ${item.goal}` : ''}
-        </span>
-        {more.length > 0 && (
+        <Link className="row-title" to={`/focus/${item.id}`}>
+          {item.label}
+        </Link>
+        <span className="row-meta">{lastNoteText(item.lastNoteOn, today)}</span>
+        {gist && <span className="focus-gist">{gist}</span>}
+        {item.techniques.length > 0 && (
           <div className="chips">
-            {more.map(t => (
+            {item.techniques.map(t => (
               <Link key={t.id} className="chip" to={`/t/${t.id}`}>
                 {t.name}
               </Link>
@@ -118,40 +106,7 @@ function FocusRow({
       <button type="button" className="btn ghost focus-more" aria-expanded={expanded} aria-label={`Change ${item.label}`} onClick={onToggle}>
         <Icon name="more" />
       </button>
-      {expanded && (
-        <div className="focus-actions">
-          {!first && (
-            <button type="button" className="btn quiet small" disabled={act.isPending} onClick={() => run('move', (item.rank ?? 2) - 1)}>
-              <Icon name="up" size={18} />
-              Up
-            </button>
-          )}
-          {!last && (
-            <button type="button" className="btn quiet small" disabled={act.isPending} onClick={() => run('move', (item.rank ?? 0) + 1)}>
-              <Icon name="down" size={18} />
-              Down
-            </button>
-          )}
-          {!first && (
-            <button type="button" className="btn quiet small" disabled={act.isPending} onClick={() => run('move', 1)}>
-              Top
-            </button>
-          )}
-          <button type="button" className="btn quiet small" disabled={act.isPending} onClick={() => run('complete', undefined, `Done: ${item.label}`)}>
-            <Icon name="check" size={18} />
-            Done
-          </button>
-          <button type="button" className="btn quiet small" disabled={act.isPending} onClick={() => run('pause', undefined, `Paused ${item.label}`)}>
-            Pause
-          </button>
-          <button type="button" className="btn quiet small" onClick={onEdit}>
-            Rename
-          </button>
-          <button type="button" className="btn danger small" disabled={act.isPending} onClick={() => run('drop', undefined, `Removed ${item.label}`)}>
-            Remove
-          </button>
-        </div>
-      )}
+      {expanded && <FocusActions item={item} first={first} last={last} onEdit={onEdit} />}
     </div>
   );
 }
@@ -166,7 +121,9 @@ function OffList({ title, items }: { title: string; items: FocusItemView[] }) {
         {items.map(item => (
           <div key={item.id} className="row row-split">
             <span className="grow">
-              <span className="row-title">{item.label}</span>
+              <Link className="row-title" to={`/focus/${item.id}`}>
+                {item.label}
+              </Link>
             </span>
             <button
               type="button"
@@ -190,6 +147,7 @@ function OffList({ title, items }: { title: string; items: FocusItemView[] }) {
 
 function AddFocus({ onClose }: { onClose: () => void }) {
   const [label, setLabel] = useState('');
+  const [description, setDescription] = useState('');
   const [techniques, setTechniques] = useState<TechniqueRef[]>([]);
   const [top, setTop] = useState(true);
   const add = useAddFocus();
@@ -202,7 +160,7 @@ function AddFocus({ onClose }: { onClose: () => void }) {
           const name = label.trim() || techniques[0]?.name;
           if (!name) return;
           add.mutate(
-            { label: name, techniqueIds: techniques.map(t => t.id), position: top ? 1 : 999 },
+            { label: name, description: description.trim() || undefined, techniqueIds: techniques.map(t => t.id), position: top ? 1 : 999 },
             {
               onSuccess: () => {
                 toast.show(`Added ${name}`, { undoable: true });
@@ -218,11 +176,12 @@ function AddFocus({ onClose }: { onClose: () => void }) {
           <input
             className="input"
             autoFocus
-            placeholder="Kimura from closed guard"
+            placeholder="Stop getting flattened in half guard"
             value={label}
             onChange={e => setLabel(e.target.value)}
           />
         </label>
+        <DescriptionField value={description} onChange={setDescription} />
         <TechniquePicker label="Technique cards (optional)" selected={techniques} onChange={setTechniques} />
         <div className="field">
           <span className="label">Where on the list</span>
@@ -237,44 +196,6 @@ function AddFocus({ onClose }: { onClose: () => void }) {
         </div>
         <button className="btn block" type="submit" disabled={add.isPending || !(label.trim() || techniques.length)}>
           Add to focus
-        </button>
-      </form>
-    </Sheet>
-  );
-}
-
-function EditFocus({ item, onClose }: { item: FocusItemView; onClose: () => void }) {
-  const [label, setLabel] = useState(item.label);
-  const [goal, setGoal] = useState(item.goal ?? '');
-  const edit = useEditFocus();
-  const toast = useToast();
-  return (
-    <Sheet title="Rename" onClose={onClose}>
-      <form
-        onSubmit={e => {
-          e.preventDefault();
-          edit.mutate(
-            { id: item.id, label: label.trim(), goal: goal.trim() || null },
-            {
-              onSuccess: () => {
-                toast.show('Saved', { undoable: true });
-                onClose();
-              },
-              onError: toast.error,
-            },
-          );
-        }}
-      >
-        <label className="field">
-          <span className="label">Name</span>
-          <input className="input" autoFocus value={label} onChange={e => setLabel(e.target.value)} />
-        </label>
-        <label className="field">
-          <span className="label">Goal (optional)</span>
-          <input className="input" placeholder="Hit it twice in live rounds" value={goal} onChange={e => setGoal(e.target.value)} />
-        </label>
-        <button className="btn block" type="submit" disabled={edit.isPending || !label.trim()}>
-          Save
         </button>
       </form>
     </Sheet>

@@ -57,7 +57,8 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('button', { name: 'Save note' }).click();
     await page.getByText('Saved to Ghost escape').waitFor();
 
-    await page.getByRole('link', { name: 'Ghost escape', exact: true }).click();
+    // On the Focus list, an item's title opens its page and its chips open the technique cards.
+    await page.locator('.focus-row .chip', { hasText: 'Ghost escape' }).click();
     await page.getByRole('heading', { name: 'Ghost escape' }).waitFor();
     await page.getByText('Turn to the knees before the hips.').waitFor();
     expect(await page.getByText('Today, rolling').count()).toBe(1);
@@ -81,6 +82,37 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('button', { name: 'Undo' }).click();
     await page.getByText(/^Undid: move/).waitFor();
     expect(await page.locator('.focus-row .row-title').first().textContent()).toBe('Baratoplata');
+  });
+
+  it('opens a focus item, writes its description and pins a note to it', async () => {
+    await page.locator('.focus-row .row-title', { hasText: 'Ghost escape' }).click();
+    await page.getByRole('heading', { name: 'Ghost escape', level: 1 }).waitFor();
+    await page.getByText(/^Number 5 on your focus list\./).waitFor();
+
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await page.getByRole('dialog').getByPlaceholder(/The strategy/).fill('Get to the knees before the pin settles.\nGoal: out in ten seconds.');
+    await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
+    await page.getByText('Get to the knees before the pin settles.').waitFor();
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.getByText(/^Undid: edit to/).waitFor();
+    await page.getByText("The strategy, the cues, and what it looks like when it's working.").waitFor();
+
+    // The note from earlier is on its technique; pin it to the item.
+    const related = page.getByRole('region', { name: 'From its techniques' });
+    await related.getByText('Turn to the knees before the hips.').waitFor();
+    await related.getByRole('button', { name: 'Link' }).first().click();
+    await page.getByText('Linked', { exact: true }).waitFor();
+    await page.getByRole('region', { name: 'Linked notes' }).getByText('Turn to the knees before the hips.').waitFor();
+    expect(await page.getByRole('region', { name: 'From its techniques' }).count()).toBe(0);
+
+    // The card points at the item's page, and the note shows the item it's pinned to.
+    await page.getByRole('link', { name: 'Ghost escape', exact: true }).first().click();
+    await page.getByRole('link', { name: 'Focus: Ghost escape' }).waitFor();
+    await page.getByRole('link', { name: 'Number 5 on your focus list' }).click();
+    await page.getByRole('heading', { name: 'Ghost escape', level: 1 }).waitFor();
+    await page.getByRole('region', { name: 'Linked notes' }).getByRole('button', { name: 'Unlink' }).click();
+    await page.getByText('Unlinked').waitFor();
+    await page.getByRole('region', { name: 'From its techniques' }).getByText('Turn to the knees before the hips.').waitFor();
   });
 
   it('files an inbox note under a new technique', async () => {

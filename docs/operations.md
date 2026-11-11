@@ -144,6 +144,10 @@ $10 a month; the next deploy puts it back to 0 unless `infra/gcp-deploy.sh` is c
   faster: Google's Gemini embedding model through Vertex AI in the same Google Cloud project (no new sign-up,
   pennies) with pgvector in Neon. A Voyage AI version with pgvector is commit `54a76b3` for reference. Avoid
   anything billed by the hour while idle (a Vertex AI endpoint, a GPU).
+- **Focus items.** A title, a description, and links to technique cards and to notes. The old one-line goal was
+  folded into the description (migration 015); the `goal` column stays, unused, only so undo entries from before
+  can still put goals back. A later migration can drop it. Pinning a note to a focus item doesn't file it: a note
+  with no technique still waits in the inbox.
 - **Supply chain.** Lockfile, no npm install scripts, signature checks, third-party Actions pinned to commits,
   Dependabot's one-week wait, keyless deploys from `main` only.
 

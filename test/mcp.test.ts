@@ -35,6 +35,7 @@ describe('MCP tools over HTTP', () => {
       [
         'add_note',
         'clear_stars',
+        'edit_focus',
         'file_note',
         'get_focus',
         'get_inbox',
@@ -305,6 +306,49 @@ describe('MCP tools over HTTP', () => {
     expect(await call('update_note', { note_id: qid, answered: true, text: 'Do I hide the arm first?\n\nAnswer: yes.' })).toBe(
       `Updated note #${qid}, marked answered.`,
     );
+  });
+
+  it('keeps a description and linked notes on a focus item', async () => {
+    const edited = await call('edit_focus', {
+      item: 'ghost',
+      description: 'Escape before the pin settles.\nGoal: out in under ten seconds.',
+      link_techniques: ['leg elevation', 'qwxz zzyq'],
+    });
+    expect(edited).toMatch(/^Ghost escape: description updated; linked Leg elevation \(No .*technique.*"qwxz zzyq".*\)\.$/);
+    let item = await call('get_focus', { item: 'ghost' });
+    expect(item).toContain('Ghost escape (#1 on the active focus list; last note today).\nEscape before the pin settles.\nGoal: out in under ten seconds.');
+    expect(item).toContain('Techniques: Ghost escape, Leg elevation.');
+    expect(item).toContain('No notes linked.');
+    expect(item).toMatch(/\d+ other notes? on its techniques\./);
+    // The list stays short for reading aloud.
+    expect(await call('get_focus')).not.toContain('Escape before');
+
+    const saved = await call('add_note', { text: 'Shrimp early, before the crossface.', techniques: ['ghost escape'], focus: 'ghost' });
+    expect(saved).toMatch(/^Saved note #\d+ to Ghost escape, on your focus: Ghost escape\.$/);
+    const id = Number(saved.match(/#(\d+)/)![1]);
+    item = await call('get_focus', { item: 'ghost escape' });
+    expect(item).toMatch(new RegExp(`Linked notes \\(1\\):\\n- #${id} \\d{4}-\\d{2}-\\d{2}: Shrimp early, before the crossface\\.`));
+
+    expect(await call('edit_focus', { item: 'ghost', title: 'Ghost escape from side control', unlink_notes: [id] })).toBe(
+      'Ghost escape from side control: renamed to Ghost escape from side control; unlinked 1 note.',
+    );
+    expect(await call('get_focus', { item: 'Ghost escape from side control' })).toContain('No notes linked.');
+    // One undo takes back the whole edit.
+    expect(await call('undo_last')).toBe('Undid: edit to "Ghost escape"');
+    item = await call('get_focus', { item: 'ghost' });
+    expect(item).toMatch(/^Ghost escape \(/);
+    expect(item).toContain(`- #${id} `);
+
+    expect(await call('undo_last')).toMatch(new RegExp(`^Undid: note #${id}`));
+    expect(await call('undo_last')).toBe('Undid: edit to "Ghost escape"');
+    item = await call('get_focus', { item: 'ghost' });
+    expect(item).not.toContain('Escape before');
+    expect(item).toContain('Techniques: Ghost escape.');
+
+    const missed = await call('add_note', { text: 'Breathe.', techniques: ['ghost escape'], focus: 'qwxz zzyq' });
+    expect(missed).toMatch(/^Saved note #\d+ to Ghost escape; No .*focus item.*"qwxz zzyq"/);
+    await call('undo_last');
+    expect(await call('edit_focus', { item: 'ghost' })).toBe('Nothing changed on Ghost escape.');
   });
 
   it('undoes a technique edit', async () => {

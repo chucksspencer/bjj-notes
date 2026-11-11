@@ -231,3 +231,6 @@ export function hostLabel(url: string): string {
     return url;
   }
 }
+
+/** The first line of some text with something on it (a focus item's description, on the list). */
+export const firstLine = (text: string | null) => text?.split('\n').find(l => l.trim())?.trim() ?? '';

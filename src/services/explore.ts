@@ -5,7 +5,7 @@ import { mediaTag } from './attachments.js';
 import { today, type Ctx } from './context.js';
 import type { NoteView, Status, TechniqueListItem, TechniqueType } from '../shared/api.js';
 import { searchNotes, searchTechniques } from './semantic.js';
-import { LAB_DAYS, labView, positionView, techniqueList } from './views.js';
+import { FOCUS_LAST_NOTE_SQL, LAB_DAYS, labView, positionView, techniqueList } from './views.js';
 import { daysAgo, isoDate, type Role } from './vocab.js';
 
 /** What you can do from a position (optionally as top or bottom), what leads into it, and the gaps. */
@@ -105,11 +105,7 @@ export async function review(ctx: Ctx, days = 7): Promise<string> {
   ).rows;
   const quiet = (
     await q.query<{ label: string; rank: number; last_note: string | null }>(
-      `select f.label, f.rank,
-              (select max(n.observed_on)::text from notes n
-                 join note_techniques nt on nt.note_id = n.id
-                 join focus_item_techniques ft on ft.technique_id = nt.technique_id
-                where ft.focus_item_id = f.id) as last_note
+      `select f.label, f.rank, ${FOCUS_LAST_NOTE_SQL} as last_note
        from focus_items f where f.user_id = $1 and f.status = 'active' order by f.rank`,
       [me],
     )

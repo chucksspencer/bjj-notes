@@ -109,7 +109,7 @@ function TechniqueBody({ v, today, onEdit }: { v: TechniqueView; today: string; 
 
       {activeFocus && (
         <p className="small" style={{ marginTop: 14 }}>
-          <Link to="/focus">Number {activeFocus.rank} on your focus list</Link>
+          <Link to={`/focus/${activeFocus.id}`}>Number {activeFocus.rank} on your focus list</Link>
         </p>
       )}
 

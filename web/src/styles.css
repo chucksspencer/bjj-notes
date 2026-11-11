@@ -715,6 +715,53 @@ button.row {
   margin-top: 8px;
 }
 
+/* The first line of an item's description, under its title on the list. */
+.focus-gist {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  font-size: 15px;
+}
+
+.focus-history li {
+  font-size: 15px;
+}
+
+/* A focus item a note is on, among its technique chips. */
+.chip-focus {
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--rule);
+  color: var(--ink);
+}
+
+/* Focus items to put a note on: tap to toggle. */
+.chip-toggle {
+  cursor: pointer;
+  text-align: left;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--rule);
+  color: var(--ink);
+}
+
+.chip-toggle[aria-pressed='true'] {
+  background: var(--belt-wash);
+  box-shadow: none;
+  color: var(--belt);
+}
+
+/* A note to link to a focus item, in the picker. */
+.note-pick-body {
+  display: -webkit-box;
+  margin-top: 2px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
 /* ---------- technique page ---------- */
 
 .tech-name {

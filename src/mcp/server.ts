@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { undoLast } from '../services/activity.js';
 import type { Ctx } from '../services/context.js';
 import { getLab, getPosition, review, search } from '../services/explore.js';
-import { focusHistory, getFocus, updateFocus } from '../services/focus.js';
+import { editFocus, focusHistory, getFocus, getFocusItem, updateFocus } from '../services/focus.js';
 import { clearStars } from '../services/marks.js';
 import { addNote, fileNote, getInbox, updateNote } from '../services/notes.js';
 import { logSession } from '../services/sessions.js';
@@ -36,6 +36,7 @@ How to use it well:
 - Videos and ideas not tried yet go on the To try list (add_note with to_try: true), not on a technique. It's also called "silly Instagram bullshit"; "add this to my SIB" or "something to try" means the same. Reels shared from Instagram land there automatically. Once one has been tried and is worth keeping, file_note keeps it under the technique; get_inbox with to_try: true lists what's waiting.
 - Lab is the short-term working set (get_lab): starred techniques and notes, videos to try, techniques new in the notes, questions for the coach. "Star that" or "flag that" stars whatever "that" is: a note (update_note with starred: true, or add_note with starred: true for a new one) or a technique (save_technique with starred: true). Stars are for what's pertinent now: after 4 weeks they fold away as older stars, and clear_stars unstars old ones (or all). When the coach answers a question, update_note with answered: true and add the answer to the text. The focus list is the long-term guide: broad areas, strategies and positions over weeks or months.
 - The focus list is ordered; #1 is what ${who} is working on most. "Add X to my focus" puts it at the top unless told otherwise.
+- Each focus item has a title, a description (the strategy, cues, what success looks like) and linked techniques and notes. get_focus with item shows one; edit_focus changes it. "Add a note to my X focus" is add_note with focus: X (and the techniques it's about, so it's filed).
 - Replies are often read aloud, so keep confirmations short. "Undo that" means undo_last.`;
 }
 
@@ -176,6 +177,7 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
           .optional()
           .describe('Not tried yet ("silly Instagram bullshit"): goes on the To try list instead of being filed'),
         starred: flag.optional().describe('Star it: a recent, pertinent note to keep in front of him (shows in Lab)'),
+        focus: z.string().optional().describe('A focus item to link the note to, by its title or a linked technique'),
         source: z
           .object({
             kind: z.enum(SOURCE_KINDS).optional(),
@@ -302,11 +304,11 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
     {
       title: 'Get the focus list',
       description:
-        'The ranked active focus list with how recently each item got a note, plus paused and backlog items. With history=true, returns the change log instead (optionally for one item).',
+        'The ranked active focus list with how recently each item got a note, plus paused and backlog items. With item, that one item: its description, techniques and linked notes. With history=true, the change log instead (optionally for one item).',
       inputSchema: { history: flag.optional(), item: z.string().optional() },
       annotations: readOnly,
     },
-    args => run(() => (args.history ? focusHistory(ctx, args.item) : getFocus(ctx))),
+    args => run(() => (args.history ? focusHistory(ctx, args.item) : args.item ? getFocusItem(ctx, args.item) : getFocus(ctx))),
   );
 
   server.registerTool(
@@ -320,11 +322,32 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
         item: z.string(),
         position: z.number().int().min(1).optional(),
         techniques: z.array(z.string()).optional(),
-        goal: z.string().optional(),
+        description: z.string().optional().describe('On add: what the item is about'),
+        notes: z.array(z.number().int()).optional().describe('On add: note ids to link'),
       },
       annotations: write,
     },
-    args => run(() => updateFocus(ctx, args)),
+    args => run(() => updateFocus(ctx, { ...args, note_ids: args.notes })),
+  );
+
+  server.registerTool(
+    'edit_focus',
+    {
+      title: 'Edit a focus item',
+      description:
+        "Changes a focus item's title or description, or links and unlinks techniques (by name) and notes (by id). item is the title or a linked technique name. Leave out what shouldn't change.",
+      inputSchema: {
+        item: z.string(),
+        title: z.string().optional(),
+        description: z.string().optional().describe('Replaces the description; an empty string clears it'),
+        link_techniques: z.array(z.string()).optional(),
+        unlink_techniques: z.array(z.string()).optional(),
+        link_notes: z.array(z.number().int()).optional(),
+        unlink_notes: z.array(z.number().int()).optional(),
+      },
+      annotations: write,
+    },
+    args => run(() => editFocus(ctx, args)),
   );
 
   server.registerTool(

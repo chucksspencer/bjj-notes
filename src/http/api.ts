@@ -2,6 +2,7 @@ import express, { type NextFunction, type Request, type RequestHandler, type Res
 import { z } from 'zod';
 import type {
   AttachmentView,
+  FocusItemDetail,
   FocusView,
   LabView,
   MessageResult,
@@ -18,7 +19,7 @@ import { ForbiddenError as Forbidden, NotFoundError as NotFound, UserError } fro
 import { userCtx, type Ctx } from '../services/context.js';
 import { uid } from '../db.js';
 import { userIdOf } from './auth.js';
-import { editFocusItem, updateFocus } from '../services/focus.js';
+import { editFocusItem, linkFocus, updateFocus } from '../services/focus.js';
 import { attachmentThumb, linkAttachment } from '../services/attachments.js';
 import { clearStars, markAnswered } from '../services/marks.js';
 import { addNote, deleteNote, deleteNotes, fileNote, updateNote } from '../services/notes.js';
@@ -35,7 +36,7 @@ import {
 } from '../services/vocab.js';
 import { sessionList } from '../services/sessions.js';
 import { searchNotes, searchTechniques } from '../services/semantic.js';
-import { focusView, labView, noteList, noteView, positionList, positionView, techniqueList, techniqueView } from '../services/views.js';
+import { focusItemView, focusView, labView, noteList, noteView, positionList, positionView, techniqueList, techniqueView } from '../services/views.js';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const id = z.coerce.number().int().positive();
@@ -77,6 +78,7 @@ const noteCreate = z.object({
   session: sessionInput.optional(),
   toTry: z.boolean().optional(),
   starred: z.boolean().optional(),
+  focusItemIds: z.array(z.number().int()).max(20).optional(),
 });
 const notePatch = z.object({
   body: z.string().trim().min(1).max(10_000).optional(),
@@ -89,6 +91,7 @@ const notePatch = z.object({
   starred: z.boolean().optional(),
   answered: z.boolean().optional(),
   newTechniques: z.array(newTechnique).max(10).optional(),
+  focusItemIds: z.array(z.number().int()).max(20).optional(),
 });
 const techniqueCreate = z.object({
   name: z.string().trim().min(1).max(120),
@@ -120,17 +123,24 @@ const linkCreate = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   note: z.string().trim().max(500).optional(),
 });
+const focusDescription = z.string().trim().max(4000);
 const focusCreate = z.object({
   label: z.string().trim().min(1).max(200),
+  description: focusDescription.optional(),
   techniqueIds: z.array(z.number().int()).max(10).optional(),
+  noteIds: z.array(z.number().int()).max(50).optional(),
   position: z.number().int().min(1).optional(),
-  goal: z.string().trim().max(300).optional(),
 });
 const focusActionBody = z.object({
   action: z.enum(['move', 'resume', 'pause', 'backlog', 'complete', 'drop']),
   position: z.number().int().min(1).optional(),
 });
-const focusPatch = z.object({ label: z.string().trim().min(1).max(200).optional(), goal: z.string().trim().max(300).nullable().optional() });
+const focusPatch = z.object({ label: z.string().trim().min(1).max(200).optional(), description: focusDescription.nullable().optional() });
+const linkIds = z.object({
+  techniqueIds: z.array(z.number().int()).max(50).optional(),
+  noteIds: z.array(z.number().int()).max(200).optional(),
+});
+const focusLinks = z.object({ add: linkIds.optional(), remove: linkIds.optional() });
 
 /**
  * Wraps an async handler: it gets the signed-in user's context (set up by requireAuth), its result is sent
@@ -159,8 +169,15 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
     return t;
   };
 
+  const loadFocusItem = async (ctx: Ctx, itemId: number): Promise<FocusItemDetail> => {
+    const item = await focusItemView(ctx.db, itemId);
+    if (!item) throw new NotFound(`No focus item #${itemId}.`);
+    return item;
+  };
+
   // Focus list
   r.get('/api/v1/focus', h(async (ctx): Promise<FocusView> => focusView(ctx)));
+  r.get('/api/v1/focus/:id', h(async (ctx, req): Promise<FocusItemDetail> => loadFocusItem(ctx, id.parse(req.params.id))));
   r.post(
     '/api/v1/focus',
     h(async (ctx, req): Promise<MessageResult & { focus: FocusView }> => {
@@ -169,8 +186,9 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
         action: 'add',
         item: b.label,
         technique_ids: b.techniqueIds,
+        note_ids: b.noteIds,
+        description: b.description,
         position: b.position,
-        goal: b.goal,
       });
       return { message, focus: await focusView(ctx) };
     }),
@@ -189,6 +207,16 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
       const b = focusPatch.parse(req.body);
       const message = await editFocusItem(ctx, id.parse(req.params.id), b);
       return { message, focus: await focusView(ctx) };
+    }),
+  );
+  r.post(
+    '/api/v1/focus/:id/links',
+    h(async (ctx, req): Promise<MessageResult & { item: FocusItemDetail; focus: FocusView }> => {
+      const itemId = id.parse(req.params.id);
+      const b = focusLinks.parse(req.body);
+      await loadFocusItem(ctx, itemId);
+      const message = await linkFocus(ctx, itemId, b);
+      return { message, item: await loadFocusItem(ctx, itemId), focus: await focusView(ctx) };
     }),
   );
 
@@ -399,6 +427,7 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
         session: b.session,
         to_try: b.toTry,
         starred: b.starred,
+        focus_item_ids: b.focusItemIds,
         via: 'web',
       });
       res.status(201);
@@ -421,6 +450,7 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
         starred: b.starred,
         answered: b.answered,
         new_techniques: b.newTechniques,
+        focus_item_ids: b.focusItemIds,
       });
       const note = await noteView(ctx.db, noteId);
       if (!note) throw new NotFound(`No note #${noteId}.`);

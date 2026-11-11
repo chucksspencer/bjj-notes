@@ -1,7 +1,9 @@
 // Read side: structured views used by the web app's JSON API and by the MCP text formatters.
 import type {
   EdgeView,
+  FocusItemDetail,
   FocusItemView,
+  FocusRef,
   FocusView,
   LabView,
   LinkView,
@@ -25,6 +27,17 @@ import { EXPECTED_BY_CATEGORY, minusDays } from './vocab.js';
 const json = <T>(v: unknown): T => (typeof v === 'string' ? (JSON.parse(v) as T) : (v as T));
 
 const TECH_REF_JSON = `json_build_object('id', t.id, 'name', t.name, 'type', t.type, 'role', t.role, 'status', t.status)`;
+
+/**
+ * The date of the latest note on a focus item (aliased `f`): one linked to it, or one on any of its
+ * techniques. Used by the focus list, an item's page and the weekly review's quiet items.
+ */
+export const FOCUS_LAST_NOTE_SQL = `greatest(
+    (select max(n.observed_on) from focus_item_notes fn join notes n on n.id = fn.note_id where fn.focus_item_id = f.id),
+    (select max(n.observed_on) from notes n
+       join note_techniques nt on nt.note_id = n.id
+       join focus_item_techniques ft on ft.technique_id = nt.technique_id
+      where ft.focus_item_id = f.id))::text`;
 
 // ---------- where notes came from ----------
 
@@ -71,6 +84,7 @@ interface NoteRow {
   ss_location: string | null;
   ss_gi: SessionView['gi'];
   techniques: unknown;
+  focus: unknown;
 }
 
 const NOTE_SELECT = `
@@ -82,7 +96,10 @@ const NOTE_SELECT = `
          ss.location as ss_location, ss.gi as ss_gi,
          coalesce((select json_agg(${TECH_REF_JSON} order by t.name)
                    from note_techniques nt join techniques t on t.id = nt.technique_id
-                   where nt.note_id = n.id), '[]'::json) as techniques
+                   where nt.note_id = n.id), '[]'::json) as techniques,
+         coalesce((select json_agg(json_build_object('id', f.id, 'label', f.label, 'status', f.status) order by f.rank nulls last, f.label)
+                   from focus_item_notes fn join focus_items f on f.id = fn.focus_item_id
+                   where fn.note_id = n.id), '[]'::json) as focus
   from notes n
   left join sources s on s.id = n.source_id
   left join sessions ss on ss.id = n.session_id`;
@@ -105,6 +122,7 @@ function toNote(r: NoteRow): NoteView {
     starredAt: r.starred_at,
     answered: r.answered_at !== null,
     attachments: json<NoteView['attachments']>(r.attachments),
+    focus: json<FocusRef[]>(r.focus),
     sessionId: r.session_id,
     session:
       r.session_id && r.ss_kind
@@ -139,6 +157,10 @@ export interface NoteQuery {
   beforeId?: number;
   /** Only notes about any of these techniques. */
   techniqueIds?: number[];
+  /** Only notes linked to this focus item. */
+  focusItemId?: number;
+  /** Only notes on this focus item's techniques that aren't linked to it. */
+  relatedToFocusItemId?: number;
   oldestFirst?: boolean;
 }
 
@@ -169,6 +191,10 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
   if (opts.techniqueIds !== undefined) {
     where.push(`exists (select 1 from note_techniques x where x.note_id = n.id and x.technique_id = any(${p(opts.techniqueIds)}::int[]))`);
   }
+  if (opts.focusItemId !== undefined) {
+    where.push(`exists (select 1 from focus_item_notes x where x.note_id = n.id and x.focus_item_id = ${p(opts.focusItemId)})`);
+  }
+  if (opts.relatedToFocusItemId !== undefined) where.push(relatedToFocus(p(opts.relatedToFocusItemId)));
   const limit = p(Math.min(Math.max(opts.limit ?? 30, 1), 200));
   const { rows } = await q.query<NoteRow>(
     `${NOTE_SELECT} where ${where.join(' and ')} order by ${order} limit ${limit}`,
@@ -176,6 +202,12 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
   );
   return rows.map(toNote);
 }
+
+/** Notes (aliased `n`) on a focus item's techniques that aren't linked to the item itself. */
+const relatedToFocus = (item: string) =>
+  `(exists (select 1 from note_techniques x join focus_item_techniques ft on ft.technique_id = x.technique_id
+            where x.note_id = n.id and ft.focus_item_id = ${item})
+    and not exists (select 1 from focus_item_notes y where y.note_id = n.id and y.focus_item_id = ${item}))`;
 
 export async function noteView(q: Queryable, id: number): Promise<NoteView | null> {
   const { rows } = await q.query<NoteRow>(`${NOTE_SELECT} where n.id = $1 and n.user_id = $2`, [id, uid(q)]);
@@ -405,43 +437,79 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
 
 // ---------- focus ----------
 
+interface FocusRow {
+  id: number;
+  label: string;
+  description: string | null;
+  status: FocusItemView['status'];
+  rank: number | null;
+  techniques: unknown;
+  note_count: number;
+  last_note: string | null;
+  created_at: string;
+}
+
+const FOCUS_SELECT = `
+  select f.id, f.label, f.description, f.status, f.rank, ${iso('f.created_at')} as created_at,
+         coalesce((select json_agg(${TECH_REF_JSON} order by t.name)
+                   from focus_item_techniques ft join techniques t on t.id = ft.technique_id
+                   where ft.focus_item_id = f.id), '[]'::json) as techniques,
+         (select count(*)::int from focus_item_notes fn where fn.focus_item_id = f.id) as note_count,
+         ${FOCUS_LAST_NOTE_SQL} as last_note
+  from focus_items f`;
+
+const toFocusItem = (r: FocusRow): FocusItemView => ({
+  id: r.id,
+  label: r.label,
+  description: r.description,
+  status: r.status,
+  rank: r.rank,
+  techniques: json<TechniqueRef[]>(r.techniques),
+  noteCount: r.note_count,
+  lastNoteOn: r.last_note,
+});
+
 export async function focusView(ctx: Ctx, q: Queryable = ctx.db): Promise<FocusView> {
-  const { rows } = await q.query<{
-    id: number;
-    label: string;
-    goal: string | null;
-    status: FocusItemView['status'];
-    rank: number | null;
-    techniques: unknown;
-    last_note: string | null;
-  }>(
-    `select f.id, f.label, f.goal, f.status, f.rank,
-            coalesce((select json_agg(${TECH_REF_JSON} order by t.name)
-                      from focus_item_techniques ft join techniques t on t.id = ft.technique_id
-                      where ft.focus_item_id = f.id), '[]'::json) as techniques,
-            (select max(n.observed_on)::text from notes n
-               join note_techniques nt on nt.note_id = n.id
-               join focus_item_techniques ft2 on ft2.technique_id = nt.technique_id
-              where ft2.focus_item_id = f.id) as last_note
-     from focus_items f
+  const { rows } = await q.query<FocusRow>(
+    `${FOCUS_SELECT}
      where f.user_id = $1 and f.status in ('active', 'paused', 'backlog')
      order by f.rank nulls last, f.updated_at desc`,
     [uid(q)],
   );
-  const items: FocusItemView[] = rows.map(r => ({
-    id: r.id,
-    label: r.label,
-    goal: r.goal,
-    status: r.status,
-    rank: r.rank,
-    techniques: json<TechniqueRef[]>(r.techniques),
-    lastNoteOn: r.last_note,
-  }));
+  const items = rows.map(toFocusItem);
   return {
     today: today(ctx),
     active: items.filter(i => i.status === 'active'),
     paused: items.filter(i => i.status === 'paused'),
     backlog: items.filter(i => i.status === 'backlog'),
+  };
+}
+
+/** How many related notes an item's page shows. */
+export const RELATED_NOTES = 10;
+
+/** One focus item's page, whatever its status; null if it isn't the signed-in person's. */
+export async function focusItemView(q: Queryable, id: number): Promise<FocusItemDetail | null> {
+  const row = (await q.query<FocusRow>(`${FOCUS_SELECT} where f.id = $1 and f.user_id = $2`, [id, uid(q)])).rows[0];
+  if (!row) return null;
+  const notes = await noteList(q, { focusItemId: id, limit: 200 });
+  const relatedNotes = await noteList(q, { relatedToFocusItemId: id, limit: RELATED_NOTES });
+  const relatedCount = (
+    await q.query<{ c: number }>(`select count(*)::int as c from notes n where n.user_id = $2 and ${relatedToFocus('$1')}`, [id, uid(q)])
+  ).rows[0]!.c;
+  const history = (
+    await q.query<{ at: string; event: string; to_rank: number | null }>(
+      `select ${iso('e.at')} as at, e.event, e.to_rank from focus_events e where e.focus_item_id = $1 order by e.id`,
+      [id],
+    )
+  ).rows;
+  return {
+    ...toFocusItem(row),
+    createdAt: row.created_at,
+    notes,
+    relatedNotes,
+    relatedCount,
+    history: history.map(h => ({ at: h.at, event: h.event, toRank: h.to_rank })),
   };
 }
 
