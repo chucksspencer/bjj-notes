@@ -1,6 +1,6 @@
 import { uid, type Queryable } from '../db.js';
 import { cleanUrl, instagramPost } from '../shared/links.js';
-import { describeMiss, resolveFocusItem, resolveTechnique, type Candidate } from '../resolve.js';
+import { describeMiss, resolveArea, resolveTechnique, type Candidate } from '../resolve.js';
 import type { SessionView } from '../shared/api.js';
 import { sessionPhrase } from '../shared/sessions.js';
 import { insertAttachments, mediaTag, type AttachmentInput } from './attachments.js';
@@ -52,26 +52,26 @@ export interface AddNoteInput {
   client_id?: string;
   /** Photos and videos (references to Apple Photos, with a still image each). */
   attachments?: AttachmentInput[];
-  /** Exact focus item ids to link the note to (from the web app). */
-  focus_item_ids?: number[];
-  /** A focus item to link the note to, by title or linked technique name (for voice). */
-  focus?: string;
+  /** Exact area ids to file the note under (from the web app). */
+  area_ids?: number[];
+  /** An area to file the note under, by name or linked technique name (for voice). */
+  area?: string;
 }
 
-/** The given focus item ids that belong to the signed-in person, with their titles. */
-async function ownFocusItems(q: Queryable, ids: number[]): Promise<{ id: number; label: string }[]> {
+/** The given area ids that belong to the signed-in person, with their names. */
+async function ownAreas(q: Queryable, ids: number[]): Promise<{ id: number; name: string }[]> {
   if (!ids.length) return [];
   return (
-    await q.query<{ id: number; label: string }>('select id, label from focus_items where id = any($1::int[]) and user_id = $2 order by id', [
+    await q.query<{ id: number; name: string }>('select id, name from areas where id = any($1::int[]) and user_id = $2 order by id', [
       [...new Set(ids)],
       uid(q),
     ])
   ).rows;
 }
 
-async function linkNoteToFocus(q: Queryable, noteId: number, focusItemIds: number[]) {
-  for (const f of focusItemIds) {
-    await q.query('insert into focus_item_notes (focus_item_id, note_id, user_id) values ($1, $2, $3) on conflict do nothing', [f, noteId, uid(q)]);
+async function fileUnderAreas(q: Queryable, noteId: number, areaIds: number[]) {
+  for (const a of areaIds) {
+    await q.query('insert into area_notes (area_id, note_id, user_id) values ($1, $2, $3) on conflict do nothing', [a, noteId, uid(q)]);
   }
 }
 
@@ -228,7 +228,15 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
       sessionId = sessions.length === 1 ? sessions[0]!.id : null;
     }
     const toTry = input.to_try === true;
-    const inbox = !toTry && (ids.size === 0 || unresolved.length > 0);
+    // Areas first: a note filed under an area is filed, even with no technique.
+    const areas = await ownAreas(q, input.area_ids ?? []);
+    let areaMiss: string | null = null;
+    if (input.area?.trim()) {
+      const r = await resolveArea(q, input.area);
+      if (r.match) areas.push({ id: r.match.id, name: r.match.name });
+      else areaMiss = describeMiss('area', input.area, r).replace(/\.$/, '');
+    }
+    const inbox = !toTry && ((ids.size === 0 && areas.length === 0) || unresolved.length > 0);
 
     const { rows } = await q.query<{ id: number }>(
       `insert into notes (body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via, starred_at,
@@ -256,14 +264,7 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
     }
     const attachments = input.attachments?.length ? await insertAttachments(q, noteId, input.attachments) : undefined;
 
-    const focusItems = await ownFocusItems(q, input.focus_item_ids ?? []);
-    let focusMiss: string | null = null;
-    if (input.focus?.trim()) {
-      const r = await resolveFocusItem(q, input.focus);
-      if (r.match) focusItems.push({ id: r.match.id, label: r.match.name });
-      else focusMiss = describeMiss('focus item', input.focus, r).replace(/\.$/, '');
-    }
-    await linkNoteToFocus(q, noteId, [...new Set(focusItems.map(f => f.id))]);
+    await fileUnderAreas(q, noteId, [...new Set(areas.map(a => a.id))]);
 
     const linked = [...ids.values()];
     const from = origin?.view ? ` (from ${sessionPhrase(origin.view)})` : '';
@@ -272,9 +273,9 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
       : linked.length
         ? `Saved note #${noteId} to ${linked.join(', ')}`
         : `Saved note #${noteId}`;
-    const onFocus = focusItems.length ? `, on your focus: ${[...new Set(focusItems.map(f => f.label))].join(', ')}` : '';
-    const parts = [saved + from + onFocus + (input.starred ? ', starred' : '')];
-    if (focusMiss) parts.push(focusMiss);
+    const under = areas.length ? `, under ${[...new Set(areas.map(a => a.name))].join(', ')}` : '';
+    const parts = [saved + from + under + (input.starred ? ', starred' : '')];
+    if (areaMiss) parts.push(areaMiss);
     if (created.length) parts.push(`new card${created.length > 1 ? 's' : ''}: ${created.map(c => c.name).join(', ')}`);
     for (const u of unresolved) {
       parts.push(
@@ -385,18 +386,15 @@ export interface UpdateNoteInput {
   starred?: boolean;
   /** Mark a question answered (true) or open again (false). */
   answered?: boolean;
-  /** Replaces the focus items the note is linked to. */
-  focus_item_ids?: number[];
+  /** Replaces the areas the note is filed under. */
+  area_ids?: number[];
 }
 
-/** The focus items a note is linked to. */
-async function noteFocusIds(q: Queryable, noteId: number): Promise<number[]> {
+/** The areas a note is filed under. */
+async function noteAreaIds(q: Queryable, noteId: number): Promise<number[]> {
   return (
-    await q.query<{ focus_item_id: number }>('select focus_item_id from focus_item_notes where note_id = $1 and user_id = $2 order by focus_item_id', [
-      noteId,
-      uid(q),
-    ])
-  ).rows.map(r => r.focus_item_id);
+    await q.query<{ area_id: number }>('select area_id from area_notes where note_id = $1 and user_id = $2 order by area_id', [noteId, uid(q)])
+  ).rows.map(r => r.area_id);
 }
 
 export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): Promise<string> {
@@ -430,17 +428,22 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
         await q.query('insert into note_techniques (note_id, technique_id, user_id) values ($1, $2, $3)', [id, t.id, uid(q)]);
       }
     }
-    // A to-try note waits out of the inbox; otherwise a note with no techniques needs filing.
+    const areasBefore = input.area_ids ? await noteAreaIds(q, id) : undefined;
+    if (input.area_ids) {
+      await q.query('delete from area_notes where note_id = $1 and user_id = $2', [id, uid(q)]);
+      await fileUnderAreas(q, id, (await ownAreas(q, input.area_ids)).map(a => a.id));
+    }
+    // A to-try note waits out of the inbox; otherwise a note with no technique and no area needs filing.
     const wasToTry = row.to_try ?? false;
     const toTry = input.to_try ?? wasToTry;
-    if (input.technique_ids || fresh || toTry !== wasToTry) {
-      const count = (await q.query<{ c: number }>('select count(*)::int as c from note_techniques where note_id = $1', [id])).rows[0]!.c;
-      await q.query('update notes set inbox = $2, to_try = $3 where id = $1 and user_id = $4', [id, !toTry && count === 0, toTry, uid(q)]);
-    }
-    const focusBefore = input.focus_item_ids ? await noteFocusIds(q, id) : undefined;
-    if (input.focus_item_ids) {
-      await q.query('delete from focus_item_notes where note_id = $1 and user_id = $2', [id, uid(q)]);
-      await linkNoteToFocus(q, id, (await ownFocusItems(q, input.focus_item_ids)).map(f => f.id));
+    if (input.technique_ids || fresh || input.area_ids || toTry !== wasToTry) {
+      const count = (
+        await q.query<{ c: number }>(
+          `select (select count(*) from note_techniques where note_id = $1) + (select count(*) from area_notes where note_id = $1) as c`,
+          [id],
+        )
+      ).rows[0]!.c;
+      await q.query('update notes set inbox = $2, to_try = $3 where id = $1 and user_id = $4', [id, !toTry && Number(count) === 0, toTry, uid(q)]);
     }
     const wasStarred = !!row.starred_at;
     if (input.starred !== undefined && input.starred !== wasStarred) {
@@ -470,7 +473,7 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
       techniqueIds: before,
       session: origin?.change,
       createdTechniqueIds: fresh?.created.map(c => c.id),
-      ...(focusBefore ? { focusItemIds: focusBefore } : {}),
+      ...(areasBefore ? { focusItemIds: areasBefore } : {}),
     });
     const moved =
       (toTry === wasToTry ? '' : toTry ? ', now on the To try list' : ', off the To try list') +
@@ -489,14 +492,14 @@ async function removeNote(q: Queryable, id: number): Promise<UndoOp | null> {
     await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [id])
   ).rows.map(r => r.technique_id);
   const attachmentIds = (await q.query<{ id: number }>('select id from attachments where note_id = $1', [id])).rows.map(r => r.id);
-  const focusItemIds = await noteFocusIds(q, id);
+  const areaIds = await noteAreaIds(q, id);
   await q.query('delete from notes where id = $1 and user_id = $2', [id, uid(q)]);
   return {
     kind: 'restore_note',
     row,
     techniqueIds,
     ...(attachmentIds.length ? { attachmentIds } : {}),
-    ...(focusItemIds.length ? { focusItemIds } : {}),
+    ...(areaIds.length ? { focusItemIds: areaIds } : {}),
   };
 }
 

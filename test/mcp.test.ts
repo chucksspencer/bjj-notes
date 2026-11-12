@@ -35,8 +35,8 @@ describe('MCP tools over HTTP', () => {
       [
         'add_note',
         'clear_stars',
-        'edit_focus',
         'file_note',
+        'get_area',
         'get_focus',
         'get_inbox',
         'get_lab',
@@ -44,6 +44,7 @@ describe('MCP tools over HTTP', () => {
         'get_technique',
         'log_session',
         'review',
+        'save_area',
         'save_technique',
         'search',
         'undo_last',
@@ -52,6 +53,7 @@ describe('MCP tools over HTTP', () => {
       ].sort(),
     );
     expect(client.getInstructions()).toContain('voice transcription');
+    expect(client.getInstructions()).toContain('"System" and "game plan" mean an area with a plan.');
   });
 
   it('starts with the imported working list as the focus list', async () => {
@@ -71,7 +73,7 @@ describe('MCP tools over HTTP', () => {
     const card = await call('get_technique', { name: 'ghost escape' });
     expect(card).toContain('Ghost escape (escape, bottom). Status: learning.');
     expect(card).toContain('Position: Side control (bottom)');
-    expect(card).toContain('Focus: #5 on the active list');
+    expect(card).toContain('In areas: Ghost escape (#5 on focus).');
     expect(card).toContain('keep the far elbow tight');
 
     const focus = await call('get_focus');
@@ -137,7 +139,7 @@ describe('MCP tools over HTTP', () => {
 
   it('manages the focus list, with history and undo', async () => {
     expect(await call('update_focus', { action: 'add', item: 'Kimura from closed guard' })).toBe(
-      'Added to focus at #1: Kimura from closed guard (linked to Kimura).',
+      'New area, on focus at #1: Kimura from closed guard (linked to Kimura).',
     );
     let focus = await call('get_focus');
     expect(focus).toContain('1. Kimura from closed guard');
@@ -149,18 +151,21 @@ describe('MCP tools over HTTP', () => {
     expect(focus).not.toContain('Kimura');
 
     expect(await call('update_focus', { action: 'move', item: 'ghost', position: 1 })).toBe('Moved to #1: Ghost escape.');
-    expect(await call('update_focus', { action: 'pause', item: 'ankle lock' })).toBe('Paused: Ankle lock adjustments.');
+    expect(await call('update_focus', { action: 'remove', item: 'ankle lock' })).toBe('Taken off focus: Ankle lock adjustments.');
     focus = await call('get_focus');
     expect(focus).toContain('1. Ghost escape');
     expect(focus).toContain('2. Baratoplata');
-    expect(focus).toContain('Paused: Ankle lock adjustments.');
+    expect(focus).toContain('1 other area off focus');
     expect(focus).not.toContain('7.');
+    expect(await call('get_area')).toContain('Ankle lock adjustments');
+    expect(await call('update_focus', { action: 'remove', item: 'ankle lock' })).toBe('Already off focus: Ankle lock adjustments.');
 
-    expect(await call('update_focus', { action: 'resume', item: 'ankle lock', position: 3 })).toBe(
-      'Back on the active list at #3: Ankle lock adjustments.',
-    );
+    // Older action names still work: resume puts it back on, pause takes it off.
+    expect(await call('update_focus', { action: 'resume', item: 'ankle lock', position: 3 })).toBe('On focus at #3: Ankle lock adjustments.');
+    // Adding what's already there doesn't make a second one.
+    expect(await call('update_focus', { action: 'add', item: 'ankle lock adjustments' })).toBe('Already #3 on focus: Ankle lock adjustments.');
     const history = await call('get_focus', { history: true, item: 'ankle lock' });
-    expect(history).toMatch(/added \(#7\): Ankle lock adjustments\n.*paused: Ankle lock adjustments\n.*resumed \(#3\): Ankle lock adjustments/);
+    expect(history).toMatch(/added \(#7\): Ankle lock adjustments\n.*removed: Ankle lock adjustments\n.*added \(#3\): Ankle lock adjustments/);
   });
 
   it('sends unplaceable notes to the inbox and files them later', async () => {
@@ -187,8 +192,8 @@ describe('MCP tools over HTTP', () => {
     const r = await call('review', { days: 7 });
     expect(r).toContain('1 session (1 class), 3 notes.');
     expect(r).toContain('Most noted: Armbar (1), Ghost escape (1), Leg elevation (1).');
-    expect(r).toContain('Quiet focus items');
-    expect(r).not.toMatch(/Quiet focus items[^\n]*Ghost escape/);
+    expect(r).toContain('Quiet on your focus');
+    expect(r).not.toMatch(/Quiet on your focus[^\n]*Ghost escape/);
   });
 
   it('records where a note came from and shows it on the card', async () => {
@@ -308,47 +313,114 @@ describe('MCP tools over HTTP', () => {
     );
   });
 
-  it('keeps a description and linked notes on a focus item', async () => {
-    const edited = await call('edit_focus', {
-      item: 'ghost',
+  it('keeps a description and filed notes on an area', async () => {
+    const edited = await call('save_area', {
+      name: 'ghost',
       description: 'Escape before the pin settles.\nGoal: out in under ten seconds.',
-      link_techniques: ['leg elevation', 'qwxz zzyq'],
+      techniques: ['leg elevation', 'qwxz zzyq'],
     });
     expect(edited).toMatch(/^Ghost escape: description updated; linked Leg elevation \(No .*technique.*"qwxz zzyq".*\)\.$/);
-    let item = await call('get_focus', { item: 'ghost' });
-    expect(item).toContain('Ghost escape (#1 on the active focus list; last note today).\nEscape before the pin settles.\nGoal: out in under ten seconds.');
-    expect(item).toContain('Techniques: Ghost escape, Leg elevation.');
-    expect(item).toContain('No notes linked.');
+    let item = await call('get_area', { name: 'ghost' });
+    expect(item).toContain('Ghost escape. #1 on your focus list; last note today.\nEscape before the pin settles.\nGoal: out in under ten seconds.');
+    expect(item).toContain('No plan yet.');
+    expect(item).toMatch(/Techniques: Ghost escape \(\w+\), Leg elevation \(\w+\)\./);
     expect(item).toMatch(/\d+ other notes? on its techniques\./);
     // The list stays short for reading aloud.
     expect(await call('get_focus')).not.toContain('Escape before');
+    // get_focus with an item still reads it, for clients that learned that.
+    expect(await call('get_focus', { item: 'ghost' })).toContain('Escape before the pin settles.');
 
-    const saved = await call('add_note', { text: 'Shrimp early, before the crossface.', techniques: ['ghost escape'], focus: 'ghost' });
-    expect(saved).toMatch(/^Saved note #\d+ to Ghost escape, on your focus: Ghost escape\.$/);
+    const saved = await call('add_note', { text: 'Shrimp early, before the crossface.', techniques: ['ghost escape'], area: 'ghost' });
+    expect(saved).toMatch(/^Saved note #\d+ to Ghost escape, under Ghost escape\.$/);
     const id = Number(saved.match(/#(\d+)/)![1]);
-    item = await call('get_focus', { item: 'ghost escape' });
-    expect(item).toMatch(new RegExp(`Linked notes \\(1\\):\\n- #${id} \\d{4}-\\d{2}-\\d{2}: Shrimp early, before the crossface\\.`));
+    item = await call('get_area', { name: 'ghost escape' });
+    expect(item).toMatch(new RegExp(`Notes filed here \\(1\\):\\n- #${id} \\d{4}-\\d{2}-\\d{2}: Shrimp early, before the crossface\\.`));
+    // focus: is the older name for area.
+    const older = await call('add_note', { text: 'Frame first.', area: undefined, focus: 'ghost' });
+    expect(older).toMatch(/under Ghost escape\.$/);
+    await call('undo_last');
 
-    expect(await call('edit_focus', { item: 'ghost', title: 'Ghost escape from side control', unlink_notes: [id] })).toBe(
-      'Ghost escape from side control: renamed to Ghost escape from side control; unlinked 1 note.',
+    expect(await call('save_area', { name: 'ghost', rename_to: 'Ghost escape from side control', aliases: ['ghosting'] })).toBe(
+      'Ghost escape from side control: renamed to Ghost escape from side control; aliases updated.',
     );
-    expect(await call('get_focus', { item: 'Ghost escape from side control' })).toContain('No notes linked.');
+    expect(await call('get_area', { name: 'ghosting' })).toMatch(/^Ghost escape from side control\. /);
     // One undo takes back the whole edit.
     expect(await call('undo_last')).toBe('Undid: edit to "Ghost escape"');
-    item = await call('get_focus', { item: 'ghost' });
-    expect(item).toMatch(/^Ghost escape \(/);
+    item = await call('get_area', { name: 'ghost' });
+    expect(item).toMatch(/^Ghost escape\. /);
     expect(item).toContain(`- #${id} `);
 
     expect(await call('undo_last')).toMatch(new RegExp(`^Undid: note #${id}`));
     expect(await call('undo_last')).toBe('Undid: edit to "Ghost escape"');
-    item = await call('get_focus', { item: 'ghost' });
+    item = await call('get_area', { name: 'ghost' });
     expect(item).not.toContain('Escape before');
-    expect(item).toContain('Techniques: Ghost escape.');
+    expect(item).toMatch(/Techniques: Ghost escape \(\w+\)\./);
 
-    const missed = await call('add_note', { text: 'Breathe.', techniques: ['ghost escape'], focus: 'qwxz zzyq' });
-    expect(missed).toMatch(/^Saved note #\d+ to Ghost escape; No .*focus item.*"qwxz zzyq"/);
+    const missed = await call('add_note', { text: 'Breathe.', techniques: ['ghost escape'], area: 'qwxz zzyq' });
+    expect(missed).toMatch(/^Saved note #\d+ to Ghost escape; No .*area.*"qwxz zzyq"/);
     await call('undo_last');
-    expect(await call('edit_focus', { item: 'ghost' })).toBe('Nothing changed on Ghost escape.');
+    expect(await call('save_area', { name: 'ghost' })).toBe('Nothing changed on Ghost escape.');
+  });
+
+  it('saves a system as an area with a plan, and reads it back as if/then', async () => {
+    await call('save_technique', { name: 'John Wayne sweep', type: 'sweep', role: 'bottom', status: 'drilling' });
+    await call('save_technique', { name: 'Shuck', type: 'transition', role: 'bottom', status: 'learning' });
+    const saved = await call('save_area', {
+      name: 'Bottom half: winning the underhook',
+      start: 'half guard',
+      start_role: 'bottom',
+      premise: 'Top has the underhook and crossface',
+      steps: [
+        { depth: 0, do: 'John Wayne sweep', note: 'force them to post the underhook hand, then win the underhook' },
+        { depth: 0, do: 'shuck pass', technique: 'shuck' },
+        { depth: 1, when: 'they post the far leg', do: 'Go to deep half', to: 'deep half', to_role: 'bottom' },
+        { depth: 1, when: 'they base back', do: 'Octopus sweeps' },
+      ],
+    });
+    expect(saved).toBe(
+      'New area: Bottom half: winning the underhook: starts in Half guard (bottom); plan saved (4 steps) (no technique card for: Go to deep half; Octopus sweeps).',
+    );
+    // A new area isn't on focus unless asked.
+    expect(await call('get_focus')).not.toContain('underhook');
+
+    const read = await call('get_area', { name: 'winning the underhook' });
+    expect(read).toContain('Bottom half: winning the underhook. off focus;');
+    expect(read).toContain('Starts in Half guard, bottom, when top has the underhook and crossface.');
+    expect(read).toContain(
+      [
+        'Plan:',
+        '1. John Wayne sweep (drilling): force them to post the underhook hand, then win the underhook.',
+        '2. shuck pass (learning).',
+        '   If they post the far leg: go to deep half → Deep half guard (bottom).',
+        '   If they base back: octopus sweeps.',
+        'Weakest step: Shuck (learning).',
+      ].join('\n'),
+    );
+    expect(await call('get_technique', { name: 'shuck' })).toContain('In areas: Bottom half: winning the underhook.');
+    expect(await call('get_position', { name: 'half guard', role: 'bottom' })).toContain('Plans from here: Bottom half: winning the underhook');
+    expect(await call('search', { query: 'what do I do when they post the far leg' })).toContain(
+      '- Bottom half: winning the underhook: if they post the far leg: Go to deep half',
+    );
+
+    // A plan for deep half: the branch into it now says where it continues.
+    await call('save_area', { name: 'Deep half sweeps', start: 'deep half', start_role: 'bottom', steps: [{ depth: 0, do: 'Waiter sweep' }] });
+    expect(await call('get_area', { name: 'winning the underhook' })).toContain('go to deep half → Deep half guard (bottom). Continues in: Deep half sweeps.');
+    expect(await call('get_area')).toMatch(/Deep half guard \(bottom\): Deep half sweeps \[1 step\]\nHalf guard \(bottom\): Bottom half: winning the underhook \[4 steps\]/);
+
+    // Putting it on focus, and a bad outline.
+    expect(await call('save_area', { name: 'winning the underhook', focus: true })).toBe('Bottom half: winning the underhook: on focus at #1.');
+    await expect(call('save_area', { name: 'winning the underhook', steps: [{ depth: 0, do: 'a' }, { depth: 2, do: 'b' }] })).rejects.toThrow(
+      'Error: Step 2 is 2 levels deeper than the step before it.',
+    );
+    expect(await call('update_focus', { action: 'remove', item: 'winning the underhook' })).toBe('Taken off focus: Bottom half: winning the underhook.');
+
+    // Deleting is for good, but undoable.
+    expect(await call('save_area', { name: 'Deep half sweeps', delete: true })).toBe('Deleted Deep half sweeps.');
+    expect(await call('get_area', { name: 'winning the underhook' })).not.toContain('Continues in');
+    expect(await call('undo_last')).toBe('Undid: delete "Deep half sweeps"');
+    expect(await call('get_area', { name: 'winning the underhook' })).toContain('Continues in: Deep half sweeps.');
+    await call('save_area', { name: 'Deep half sweeps', delete: true });
+    await call('save_area', { name: 'winning the underhook', delete: true });
   });
 
   it('undoes a technique edit', async () => {

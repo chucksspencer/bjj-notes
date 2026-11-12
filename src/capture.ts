@@ -7,7 +7,7 @@ import { clipPlaceholder, placeholderFor, splitLink } from './shared/links.js';
 import { MAX_THUMB_BYTES, type AttachmentInput } from './services/attachments.js';
 import { techniquesMentionedIn } from './resolve.js';
 import { userCtx, type Ctx } from './services/context.js';
-import { getFocus } from './services/focus.js';
+import { getFocus } from './services/areas.js';
 import { addNote, type AddNoteInput } from './services/notes.js';
 import { NOTE_KINDS, ROLES, SESSION_KINDS, SOURCE_KINDS, TECHNIQUE_TYPES } from './services/vocab.js';
 

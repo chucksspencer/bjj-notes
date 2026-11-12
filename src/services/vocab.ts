@@ -32,8 +32,11 @@ export type SourceKind = (typeof SOURCE_KINDS)[number];
 
 export const SESSION_KINDS = ['class', 'open_mat', 'private', 'seminar', 'competition', 'drilling', 'other'] as const;
 
-export const FOCUS_ACTIONS = ['add', 'move', 'resume', 'pause', 'backlog', 'complete', 'drop'] as const;
-export type FocusAction = (typeof FOCUS_ACTIONS)[number];
+/** add puts an area on the focus list, move re-ranks it, remove takes it off (the area stays). */
+export const FOCUS_ACTIONS = ['add', 'move', 'remove'] as const;
+/** Older names, still accepted: resume = add; pause, backlog, complete and drop = remove. */
+export const OLD_FOCUS_ACTIONS = ['resume', 'pause', 'backlog', 'complete', 'drop'] as const;
+export type FocusAction = (typeof FOCUS_ACTIONS)[number] | (typeof OLD_FOCUS_ACTIONS)[number];
 
 /** Technique types you'd expect to have from each kind of position, used to point out gaps. */
 export const EXPECTED_BY_CATEGORY: Record<string, Partial<Record<Role, TechniqueType[]>>> = {

@@ -267,8 +267,8 @@ export async function getTechnique(ctx: Ctx, name: string, noteLimit = 5): Promi
         .join('; ')}`,
     );
   }
-  for (const f of t.focus) {
-    lines.push(`Focus: ${f.status === 'active' ? `#${f.rank} on the active list` : f.status} ("${f.label}").`);
+  if (t.areas.length) {
+    lines.push(`In areas: ${t.areas.map(a => `${a.name}${a.rank ? ` (#${a.rank} on focus)` : ''}`).join('; ')}.`);
   }
   if (t.notes.length) {
     lines.push(`Notes (${t.notes.length} of ${t.noteCount}, newest first):`);
@@ -354,15 +354,17 @@ async function removeTechnique(q: Queryable, id: number): Promise<{ name: string
     r => r.note_id,
   );
   const focusItemIds = (
-    await q.query<{ focus_item_id: number }>('select focus_item_id from focus_item_techniques where technique_id = $1 and user_id = $2', [
-      id,
-      uid(q),
-    ])
-  ).rows.map(r => r.focus_item_id);
+    await q.query<{ area_id: number }>('select area_id from area_techniques where technique_id = $1 and user_id = $2', [id, uid(q)])
+  ).rows.map(r => r.area_id);
+  const stepIds = (await q.query<{ id: number }>('select id from area_steps where technique_id = $1 and user_id = $2', [id, uid(q)])).rows.map(
+    r => r.id,
+  );
+  // Notes this was the only filing for go to the inbox; one filed under an area stays filed.
   const orphaned = (
     await q.query<{ id: number }>(
       `select n.id from notes n where n.id = any($1::int[]) and n.user_id = $3 and not n.inbox
-         and not exists (select 1 from note_techniques x where x.note_id = n.id and x.technique_id <> $2)`,
+         and not exists (select 1 from note_techniques x where x.note_id = n.id and x.technique_id <> $2)
+         and not exists (select 1 from area_notes y where y.note_id = n.id)`,
       [noteIds, id, uid(q)],
     )
   ).rows.map(r => r.id);
@@ -371,7 +373,7 @@ async function removeTechnique(q: Queryable, id: number): Promise<{ name: string
   return {
     name: row.name,
     inboxed: orphaned.length,
-    undo: { kind: 'restore_deleted_technique', row, edges, links, noteIds, focusItemIds, inboxedNoteIds: orphaned },
+    undo: { kind: 'restore_deleted_technique', row, edges, links, noteIds, focusItemIds, stepIds, inboxedNoteIds: orphaned },
   };
 }
 
