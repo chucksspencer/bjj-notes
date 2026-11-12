@@ -786,3 +786,46 @@ export async function listAreas(ctx: Ctx): Promise<string> {
   if (none) lines.push(`No starting position: ${none.join('; ')}`);
   return lines.join('\n');
 }
+
+/**
+ * A plan said aloud, for Siri: found by area name, or by where it starts ("bottom half", "half guard bottom").
+ * The main line and its branches; deeper steps are left for the app.
+ */
+export async function planSpeech(ctx: Ctx, query: string): Promise<{ areaId: number | null; speech: string }> {
+  const q = ctx.db;
+  const words = query.trim();
+  if (!words) return { areaId: null, speech: 'Which plan? Say an area or a position.' };
+  let id: number | null = null;
+  let none: string | null = null;
+  // "bottom half", "half guard, top": a position (and a side, if one is said) names the plan that starts there.
+  const role = /\bbottom\b/i.test(words) ? 'bottom' : /\btop\b/i.test(words) ? 'top' : null;
+  const pos = await resolvePosition(q, words.replace(/\b(top|bottom|from|on|my|plan|the)\b/gi, ' ').replace(/\s+/g, ' ').trim() || words);
+  if (pos.match) {
+    const row = (
+      await q.query<{ id: number }>(
+        `select id from areas where user_id = $1 and start_position_id = $2 and ($3::text is null or start_role is null or start_role = $3)
+           and exists (select 1 from area_steps st where st.area_id = areas.id)
+         order by rank nulls last, name limit 1`,
+        [uid(q), pos.match.id, role],
+      )
+    ).rows[0];
+    if (row) id = row.id;
+    else none = `You don't have a plan from ${pos.match.name}${role ? ` on ${role}` : ''} yet.`;
+  }
+  if (id === null) {
+    const byName = await resolveArea(q, words);
+    if (byName.match) id = byName.match.id;
+    else if (none) return { areaId: null, speech: none };
+  }
+  if (id === null) return { areaId: null, speech: `I couldn't find a plan called ${words}.` };
+  const v = (await areaView(q, id))!;
+  if (!v.plan.length) return { areaId: id, speech: `${v.name} doesn't have a plan yet.` };
+  const step = (s: PlanStep) => `${lowerFirst(s.action)}${s.note ? `, to ${lowerFirst(s.note)}` : ''}`;
+  const parts: string[] = [];
+  v.plan.forEach((s, i) => {
+    parts.push(`${i === 0 ? capitalise(step(s)) : `Then ${step(s)}`}.`);
+    for (const b of s.children) parts.push(`${b.trigger ? `If ${b.trigger}, ` : 'Then '}${step(b)}.`);
+  });
+  const when = v.premise ? ` When ${lowerFirst(v.premise)}:` : '';
+  return { areaId: id, speech: `${v.name}.${when} ${parts.join(' ')}`.replace(/\.\./g, '.') };
+}

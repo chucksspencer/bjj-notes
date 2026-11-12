@@ -1,6 +1,6 @@
 # BJJ Notes
 
-A jiu-jitsu notebook you can talk to, for you and the people you invite: everyone gets their own. Techniques are organised as a **position graph** (a sweep takes you from the bottom of a guard to the top; a pass from a guard to a pin; an escape from the bottom of a pin), with dated notes from class, videos and rolling, training sessions, and a ranked **focus list** whose history is kept.
+A jiu-jitsu notebook you can talk to, for you and the people you invite: everyone gets their own. Techniques are organised as a **position graph** (a sweep takes you from the bottom of a guard to the top; a pass from a guard to a pin; an escape from the bottom of a pin), with dated notes from class, videos and rolling, training sessions, **areas** of your game (an area with a **plan**, steps that branch on how they react, is a system), and a ranked **focus list** of the areas you're working on now, whose history is kept.
 
 It is one small Node service with three front doors:
 
@@ -8,9 +8,9 @@ It is one small Node service with three front doors:
 | --- | --- | --- |
 | `/mcp` | Claude (chat or voice) as a custom connector | OAuth 2.1, your email and password |
 | `/api/capture`, `/api/focus` | Siri Shortcuts ("Hey Siri, BJJ note") | Your bearer token |
-| `/` | The web app: Lab and focus list, technique library, notes, positions, inbox | Your email and password (stays signed in 90 days) |
+| `/` | The web app: Lab and focus list, technique library, notes, areas and positions (Game), inbox | Your email and password (stays signed in 90 days) |
 
-The database starts with ~30 positions (shared by everyone) and, for the owner, the working list from 2026-10-09 (Baratoplata through ankle lock adjustments) as the active focus list, each linked to a technique card. People you invite start with an empty notebook of their own.
+The database starts with ~30 positions (shared by everyone) and, for the owner, the working list from 2026-10-09 (Baratoplata through ankle lock adjustments) as areas on the focus list, each linked to a technique card. People you invite start with an empty notebook of their own.
 
 ## Set it up from your phone
 
@@ -61,17 +61,18 @@ From then on, every push to `main` tests, builds and deploys. The deploy copies 
 
 On claude.ai in a browser, add a **custom connector** in settings with the connector URL. Claude opens a sign-in page from this server; enter your email and `OWNER_PASSWORD`. (The first email you sign in with becomes yours; you can change it on the Account page.) Connectors added on the web also show up in the iOS app. Try it in voice mode first: that's the main thing this first version needs to prove.
 
-Try: *"What's on my BJJ focus list?"*, *"Add a note to ghost escape: turn to the knees before the hips"*, *"Move body lock passing to the top of my focus"*, *"Add a note to my half guard focus: frame on the hip before the underhook"*, *"What do I have from deep half bottom?"*, *"Undo that."*
+Try: *"What's on my BJJ focus list?"*, *"Add a note to ghost escape: turn to the knees before the hips"*, *"Move body lock passing to the top of my focus"*, *"Add a note to my half guard focus: frame on the hip before the underhook"*, *"What do I have from deep half bottom?"*, *"From bottom side, if they have the underhook and crossface, John Wayne sweep to make them post, then shuck; if they post the far leg go deep half, if they base back go octopus. Save that as a system."*, *"Take ankle locks off my focus."*, *"Undo that."*
 
 ### 7. The web app on your phone
 
 Open the server's address in Safari and sign in with your email and `OWNER_PASSWORD`. Then **Share → Add to Home Screen** for an app icon that opens full screen.
 
-- **Focus**: your ranked list of broad things to work on. Each item has a title, a description (the strategy, the cues, what success looks like; its first line shows on the list), technique cards, and notes pinned to it. Tap an item for its page: the description, its techniques, its pinned notes, recent notes on its techniques (one tap pins one), and its history. The ••• button (and the item's page) moves, pauses, completes, edits or removes it. A note's edit sheet can put it on focus items too.
+- **Focus**: your ranked list of the areas you're working on now. The ••• button moves one up, down or to the top, or takes it off focus (the area stays, plan and notes included). Add puts an area you have back on, or starts a new one.
+- **Areas**: a part of your game, with a description (the strategy, the cues, what success looks like), technique cards, notes filed under it, and optionally a **plan**: where it starts, the situation it's for, the main line of steps, and branches for what they do ("if they post the far leg: go to deep half"). Read it as an outline with each step's stripes; a step that leaves you where another plan starts says where it continues. Build it a step at a time (tap a step to change it; *Then* and *If they…* add the next), or **Describe it** in your own words and Claude outlines it for you to check before saving. The *On focus* switch puts it on or takes it off the focus list. A note's sheet files it under techniques and areas from one search; filed under an area, it's out of the inbox.
 - **Library**: every technique, searchable by name, alias or detail (typos are fine), filterable by type and top/bottom. The search finds notes too, and, with search by meaning on, a phrase like *how do I stop the knee cut* finds notes and cards about it even when they use other words. The black bar on each row is its rank bar: one stripe for learning, two for drilling, three for hitting it live, four for reliable.
 - **Technique card**: tap the belt's stripes to change status; positions, key details, common mistakes, related techniques and notes, with YouTube videos that play from the saved timestamp.
 - **+**: a new note from anywhere. Notes without a technique land in the **Inbox** to file later.
-- **Positions**: what you have from each position, top or bottom, the ways in, and the gaps.
+- **Game**: your areas by where their plans start, then the positions you have something from (the rest fold away). A position shows its plans, what you have from it top or bottom, the ways in, and the gaps.
 - **Account** (the person icon at the top of Focus): your name and belt (Claude knows both), email, password, Siri Shortcut tokens and, for the owner, People. The app wears your belt's colours, in light and dark mode; a black belt's rank bar is red. Signed out, and in its icon, the app is a black belt.
 
 Every change shows an **Undo** button, the same undo Claude uses when you say "undo that".
@@ -210,7 +211,7 @@ src/
   http/              the web app's sign-in (cookie sessions), JSON API (/api/v1), account and invites, static hosting
   shared/api.ts      types shared by the JSON API and the web app
   mcp/server.ts      the 12 MCP tools and the instructions Claude sees
-  services/          notes, techniques, focus list, search/positions/review, undo log; views.ts is the read side;
+  services/          notes, techniques, areas and focus, plan drafting, search/positions/review, undo log; views.ts is the read side;
                      semantic.ts is search by meaning
   resolve.ts         fuzzy name matching tuned for voice transcription
   auth/              OAuth server (dynamic registration, PKCE, rotating refresh tokens); users, passwords, invites, Siri tokens
@@ -222,7 +223,7 @@ test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture,
 docs/operations.md   running it: what's where, settings, what expires, rollbacks, restores, fixing the usual problems
 ```
 
-**Data model.** `users` (the owner and everyone invited, each with a belt) · `invites` (join and password-reset links) · `api_tokens` (Siri Shortcuts) · `positions` (with aliases like "100 kilos"; shared) · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, inbox flag) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `focus_items` (a title and description) + `focus_item_techniques` + `focus_item_notes` (notes pinned to an item) + `focus_events` (every add, move, pause and completion, for focus over time) · `activity_log` (powers `undo_last`). Every notebook table has a `user_id`; each request reads and writes only its signed-in user's rows (the handle services get carries the user, and a query without one throws), and composite foreign keys mean a row can only ever point at the same person's notes, techniques, sessions and sources.
+**Data model.** `users` (the owner and everyone invited, each with a belt) · `invites` (join and password-reset links) · `api_tokens` (Siri Shortcuts) · `positions` (with aliases like "100 kilos"; shared) · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, inbox flag) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `areas` (a name, aliases, description, a plan's start position, role and premise, and a rank while on focus) + `area_steps` (the plan: a tree of steps, each with a trigger, what to do, an optional card and resulting position) + `area_techniques` + `area_notes` (notes filed under it) + `focus_events` (every time it went on, moved or came off, for focus over time) · `activity_log` (powers `undo_last`). Every notebook table has a `user_id`; each request reads and writes only its signed-in user's rows (the handle services get carries the user, and a query without one throws), and composite foreign keys mean a row can only ever point at the same person's notes, techniques, sessions and sources.
 
 **Name matching.** Voice transcription mangles names, so lookups combine trigram similarity, edit distance and word matching: "barra toe plata" finds Baratoplata, "ghost" finds Ghost escape, but "omoplata" is not mistaken for Baratoplata. Exact names and aliases always win; uncertain matches are reported back rather than guessed.
 
@@ -231,19 +232,20 @@ docs/operations.md   running it: what's where, settings, what expires, rollbacks
 | Tool | Does |
 | --- | --- |
 | `search` | Techniques by fuzzy name / type / role / position / status; notes by full text or where they came from; with search by meaning on, both also by what they're about |
-| `get_technique` | A card: positions, details, mistakes, related techniques, focus status, recent notes |
+| `get_technique` | A card: positions, details, mistakes, related techniques, the areas it's in, recent notes |
 | `save_technique` | Create or update a card; add positions, aliases, details, links; star or unstar it |
-| `add_note` | Save a dated note linked to techniques and where it came from ("Zen camp seminar by Josh Jones"), optionally pinned to a focus item; unknown techniques go to the inbox |
+| `add_note` | Save a dated note linked to techniques and where it came from ("Zen camp seminar by Josh Jones"), optionally filed under an area; unknown techniques go to the inbox |
 | `update_note` | Change a note's text, kind, date or where it came from; star or unstar it; mark a question answered |
 | `get_inbox`, `file_note` | Triage notes that couldn't be placed; with `to_try`, the To try list ("silly Instagram bullshit") of videos to try before keeping |
 | `log_session` | Record a class/seminar/open mat/private; attaches that day's notes; saying the same session twice updates it |
 | `get_lab` | The Lab, the short-term working set: starred techniques and notes (stars over 4 weeks old fold away), the To try list, techniques new in the last N days, open questions for coach |
 | `clear_stars` | Unstar everything, or only stars older than N days, in one undoable step |
-| `get_focus` | Ranked focus list with time since each item's last note; one item's description, techniques and pinned notes; or the history |
-| `update_focus` | add (with a description) / move / resume / pause / backlog / complete / drop |
-| `edit_focus` | Change a focus item's title or description, link or unlink techniques and notes; one undo takes it all back |
+| `get_focus` | Ranked focus list with time since each area's last note; or the history |
+| `update_focus` | add (making the area if there isn't one) / move / remove; the older resume, pause, backlog, complete and drop still work |
+| `get_area` | One area, its plan read as if/then with each step's status and hand-offs; or every area by where it starts |
+| `save_area` | Create or change an area: name, aliases, description, techniques, a plan (steps as a flat outline with depths), on or off focus; or delete it. One undo takes it all back |
 | `get_position` | What you have from a position, what leads into it, and the gaps |
-| `review` | Last N days: sessions, notes, most-noted techniques, quiet focus items |
+| `review` | Last N days: sessions, notes, most-noted techniques, quiet areas on your focus |
 | `undo_last` | Reverse the most recent change |
 
 ## Local development
@@ -283,7 +285,7 @@ GitHub account is the root of trust. Around that:
 
 ## iPhone app
 
-`ios/` is a native app around the web app for Siri (App Intents: add a note, ask coach, focus, Lab)
+`ios/` is a native app around the web app for Siri (App Intents: add a note, ask coach, focus, a plan, Lab)
 and offline capture. It's built and sent to TestFlight by GitHub Actions; see [ios/README.md](ios/README.md).
 
 ## Next

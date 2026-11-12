@@ -1,6 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, type ReactNode } from 'react';
-import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router';
+import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useParams } from 'react-router';
 import { queryClient, setUnauthorizedHandler, useNotes, useSession } from './api';
 import { CaptureProvider, useCapture } from './components/Capture';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -8,14 +8,14 @@ import { Icon } from './components/Icon';
 import { applyBelt } from './lib/belt';
 import { ToastProvider } from './components/Toast';
 import { Account } from './pages/Account';
+import { Area } from './pages/Area';
 import { Focus } from './pages/Focus';
-import { FocusItem } from './pages/FocusItem';
 import { Inbox } from './pages/Inbox';
 import { Join } from './pages/Join';
 import { Lab } from './pages/Lab';
 import { Library } from './pages/Library';
 import { Login } from './pages/Login';
-import { Position, Positions } from './pages/Positions';
+import { Game, Position } from './pages/Positions';
 import { Share } from './pages/Share';
 import { Technique } from './pages/Technique';
 import { ToTry } from './pages/ToTry';
@@ -69,11 +69,13 @@ function Shell() {
           <Routes>
             <Route path="/" element={<Lab />} />
             <Route path="/focus" element={<Focus />} />
-            <Route path="/focus/:id" element={<FocusItem />} />
+            <Route path="/focus/:id" element={<OldFocusItem />} />
+            <Route path="/areas/:id" element={<Area />} />
             <Route path="/try" element={<ToTry />} />
             <Route path="/library" element={<Library />} />
             <Route path="/t/:id" element={<Technique />} />
-            <Route path="/positions" element={<Positions />} />
+            <Route path="/game" element={<Game />} />
+            <Route path="/positions" element={<Navigate to="/game" replace />} />
             <Route path="/p/:slug" element={<Position />} />
             <Route path="/inbox" element={<Inbox />} />
             <Route path="/inbox/try" element={<Navigate to="/try" replace />} />
@@ -107,9 +109,9 @@ function TabBar() {
       <button type="button" className="tab-note" aria-label="New note" onClick={() => capture.open()}>
         <Icon name="plus" size={28} />
       </button>
-      <Tab to="/positions" active={under('/positions', '/p')}>
+      <Tab to="/game" active={under('/game', '/p', '/areas')}>
         <Icon name="positions" />
-        Positions
+        Game
       </Tab>
       <Tab to="/inbox" active={under('/inbox')}>
         <Icon name="inbox" />
@@ -131,6 +133,11 @@ function Tab({ to, active, children }: { to: string; active: boolean; children: 
       {children}
     </Link>
   );
+}
+
+/** Focus items became areas: old links (bookmarks, shared URLs) still land on the same page. */
+function OldFocusItem() {
+  return <Navigate to={`/areas/${useParams().id}`} replace />;
 }
 
 function NotFound() {

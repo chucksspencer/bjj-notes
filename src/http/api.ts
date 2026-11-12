@@ -21,7 +21,7 @@ import { ForbiddenError as Forbidden, NotFoundError as NotFound, UserError } fro
 import { userCtx, type Ctx } from '../services/context.js';
 import { uid } from '../db.js';
 import { userIdOf } from './auth.js';
-import { createArea, deleteArea, editArea, linkArea, MAX_DEPTH, MAX_STEPS, updateFocus } from '../services/areas.js';
+import { createArea, deleteArea, editArea, linkArea, MAX_DEPTH, MAX_STEPS, planSpeech, updateFocus } from '../services/areas.js';
 import { draftPlan } from '../services/plans.js';
 import { attachmentThumb, linkAttachment } from '../services/attachments.js';
 import { clearStars, markAnswered } from '../services/marks.js';
@@ -251,6 +251,12 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
       const message = await linkArea(ctx, areaId, b);
       return { message, area: await loadArea(ctx, areaId) };
     }),
+  );
+
+  // A plan read aloud, for Siri ("what's my plan from bottom half").
+  r.get(
+    '/api/v1/plan',
+    h(async (ctx, req) => planSpeech(ctx, z.object({ q: z.string().trim().max(200) }).parse(req.query).q)),
   );
 
   // "Describe it": Claude outlines a plan from plain words; nothing is saved until the outline is.

@@ -20,6 +20,12 @@ struct FocusView: Codable {
     let active: [FocusItem]
 }
 
+/// A plan, as Siri says it (GET /api/v1/plan).
+struct PlanSpeech: Codable {
+    let areaId: Int?
+    let speech: String
+}
+
 struct NoteSummary: Codable, Identifiable, Hashable {
     let id: Int
     let body: String

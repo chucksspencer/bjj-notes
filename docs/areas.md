@@ -8,8 +8,7 @@ sit on top of it:
 - **A place on the focus list.** An area is on focus (ranked) or it isn't. Taking it off means
   "I've moved on to other things"; the area, its plan and its notes stay.
 
-Schema: `db/migrations/016_areas.sql`. This file is the plan for the code; none of it exists yet.
-The migration renames tables, so it has to ship in the same change as the code below.
+Schema: `db/migrations/016_areas.sql`. Built as planned here, with the differences listed at the end.
 
 ## What the migration does
 
@@ -147,7 +146,7 @@ Server instructions, replacing the two focus bullets:
 - **Tabs.** Positions becomes "Game": your areas grouped by start position (on-focus ones marked),
   then the position list with empty positions folded away. A position page leads with "Plans
   from here".
-- **Area page** (today's focus item page): adds the plan between the description and techniques.
+- **Area page** (today's focus item page): adds the plan above the description and techniques.
   One switch, "On focus", with Up / Down / Top when it's on. Pause, Done and Remove go away;
   Delete is separate and asks first.
 - **Plan, reading:** an outline two levels deep with a status bar per step; deeper branches open
@@ -166,6 +165,21 @@ Server instructions, replacing the two focus bullets:
 3. Plans: `saveArea` steps, `getArea`, undo, MCP tools, search.
 4. Web: area page plan (read, then edit), Game tab, "File under".
 5. iOS: a read intent ("what's my plan from bottom half?").
+
+## How it was built, where it differs
+
+- `edit_focus` is gone: `save_area` does everything it did. `get_focus` with `item` still reads an area.
+- `add_note` takes `area`; `focus` is still accepted.
+- Old URLs: `/focus/:id` redirects to `/areas/:id`, `/positions` to `/game`.
+- `GET /api/v1/focus` keeps a `label` on each item (the name) for installed iOS builds.
+- In the note sheet's "File under" search, technique matches come before area matches, and area matches
+  wait for the technique results, so an area that shares a card's name doesn't catch the tap.
+- The technique card shows "In" with the card's areas under its belt; "Related" stays (variations and
+  counters still live there).
+- Plan steps are edited a step at a time: *Then* (the next main-line step, or what follows inside a branch)
+  and *If they…* (a branch). Reordering steps isn't there yet: delete and add, with Undo.
+- Siri: `GET /api/v1/plan?q=` reads a plan aloud, found by the position it starts from or by name, and the
+  iOS app has a "What's my plan" intent for it.
 
 ## Left out for now
 

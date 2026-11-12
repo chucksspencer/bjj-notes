@@ -2,7 +2,7 @@
 
 A small native app around the web app, there for what a web page can't do:
 
-- **Siri.** "Add a note to BJJ Notes", "Ask coach in BJJ Notes", "What's my focus in BJJ Notes",
+- **Siri.** "Add a note to BJJ Notes", "Ask coach in BJJ Notes", "What's my focus in BJJ Notes", "What's my plan in BJJ Notes",
   "What's in my BJJ Notes lab". They work without building a Shortcut and show up in the Shortcuts
   app, Spotlight and on the Action button.
 - **Offline.** A note added with no signal is kept on the phone and sent when you're back online:
@@ -100,4 +100,4 @@ The Xcode project is generated from `project.yml` with [XcodeGen](https://github
 | `BJJNotesTests` | Unit tests, run on every build |
 
 The server side is `POST /api/v1/capture` (the same tidy-and-file as the Siri Shortcut, signed in like
-the web app, with `clientId`, `date`, `kind` and `starred`), `GET /api/v1/focus` and `GET /api/v1/lab`.
+the web app, with `clientId`, `date`, `kind` and `starred`), `GET /api/v1/focus`, `GET /api/v1/plan?q=` and `GET /api/v1/lab`.

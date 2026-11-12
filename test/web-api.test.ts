@@ -666,6 +666,15 @@ describe('JSON API', () => {
     ]);
     expect((await api<PositionView>('GET', '/api/v1/positions/half-guard?role=top')).body.plans).toEqual([]);
 
+    // Siri reads a plan aloud, found by name or by where it starts.
+    const said = (q: string) => api('GET', `/api/v1/plan?q=${encodeURIComponent(q)}`).then(r => r.body.speech as string);
+    expect(await said('winning the underhook')).toBe(
+      'Bottom half: winning the underhook. When top has the underhook and crossface: John Wayne sweep, to force them to post the underhook hand. Then shuck. If they post the far leg, go to deep half. If they base back, octopus sweeps.',
+    );
+    expect(await said('bottom half guard')).toMatch(/^Bottom half: winning the underhook\./);
+    expect(await said('half guard top')).toBe("You don't have a plan from Half guard on top yet.");
+    expect(await said('qwxz zzyq')).toBe("I couldn't find a plan called qwxz zzyq.");
+
     // A bad outline is refused whole.
     const bad = await api('PATCH', `/api/v1/areas/${area.id}`, { plan: [{ depth: 1, action: 'Orphan' }] });
     expect([bad.status, bad.body.message]).toEqual([400, 'The first step must be on the main line (depth 0).']);

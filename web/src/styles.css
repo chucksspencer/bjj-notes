@@ -1923,3 +1923,266 @@ button.clip:active {
 .share-hint {
   margin: -6px 0 16px;
 }
+
+/* ---------- areas and plans ---------- */
+
+/* On focus or off: a switch, since it's a state of the area rather than something done to it. */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 12px 0 4px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.switch-track {
+  position: relative;
+  width: 44px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--rule);
+  transition: background 0.15s ease;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transition: transform 0.15s ease;
+}
+
+.switch[aria-checked='true'] .switch-track {
+  background: var(--accent);
+}
+
+.switch[aria-checked='true'] .switch-thumb {
+  transform: translateX(18px);
+}
+
+.switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.focus-actions:has(.switch) {
+  align-items: center;
+  margin: 0 0 4px;
+}
+
+.tech-meta .block {
+  display: block;
+}
+
+/* A section heading with buttons beside it. */
+.section-row {
+  margin: 28px 0 8px;
+}
+
+.section-row .section-title {
+  margin: 0;
+}
+
+.section-action {
+  margin-top: 8px;
+}
+
+.list-foot {
+  margin-top: 12px;
+}
+
+/* Where a plan starts: tap to change it. */
+.plan-start {
+  display: block;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 12px var(--pad);
+  border: 0;
+  border-left: 4px solid var(--belt-fill);
+  border-radius: 0 var(--radius-small) var(--radius-small) 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plan-start.static {
+  cursor: default;
+}
+
+.plan-start-label {
+  color: var(--muted);
+}
+
+.plan-premise {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.plan-panel {
+  padding: 6px 0;
+}
+
+.plan,
+.plan-branches {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Branches hang under the step they follow, on a rule, so the tree reads at a glance. */
+.plan-branches {
+  margin-left: calc(var(--pad) + 22px);
+  border-left: 2px solid var(--rule);
+}
+
+.plan-step.depth-0 + .plan-step.depth-0 {
+  border-top: 1px solid var(--rule);
+}
+
+.plan-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px var(--pad);
+}
+
+.plan-branches .plan-line {
+  padding-left: 12px;
+}
+
+.plan-num {
+  flex: none;
+  width: 22px;
+  font-variation-settings: 'wdth' 62;
+  font-weight: 850;
+  font-size: 26px;
+  line-height: 1;
+  font-feature-settings: 'tnum';
+}
+
+.plan-body {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.plan-body {
+  cursor: pointer;
+}
+
+.plan-line .rank-bar {
+  margin-top: 4px;
+}
+
+.plan-when {
+  display: block;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.plan-do {
+  display: block;
+  font-size: 18px;
+  font-variation-settings: 'wdth' 74;
+  font-weight: 720;
+  line-height: 1.2;
+}
+
+.plan-meta,
+.plan-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.plan-note {
+  color: var(--ink);
+}
+
+.plan-meta a {
+  color: var(--belt);
+  font-weight: 600;
+}
+
+.plan-more {
+  margin: 0 0 6px calc(var(--pad) + 26px);
+}
+
+.plan-branches .plan-more {
+  margin-left: 4px;
+}
+
+.plan-more svg {
+  margin-left: 2px;
+}
+
+/* While editing: a step is tappable, and offers what can follow it. */
+.plan.editing .plan-body {
+  margin: -6px -8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-small);
+  background: var(--surface-2);
+}
+
+.plan-add {
+  display: flex;
+  gap: 4px;
+  margin: -4px 0 6px calc(var(--pad) + 26px);
+}
+
+.plan-branches .plan-add {
+  margin-left: 6px;
+}
+
+.plan-add-end {
+  margin: 4px var(--pad) 6px;
+}
+
+/* An area's place on the focus list, in lists of areas. */
+.area-rank {
+  flex: none;
+  min-width: 28px;
+  font-variation-settings: 'wdth' 62;
+  font-weight: 850;
+  font-size: 26px;
+  line-height: 1;
+  font-feature-settings: 'tnum';
+}
+
+.group-title a {
+  color: inherit;
+}
+
+/* The areas a technique is part of, under its belt. */
+.tech-areas {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.delete-link {
+  margin: 28px 0 0 -16px;
+}

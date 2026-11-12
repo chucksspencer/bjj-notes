@@ -87,6 +87,14 @@ final class API {
         try await send(request("GET", "/api/v1/focus", timeout: timeout), as: FocusView.self)
     }
 
+    /// A plan read aloud, found by area name or by where it starts ("bottom half").
+    func plan(_ query: String, timeout: TimeInterval = 15) async throws -> PlanSpeech {
+        var parts = URLComponents()
+        parts.path = "/api/v1/plan"
+        parts.queryItems = [URLQueryItem(name: "q", value: query)]
+        return try await send(request("GET", parts.string ?? "/api/v1/plan", timeout: timeout), as: PlanSpeech.self)
+    }
+
     func lab(timeout: TimeInterval = 15) async throws -> LabView {
         try await send(request("GET", "/api/v1/lab", timeout: timeout), as: LabView.self)
     }
