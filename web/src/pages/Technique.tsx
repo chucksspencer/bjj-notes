@@ -84,7 +84,6 @@ function TechniqueBody({ v, today, onEdit }: { v: TechniqueView; today: string; 
   const toast = useToast();
   const navigate = useNavigate();
   const ref: TechniqueRef = { id: v.id, name: v.name, type: v.type, role: v.role, status: v.status };
-  const activeFocus = v.focus.find(f => f.status === 'active');
 
   return (
     <>
@@ -107,10 +106,19 @@ function TechniqueBody({ v, today, onEdit }: { v: TechniqueView; today: string; 
         onChange={status => patch.mutate({ status }, { onError: toast.error })}
       />
 
-      {activeFocus && (
-        <p className="small" style={{ marginTop: 14 }}>
-          <Link to={`/focus/${activeFocus.id}`}>Number {activeFocus.rank} on your focus list</Link>
-        </p>
+      {v.areas.length > 0 && (
+        <div className="tech-areas">
+          <span className="muted small">In</span>
+          <div className="chips">
+            {v.areas.map(a => (
+              <Link key={a.id} className="chip chip-focus" to={`/areas/${a.id}`}>
+                <Icon name="focus" size={16} />
+                {a.rank ? `#${a.rank} ` : ''}
+                {a.name}
+              </Link>
+            ))}
+          </div>
+        </div>
       )}
 
       <SectionHead title="Positions" action="Add" onAction={() => onEdit('position')} />

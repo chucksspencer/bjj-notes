@@ -2,10 +2,13 @@ import { QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/re
 import type {
   AccountView,
   ApiTokenView,
+  AreaCreateInput,
+  AreaDetail,
+  AreaLinksInput,
+  AreaPatch,
+  AreasView,
   BeltRank,
   FocusAction,
-  FocusItemDetail,
-  FocusLinksInput,
   InviteCheck,
   InviteView,
   Me,
@@ -17,6 +20,7 @@ import type {
   NoteKind,
   NotePatch,
   NoteView,
+  PlanDraft,
   PositionListItem,
   PositionView,
   Role,
@@ -78,7 +82,8 @@ export const keys = {
   session: ['session'] as const,
   account: ['account'] as const,
   focus: ['focus'] as const,
-  focusItem: (id: number) => ['focusItem', id] as const,
+  areas: ['areas'] as const,
+  area: (id: number) => ['area', id] as const,
   lab: ['lab'] as const,
   techniques: (f: TechniqueFilters = {}) => ['techniques', f] as const,
   technique: (id: number) => ['technique', id] as const,
@@ -90,7 +95,7 @@ export const keys = {
 
 /** Everything that may show changed data after a write. */
 function invalidateAll(qc: ReturnType<typeof useQueryClient>) {
-  for (const k of ['focus', 'focusItem', 'lab', 'techniques', 'technique', 'notes', 'positions', 'position', 'sessions']) {
+  for (const k of ['focus', 'areas', 'area', 'lab', 'techniques', 'technique', 'notes', 'positions', 'position', 'sessions']) {
     void qc.invalidateQueries({ queryKey: [k] });
   }
 }
@@ -131,58 +136,77 @@ export function useSignOut() {
   });
 }
 
-// ---------- focus ----------
+// ---------- focus and areas ----------
 
+/** The focus list: the areas being worked on now, top first. */
 export const useFocus = () => useQuery({ queryKey: keys.focus, queryFn: () => request<FocusView>('GET', '/api/v1/focus') });
 
-/** One focus item's page. */
-export const useFocusItem = (id: number) =>
-  useQuery({ queryKey: keys.focusItem(id), queryFn: () => request<FocusItemDetail>('GET', `/api/v1/focus/${id}`) });
+/** Every area, on focus first. */
+export const useAreas = (enabled = true) => useQuery({ queryKey: keys.areas, queryFn: () => request<AreasView>('GET', '/api/v1/areas'), enabled });
 
-/** A focus change: the list comes back with it; item pages, cards and notes may show it too. */
-function afterFocusWrite(qc: ReturnType<typeof useQueryClient>, focus: FocusView) {
-  qc.setQueryData(keys.focus, focus);
-  for (const k of ['focusItem', 'technique', 'notes', 'lab']) void qc.invalidateQueries({ queryKey: [k] });
+/** One area's page. */
+export const useArea = (id: number) => useQuery({ queryKey: keys.area(id), queryFn: () => request<AreaDetail>('GET', `/api/v1/areas/${id}`) });
+
+/** After a change to an area or the focus list: everything that shows areas may have changed. */
+function afterAreaWrite(qc: ReturnType<typeof useQueryClient>, area?: AreaDetail) {
+  if (area) qc.setQueryData(keys.area(area.id), area);
+  for (const k of ['focus', 'areas', 'area', 'technique', 'notes', 'lab', 'position']) void qc.invalidateQueries({ queryKey: [k] });
 }
 
+/** Put an area on the focus list (add), move it, or take it off (remove). */
 export function useFocusAction() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (v: { id: number; action: FocusAction; position?: number }) =>
       request<MessageResult & { focus: FocusView }>('POST', `/api/v1/focus/${v.id}/actions`, { action: v.action, position: v.position }),
-    onSuccess: r => afterFocusWrite(qc, r.focus),
-  });
-}
-
-export function useAddFocus() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (v: { label: string; description?: string; techniqueIds?: number[]; noteIds?: number[]; position?: number }) =>
-      request<MessageResult & { focus: FocusView }>('POST', '/api/v1/focus', v),
-    onSuccess: r => afterFocusWrite(qc, r.focus),
-  });
-}
-
-export function useEditFocus() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (v: { id: number; label?: string; description?: string | null }) =>
-      request<MessageResult & { focus: FocusView }>('PATCH', `/api/v1/focus/${v.id}`, { label: v.label, description: v.description }),
-    onSuccess: r => afterFocusWrite(qc, r.focus),
-  });
-}
-
-/** Links techniques or notes to a focus item, or unlinks them. */
-export function useLinkFocus() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, ...links }: FocusLinksInput & { id: number }) =>
-      request<MessageResult & { item: FocusItemDetail; focus: FocusView }>('POST', `/api/v1/focus/${id}/links`, links),
     onSuccess: r => {
-      qc.setQueryData(keys.focusItem(r.item.id), r.item);
-      afterFocusWrite(qc, r.focus);
+      qc.setQueryData(keys.focus, r.focus);
+      afterAreaWrite(qc);
     },
   });
+}
+
+export function useCreateArea() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: AreaCreateInput) => request<MessageResult & { area: AreaDetail }>('POST', '/api/v1/areas', v),
+    onSuccess: r => afterAreaWrite(qc, r.area),
+  });
+}
+
+/** Change an area's fields, or (with plan) its whole plan. */
+export function useEditArea() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: AreaPatch & { id: number }) => request<MessageResult & { area: AreaDetail }>('PATCH', `/api/v1/areas/${id}`, patch),
+    onSuccess: r => afterAreaWrite(qc, r.area),
+  });
+}
+
+export function useDeleteArea() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => request<MessageResult>('DELETE', `/api/v1/areas/${id}`),
+    onSuccess: (_r, id) => {
+      qc.removeQueries({ queryKey: keys.area(id) });
+      afterAreaWrite(qc);
+    },
+  });
+}
+
+/** Links techniques or notes to an area, or unlinks them. */
+export function useLinkArea() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...links }: AreaLinksInput & { id: number }) =>
+      request<MessageResult & { area: AreaDetail }>('POST', `/api/v1/areas/${id}/links`, links),
+    onSuccess: r => afterAreaWrite(qc, r.area),
+  });
+}
+
+/** Has Claude outline a plan described in plain words. Nothing is saved. */
+export function useDraftPlan() {
+  return useMutation({ mutationFn: (text: string) => request<PlanDraft>('POST', '/api/v1/plans/draft', { text }) });
 }
 
 // ---------- lab ----------

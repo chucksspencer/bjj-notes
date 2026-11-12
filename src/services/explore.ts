@@ -5,7 +5,7 @@ import { mediaTag } from './attachments.js';
 import { today, type Ctx } from './context.js';
 import type { NoteView, Status, TechniqueListItem, TechniqueType } from '../shared/api.js';
 import { searchNotes, searchTechniques } from './semantic.js';
-import { FOCUS_LAST_NOTE_SQL, LAB_DAYS, labView, positionView, techniqueList } from './views.js';
+import { AREA_LAST_NOTE_SQL, LAB_DAYS, labView, positionView, techniqueList } from './views.js';
 import { daysAgo, isoDate, type Role } from './vocab.js';
 
 /** What you can do from a position (optionally as top or bottom), what leads into it, and the gaps. */
@@ -32,7 +32,35 @@ export async function getPosition(ctx: Ctx, name: string, role?: Role): Promise<
     lines.push(`Ways in: ${v.into.map(t => `${t.name}${t.edge.from ? ` (from ${t.edge.from.name})` : ''}`).join('; ')}`);
   }
   if (v.gaps.length) lines.push(`Gaps: no ${v.gaps.map(g => `${g.role} ${g.type}`).join(', ')} logged.`);
+  if (v.plans.length) lines.push(`Plans from here: ${v.plans.map(a => a.name).join('; ')} (get_area to read one).`);
   return lines.join('\n');
+}
+
+/**
+ * Areas whose name or alias is like the query, or whose words (description, premise, steps) contain it.
+ * Matching steps are read back, so "what do I do when they post the far leg" finds the branch.
+ */
+async function searchAreas(ctx: Ctx, query: string, limit: number): Promise<{ name: string; rank: number | null; steps: string[] }[]> {
+  const { rows } = await ctx.db.query<{ name: string; rank: number | null; steps: string[] | null }>(
+    `with q as (select plainto_tsquery('english', $1) as tq)
+     select a.name, a.rank,
+            (select array_agg(coalesce('if ' || st.trigger || ': ', '') || st.action order by st.id)
+               from area_steps st, q
+              where st.area_id = a.id and numnode(q.tq) > 0
+                and to_tsvector('english', coalesce(st.trigger, '') || ' ' || st.action || ' ' || coalesce(st.note, '')) @@ q.tq) as steps
+     from areas a, q
+     where a.user_id = $2
+       and ((select max(bjj_name_score(c, $1)) from unnest(array_prepend(a.name, a.aliases)) c) >= 0.45
+            or (numnode(q.tq) > 0 and (
+                  to_tsvector('english', a.name || ' ' || array_to_string(a.aliases, ' ') || ' ' || coalesce(a.description, '') || ' '
+                              || coalesce(a.premise, '')) @@ q.tq
+                  or exists (select 1 from area_steps st where st.area_id = a.id
+                               and to_tsvector('english', coalesce(st.trigger, '') || ' ' || st.action || ' ' || coalesce(st.note, '')) @@ q.tq))))
+     order by a.rank nulls last, a.name
+     limit $3`,
+    [query, uid(ctx.db), limit],
+  );
+  return rows.map(r => ({ name: r.name, rank: r.rank, steps: r.steps ?? [] }));
 }
 
 export interface SearchInput {
@@ -66,6 +94,11 @@ export async function search(ctx: Ctx, input: SearchInput): Promise<string> {
     }
   }
   if (query) {
+    const areas = await searchAreas(ctx, query, limit);
+    if (areas.length) {
+      lines.push('Areas:');
+      for (const a of areas) lines.push(`- ${a.name}${a.rank ? ` (#${a.rank} on focus)` : ''}${a.steps.length ? `: ${a.steps.join('; ')}` : ''}`);
+    }
     const notes = await searchNotes(ctx, { q: query, limit }, 'always');
     if (notes.length) {
       lines.push('Notes:');
@@ -104,9 +137,9 @@ export async function review(ctx: Ctx, days = 7): Promise<string> {
     )
   ).rows;
   const quiet = (
-    await q.query<{ label: string; rank: number; last_note: string | null }>(
-      `select f.label, f.rank, ${FOCUS_LAST_NOTE_SQL} as last_note
-       from focus_items f where f.user_id = $1 and f.status = 'active' order by f.rank`,
+    await q.query<{ name: string; rank: number; last_note: string | null }>(
+      `select a.name, a.rank, ${AREA_LAST_NOTE_SQL} as last_note
+       from areas a where a.user_id = $1 and a.rank is not null order by a.rank`,
       [me],
     )
   ).rows.filter(f => !f.last_note || Date.parse(end) - Date.parse(f.last_note) > 14 * 86_400_000);
@@ -121,7 +154,7 @@ export async function review(ctx: Ctx, days = 7): Promise<string> {
   if (top.length) lines.push(`Most noted: ${top.map(t => `${t.name} (${t.c})`).join(', ')}.`);
   if (quiet.length) {
     const now = new Date(`${end}T12:00:00Z`);
-    lines.push(`Quiet focus items (nothing in 2+ weeks): ${quiet.map(f => `#${f.rank} ${f.label} — ${daysAgo(f.last_note, now)}`).join('; ')}.`);
+    lines.push(`Quiet on your focus (nothing in 2+ weeks): ${quiet.map(f => `#${f.rank} ${f.name} — ${daysAgo(f.last_note, now)}`).join('; ')}.`);
   }
   if (inbox) lines.push(`${inbox} note${inbox === 1 ? '' : 's'} waiting in the inbox.`);
   return lines.join('\n');

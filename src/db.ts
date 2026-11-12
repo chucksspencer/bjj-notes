@@ -107,7 +107,11 @@ export async function pgliteDb(dataDir?: string): Promise<Db> {
 const MIGRATIONS_DIR = new URL('../db/migrations/', import.meta.url);
 
 /** Applies db/migrations/*.sql in name order, each once, each in its own transaction. */
-export async function migrate(db: Db): Promise<string[]> {
+/**
+ * Applies the migrations not yet applied, in order. `before` stops short of one migration (and everything
+ * after it), and `through` stops after one; tests use them to put data in place just before a migration.
+ */
+export async function migrate(db: Db, opts: { before?: string; through?: string } = {}): Promise<string[]> {
   await db.exec(`create table if not exists schema_migrations (
     name text primary key, applied_at timestamptz not null default now())`);
   const applied = new Set(
@@ -116,6 +120,8 @@ export async function migrate(db: Db): Promise<string[]> {
   const files = (await readdir(MIGRATIONS_DIR)).filter(f => f.endsWith('.sql')).sort();
   const ran: string[] = [];
   for (const file of files) {
+    if (opts.before !== undefined && file >= opts.before) break;
+    if (opts.through !== undefined && file > opts.through) break;
     if (applied.has(file)) continue;
     const sql = await readFile(new URL(file, MIGRATIONS_DIR), 'utf8');
     await db.tx(async q => {

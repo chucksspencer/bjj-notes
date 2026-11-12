@@ -1,28 +1,27 @@
 import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
-import type { FocusRef, NoteKind, NoteView, TechniqueRef } from '../../../src/shared/api';
+import type { AreaRef, NoteKind, NoteView, TechniqueRef } from '../../../src/shared/api';
 import { useAddNote, useDeleteNote, useEditNote } from '../api';
 import { localToday, NOTE_KIND_LABEL, NOTE_KINDS } from '../lib/format';
-import { FocusPicker } from './FocusControls';
 import { OriginPicker, originPayload, type Origin } from './OriginPicker';
 import { Sheet } from './Sheet';
 import { TechniquePicker, type NewTechnique } from './TechniquePicker';
 import { useToast } from './Toast';
 
 interface CaptureApi {
-  /** New note, optionally about some techniques, or on a focus item, already. */
-  open: (preset?: { techniques?: TechniqueRef[]; focus?: FocusRef[] }) => void;
+  /** New note, optionally about some techniques, or filed under an area, already. */
+  open: (preset?: { techniques?: TechniqueRef[]; areas?: AreaRef[] }) => void;
   edit: (note: NoteView) => void;
 }
 
 const Ctx = createContext<CaptureApi>({ open: () => {}, edit: () => {} });
 export const useCapture = () => useContext(Ctx);
 
-type State = { mode: 'new'; techniques: TechniqueRef[]; focus: FocusRef[] } | { mode: 'edit'; note: NoteView } | null;
+type State = { mode: 'new'; techniques: TechniqueRef[]; areas: AreaRef[] } | { mode: 'edit'; note: NoteView } | null;
 
 export function CaptureProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<State>(null);
   const api: CaptureApi = {
-    open: useCallback(preset => setState({ mode: 'new', techniques: preset?.techniques ?? [], focus: preset?.focus ?? [] }), []),
+    open: useCallback(preset => setState({ mode: 'new', techniques: preset?.techniques ?? [], areas: preset?.areas ?? [] }), []),
     edit: useCallback(note => setState({ mode: 'edit', note }), []),
   };
   const close = useCallback(() => setState(null), []);
@@ -39,8 +38,8 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
   const [text, setText] = useState(editing?.body ?? '');
   const [techniques, setTechniques] = useState<TechniqueRef[]>(editing?.techniques ?? (state.mode === 'new' ? state.techniques : []));
   const [newOnes, setNewOnes] = useState<NewTechnique[]>([]);
-  const [focus, setFocus] = useState<FocusRef[]>(editing?.focus ?? (state.mode === 'new' ? state.focus : []));
-  const focusChanged = !editing || focus.map(f => f.id).sort().join() !== editing.focus.map(f => f.id).sort().join();
+  const [areas, setAreas] = useState<AreaRef[]>(editing?.areas ?? (state.mode === 'new' ? state.areas : []));
+  const areasChanged = !editing || areas.map(f => f.id).sort().join() !== editing.areas.map(f => f.id).sort().join();
   const [kind, setKind] = useState<NoteKind>(editing?.kind ?? 'instruction');
   const [date, setDate] = useState(editing?.observedOn ?? localToday());
   const [origin, setOrigin] = useState<Origin>(
@@ -70,7 +69,7 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
           kind,
           date,
           techniqueIds: techniques.map(t => t.id),
-          ...(focusChanged ? { focusItemIds: focus.map(f => f.id) } : {}),
+          ...(areasChanged ? { areaIds: areas.map(f => f.id) } : {}),
           ...(unchanged ? {} : originPayload(origin, date)),
         },
         {
@@ -90,7 +89,7 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
         date,
         techniqueIds: techniques.map(t => t.id),
         newTechniques: newOnes,
-        focusItemIds: focus.length ? focus.map(f => f.id) : undefined,
+        areaIds: areas.length ? areas.map(f => f.id) : undefined,
         source: url.trim() ? { url: url.trim(), timestamp: timestamp.trim() || undefined } : undefined,
         toTry: url.trim() ? toTry : undefined,
         starred: starred || undefined,
@@ -98,7 +97,7 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
       },
       {
         onSuccess: r => {
-          const names = r.note.techniques.map(t => t.name);
+          const names = [...r.note.areas.map(a => a.name), ...r.note.techniques.map(t => t.name)];
           toast.show(r.note.toTry ? 'Added to To try' : names.length ? `Saved to ${names.join(', ')}` : 'Saved to your inbox', {
             undoable: true,
           });
@@ -124,9 +123,15 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
           />
         </label>
 
-        <TechniquePicker selected={techniques} onChange={setTechniques} newOnes={newOnes} onNewChange={editing ? undefined : setNewOnes} />
-
-        <FocusPicker selected={focus} onChange={setFocus} />
+        <TechniquePicker
+          label="File under"
+          selected={techniques}
+          onChange={setTechniques}
+          newOnes={newOnes}
+          onNewChange={editing ? undefined : setNewOnes}
+          areas={areas}
+          onAreasChange={setAreas}
+        />
 
         <div className="field">
           <span className="label">Kind of note</span>
@@ -208,9 +213,9 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
             Delete note
           </button>
         )}
-        {!editing && techniques.length === 0 && newOnes.length === 0 && !(url.trim() && toTry) && (
+        {!editing && techniques.length === 0 && newOnes.length === 0 && areas.length === 0 && !(url.trim() && toTry) && (
           <p className="muted small" style={{ marginTop: 8 }}>
-            Notes without a technique go to your inbox to file later.
+            Notes without a technique or area go to your inbox to file later.
           </p>
         )}
       </form>

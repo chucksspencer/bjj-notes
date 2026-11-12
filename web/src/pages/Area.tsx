@@ -1,36 +1,33 @@
 import { useDeferredValue, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import type { FocusItemDetail, FocusStatus, TechniqueRef } from '../../../src/shared/api';
-import { useFocus, useFocusItem, useLinkFocus, useNotes } from '../api';
+import type { AreaDetail, TechniqueRef } from '../../../src/shared/api';
+import { useArea, useDeleteArea, useFocus, useLinkArea, useNotes } from '../api';
+import { AreaEditSheet, FocusControls } from '../components/AreaControls';
 import { useCapture } from '../components/Capture';
-import { FocusActions, FocusEditSheet } from '../components/FocusControls';
 import { Icon } from '../components/Icon';
 import { NoteItem } from '../components/NoteItem';
+import { PlanSection } from '../components/Plan';
 import { Sheet } from '../components/Sheet';
 import { TechniquePicker } from '../components/TechniquePicker';
 import { useToast } from '../components/Toast';
 import { friendlyDate, lastNoteText, localToday } from '../lib/format';
 
-type Editing = null | 'details' | 'techniques' | 'notes';
+type Editing = null | 'details' | 'techniques' | 'notes' | 'delete';
 
-const STATUS_TEXT: Record<Exclude<FocusStatus, 'active'>, string> = {
-  paused: 'Paused',
-  backlog: 'In the backlog',
-  done: 'Done',
-  dropped: 'Removed from your focus',
-};
-
-/** One focus item: what it's about, its techniques, the notes pinned to it, and its history. */
-export function FocusItem() {
+/**
+ * One area: whether it's on focus, what it's about, its plan (if it's a system), its techniques, the notes
+ * filed under it, and its focus history.
+ */
+export function Area() {
   const id = Number(useParams().id);
-  const item = useFocusItem(id);
+  const item = useArea(id);
   const focus = useFocus();
   const navigate = useNavigate();
   const [editing, setEditing] = useState<Editing>(null);
   const today = focus.data?.today ?? localToday();
 
   const back = (
-    <button type="button" className="btn ghost back" onClick={() => (history.length > 1 ? navigate(-1) : navigate('/focus'))}>
+    <button type="button" className="btn ghost back" onClick={() => (history.length > 1 ? navigate(-1) : navigate('/game'))}>
       <Icon name="back" size={20} />
       Back
     </button>
@@ -51,11 +48,19 @@ export function FocusItem() {
   return (
     <div className="page">
       {back}
-      <h1 className="display tech-name">{v.label}</h1>
+      <div className="row-split tech-head">
+        <h1 className="display tech-name grow">{v.name}</h1>
+        <button type="button" className="btn ghost small" onClick={() => setEditing('details')}>
+          Edit
+        </button>
+      </div>
       <p className="tech-meta">
-        {v.status === 'active' ? `Number ${v.rank} on your focus list` : STATUS_TEXT[v.status]}. {lastNoteText(v.lastNoteOn, today)}.
+        {v.rank ? `Number ${v.rank} on your focus list` : 'Off focus'}. {lastNoteText(v.lastNoteOn, today)}.
+        {v.aliases.length > 0 && <span className="block">Also called {v.aliases.join(', ')}</span>}
       </p>
-      <FocusActions item={v} first={v.rank === 1} last={v.rank === activeCount} onEdit={() => setEditing('details')} />
+      <FocusControls area={v} count={activeCount} />
+
+      <PlanSection area={v} />
 
       <SectionHead title="Description">
         <button type="button" className="btn ghost small" onClick={() => setEditing('details')}>
@@ -84,16 +89,21 @@ export function FocusItem() {
           ))}
         </div>
       ) : (
-        <p className="section-hint">The technique cards this is about. Their notes show up here.</p>
+        <p className="section-hint">The technique cards this is about. Their notes show up here, and so do the cards in its plan.</p>
       )}
 
       <LinkedNotes v={v} today={today} onLink={() => setEditing('notes')} />
       <RelatedNotes v={v} today={today} />
       <History v={v} today={today} />
 
-      {editing === 'details' && <FocusEditSheet item={v} onClose={close} />}
+      <button type="button" className="btn danger delete-link" onClick={() => setEditing('delete')}>
+        Delete area
+      </button>
+
+      {editing === 'details' && <AreaEditSheet area={v} onClose={close} />}
       {editing === 'techniques' && <TechniquesSheet v={v} onClose={close} />}
       {editing === 'notes' && <LinkNoteSheet v={v} today={today} onClose={close} />}
+      {editing === 'delete' && <DeleteSheet v={v} onClose={close} onDeleted={() => navigate('/game', { replace: true })} />}
     </div>
   );
 }
@@ -109,44 +119,44 @@ function SectionHead({ title, children }: { title: string; children?: ReactNode 
   );
 }
 
-function LinkedNotes({ v, today, onLink }: { v: FocusItemDetail; today: string; onLink: () => void }) {
+function LinkedNotes({ v, today, onLink }: { v: AreaDetail; today: string; onLink: () => void }) {
   const capture = useCapture();
-  const link = useLinkFocus();
+  const link = useLinkArea();
   const toast = useToast();
-  const ref = { id: v.id, label: v.label, status: v.status };
+  const ref = { id: v.id, name: v.name, rank: v.rank };
   return (
     <>
       <SectionHead title="Notes">
         <button type="button" className="btn ghost small" onClick={onLink}>
-          Link a note
+          File a note here
         </button>
         <button
           type="button"
           className="btn ghost small"
-          // A note with one technique is filed under it; with several, the note says which.
-          onClick={() => capture.open({ focus: [ref], techniques: v.techniques.length === 1 ? v.techniques : [] })}
+          // A note with one technique is filed under it too; with several, the note says which.
+          onClick={() => capture.open({ areas: [ref], techniques: v.techniques.length === 1 ? v.techniques : [] })}
         >
           Add note
         </button>
       </SectionHead>
-      {v.notes.length === 0 && <p className="section-hint">Notes you pin here stay with it, whatever they're filed under.</p>}
-      <section className="panel" aria-label="Linked notes">
+      {v.notes.length === 0 && <p className="section-hint">Notes filed here stay with it, whatever techniques they're about.</p>}
+      <section className="panel" aria-label="Notes filed here">
         {v.notes.map(n => (
           <NoteItem
             key={n.id}
             note={n}
             today={today}
-            hideFocus={v.id}
+            hideArea={v.id}
             actions={
               <button
                 type="button"
                 className="btn quiet small"
                 disabled={link.isPending}
                 onClick={() =>
-                  link.mutate({ id: v.id, remove: { noteIds: [n.id] } }, { onSuccess: () => toast.show('Unlinked', { undoable: true }), onError: toast.error })
+                  link.mutate({ id: v.id, remove: { noteIds: [n.id] } }, { onSuccess: () => toast.show('Taken out', { undoable: true }), onError: toast.error })
                 }
               >
-                Unlink
+                Take out
               </button>
             }
           />
@@ -156,8 +166,8 @@ function LinkedNotes({ v, today, onLink }: { v: FocusItemDetail; today: string; 
   );
 }
 
-function RelatedNotes({ v, today }: { v: FocusItemDetail; today: string }) {
-  const link = useLinkFocus();
+function RelatedNotes({ v, today }: { v: AreaDetail; today: string }) {
+  const link = useLinkArea();
   const toast = useToast();
   if (!v.relatedNotes.length) return null;
   return (
@@ -169,18 +179,17 @@ function RelatedNotes({ v, today }: { v: FocusItemDetail; today: string }) {
             key={n.id}
             note={n}
             today={today}
-            hideFocus={v.id}
+            hideArea={v.id}
             actions={
               <button
                 type="button"
                 className="btn quiet small"
                 disabled={link.isPending}
                 onClick={() =>
-                  link.mutate({ id: v.id, add: { noteIds: [n.id] } }, { onSuccess: () => toast.show('Linked', { undoable: true }), onError: toast.error })
+                  link.mutate({ id: v.id, add: { noteIds: [n.id] } }, { onSuccess: () => toast.show('Filed here', { undoable: true }), onError: toast.error })
                 }
               >
-                <Icon name="link" size={18} />
-                Link
+                File here
               </button>
             }
           />
@@ -190,14 +199,16 @@ function RelatedNotes({ v, today }: { v: FocusItemDetail; today: string }) {
   );
 }
 
+// Paused, backlogged, completed and dropped are from before areas, when the list had statuses.
 const EVENT_TEXT: Record<string, string> = {
-  added: 'Added',
+  added: 'On focus',
   moved: 'Moved',
-  resumed: 'Back on the list',
+  removed: 'Off focus',
+  resumed: 'Back on focus',
   paused: 'Paused',
   backlogged: 'Moved to the backlog',
   completed: 'Done',
-  dropped: 'Removed',
+  dropped: 'Off focus',
 };
 
 /** The local calendar date of an ISO timestamp, as YYYY-MM-DD. */
@@ -206,7 +217,7 @@ const localDate = (iso: string) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-function History({ v, today }: { v: FocusItemDetail; today: string }) {
+function History({ v, today }: { v: AreaDetail; today: string }) {
   if (!v.history.length) return null;
   return (
     <>
@@ -225,9 +236,9 @@ function History({ v, today }: { v: FocusItemDetail; today: string }) {
   );
 }
 
-function TechniquesSheet({ v, onClose }: { v: FocusItemDetail; onClose: () => void }) {
+function TechniquesSheet({ v, onClose }: { v: AreaDetail; onClose: () => void }) {
   const [techniques, setTechniques] = useState<TechniqueRef[]>(v.techniques);
-  const link = useLinkFocus();
+  const link = useLinkArea();
   const toast = useToast();
   const before = new Set(v.techniques.map(t => t.id));
   const after = new Set(techniques.map(t => t.id));
@@ -260,25 +271,25 @@ function TechniquesSheet({ v, onClose }: { v: FocusItemDetail; onClose: () => vo
   );
 }
 
-/** Find a note by its words (or pick a recent one) and pin it to the item. */
-function LinkNoteSheet({ v, today, onClose }: { v: FocusItemDetail; today: string; onClose: () => void }) {
+/** Find a note by its words (or pick a recent one) and file it under the area. */
+function LinkNoteSheet({ v, today, onClose }: { v: AreaDetail; today: string; onClose: () => void }) {
   const [text, setText] = useState('');
   const q = useDeferredValue(text.trim());
   const searching = q.length >= 2;
   const found = useNotes({ q: searching ? q : undefined, limit: 20 });
-  const link = useLinkFocus();
+  const link = useLinkArea();
   const toast = useToast();
   const linked = new Set(v.notes.map(n => n.id));
   const notes = (found.data ?? []).filter(n => !linked.has(n.id));
   return (
-    <Sheet title="Link a note" onClose={onClose}>
+    <Sheet title="File a note here" onClose={onClose}>
       <label className="field">
         <span className="visually-hidden">Search notes</span>
         <input className="input" autoFocus type="search" placeholder="Search notes" value={text} onChange={e => setText(e.target.value)} />
       </label>
       <p className="muted small">{searching ? 'Matching notes' : 'Recent notes'}</p>
-      <section className="panel" aria-label="Notes to link">
-        {found.isSuccess && notes.length === 0 && <div className="empty">{searching ? 'No notes match.' : 'No notes to link.'}</div>}
+      <section className="panel" aria-label="Notes to file here">
+        {found.isSuccess && notes.length === 0 && <div className="empty">{searching ? 'No notes match.' : 'No notes to file.'}</div>}
         {notes.map(n => (
           <div key={n.id} className="row row-split note-pick">
             <span className="grow">
@@ -291,18 +302,51 @@ function LinkNoteSheet({ v, today, onClose }: { v: FocusItemDetail; today: strin
             <button
               type="button"
               className="btn quiet small"
-              aria-label={`Link: ${n.body.slice(0, 60)}`}
+              aria-label={`File here: ${n.body.slice(0, 60)}`}
               disabled={link.isPending}
               onClick={() =>
-                link.mutate({ id: v.id, add: { noteIds: [n.id] } }, { onSuccess: () => toast.show('Linked', { undoable: true }), onError: toast.error })
+                link.mutate({ id: v.id, add: { noteIds: [n.id] } }, { onSuccess: () => toast.show('Filed here', { undoable: true }), onError: toast.error })
               }
             >
-              <Icon name="link" size={18} />
-              Link
+              File here
             </button>
           </div>
         ))}
       </section>
+    </Sheet>
+  );
+}
+
+/** Deleting is for good (with Undo): the area, its plan and its focus history. Its notes and cards stay. */
+function DeleteSheet({ v, onClose, onDeleted }: { v: AreaDetail; onClose: () => void; onDeleted: () => void }) {
+  const del = useDeleteArea();
+  const toast = useToast();
+  return (
+    <Sheet title={`Delete ${v.name}?`} onClose={onClose}>
+      <p>
+        {v.stepCount ? `Its plan (${v.stepCount} step${v.stepCount === 1 ? '' : 's'}) goes with it. ` : ''}
+        Its notes and technique cards stay.
+        {v.rank ? ' To stop working on it for now, take it off focus instead.' : ''}
+      </p>
+      <button
+        type="button"
+        className="btn danger block"
+        disabled={del.isPending}
+        onClick={() =>
+          del.mutate(v.id, {
+            onSuccess: () => {
+              toast.show(`Deleted ${v.name}`, { undoable: true });
+              onDeleted();
+            },
+            onError: toast.error,
+          })
+        }
+      >
+        Delete area
+      </button>
+      <button type="button" className="btn quiet block" style={{ marginTop: 8 }} onClick={onClose}>
+        Keep it
+      </button>
     </Sheet>
   );
 }

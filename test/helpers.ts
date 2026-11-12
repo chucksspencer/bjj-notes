@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { buildApp } from '../src/app.js';
 import type { Structurer } from '../src/capture.js';
 import { loadConfig } from '../src/config.js';
+import { drafterFor } from '../src/services/plans.js';
 import { rewriterFor } from '../src/services/semantic.js';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
@@ -65,7 +66,7 @@ export async function startServer(
     TIME_ZONE: 'America/Chicago',
     ...env,
   });
-  const ctx: Ctx = { db, timeZone: config.timeZone, rewriter: rewriterFor(config) };
+  const ctx: Ctx = { db, timeZone: config.timeZone, rewriter: rewriterFor(config), planDrafter: drafterFor(config) };
   http.on('request', buildApp({ ctx, config, structurer, webDir: webDir ?? '/nonexistent-web-dir' }));
   return {
     base,

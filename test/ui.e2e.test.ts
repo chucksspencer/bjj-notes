@@ -57,8 +57,10 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('button', { name: 'Save note' }).click();
     await page.getByText('Saved to Ghost escape').waitFor();
 
-    // On the Focus list, an item's title opens its page and its chips open the technique cards.
-    await page.locator('.focus-row .chip', { hasText: 'Ghost escape' }).click();
+    // The card, from the Library.
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Library' }).click();
+    await page.getByLabel('Search techniques').fill('ghost');
+    await page.getByRole('link', { name: /^Ghost escape/ }).click();
     await page.getByRole('heading', { name: 'Ghost escape' }).waitFor();
     await page.getByText('Turn to the knees before the hips.').waitFor();
     expect(await page.getByText('Today, rolling').count()).toBe(1);
@@ -84,7 +86,7 @@ describe.runIf(run)('web app (end to end)', () => {
     expect(await page.locator('.focus-row .row-title').first().textContent()).toBe('Baratoplata');
   });
 
-  it('opens a focus item, writes its description and pins a note to it', async () => {
+  it('opens an area, writes its description and files a note under it', async () => {
     await page.locator('.focus-row .row-title', { hasText: 'Ghost escape' }).click();
     await page.getByRole('heading', { name: 'Ghost escape', level: 1 }).waitFor();
     await page.getByText(/^Number 5 on your focus list\./).waitFor();
@@ -97,22 +99,54 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByText(/^Undid: edit to/).waitFor();
     await page.getByText("The strategy, the cues, and what it looks like when it's working.").waitFor();
 
-    // The note from earlier is on its technique; pin it to the item.
+    // The note from earlier is on its technique; file it here.
     const related = page.getByRole('region', { name: 'From its techniques' });
     await related.getByText('Turn to the knees before the hips.').waitFor();
-    await related.getByRole('button', { name: 'Link' }).first().click();
-    await page.getByText('Linked', { exact: true }).waitFor();
-    await page.getByRole('region', { name: 'Linked notes' }).getByText('Turn to the knees before the hips.').waitFor();
+    await related.getByRole('button', { name: 'File here' }).first().click();
+    await page.getByText('Filed here', { exact: true }).waitFor();
+    await page.getByRole('region', { name: 'Notes filed here' }).getByText('Turn to the knees before the hips.').waitFor();
     expect(await page.getByRole('region', { name: 'From its techniques' }).count()).toBe(0);
 
-    // The card points at the item's page, and the note shows the item it's pinned to.
+    // The card points at the area, and the note shows the area it's filed under.
     await page.getByRole('link', { name: 'Ghost escape', exact: true }).first().click();
-    await page.getByRole('link', { name: 'Focus: Ghost escape' }).waitFor();
-    await page.getByRole('link', { name: 'Number 5 on your focus list' }).click();
+    await page.getByRole('link', { name: 'Area: Ghost escape' }).waitFor();
+    await page.locator('.tech-areas').getByRole('link', { name: '#5 Ghost escape' }).click();
     await page.getByRole('heading', { name: 'Ghost escape', level: 1 }).waitFor();
-    await page.getByRole('region', { name: 'Linked notes' }).getByRole('button', { name: 'Unlink' }).click();
-    await page.getByText('Unlinked').waitFor();
+    await page.getByRole('region', { name: 'Notes filed here' }).getByRole('button', { name: 'Take out' }).click();
+    await page.getByText('Taken out').waitFor();
     await page.getByRole('region', { name: 'From its techniques' }).getByText('Turn to the knees before the hips.').waitFor();
+  });
+
+  it('builds a plan a step at a time, and takes the area off focus and back', async () => {
+    await page.getByRole('button', { name: 'First step' }).click();
+    await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Frame on the hip');
+    await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
+    await page.getByText('Step added').waitFor();
+    await page.getByRole('list', { name: 'Plan' }).getByText('Frame on the hip').waitFor();
+
+    // A branch: what to do when they react.
+    await page.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
+    await page.getByRole('button', { name: 'If they…' }).click();
+    await page.getByRole('dialog').getByLabel('If they… (what they do)').fill('crossface hard');
+    await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Ghost escape');
+    await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
+    await page.getByText('Step added').waitFor();
+    await page.getByText('If crossface hard').waitFor();
+    await page.getByRole('button', { name: 'Edit step: Frame on the hip' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete step and the 1 after it' }).click();
+    await page.getByText('Step deleted').waitFor();
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.getByText(/^Undid: edit to/).waitFor();
+    await page.getByText('If crossface hard').waitFor();
+
+    await page.getByRole('switch', { name: 'On focus' }).click();
+    await page.getByText('Taken off focus: Ghost escape').waitFor();
+    await page.getByText(/^Off focus\./).waitFor();
+    await page.getByRole('switch', { name: 'On focus' }).click();
+    await page.getByText('On focus at #1: Ghost escape').waitFor();
+    // Put it back where it was, with Undo twice.
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.getByText(/^Undid: add/).waitFor();
   });
 
   it('files an inbox note under a new technique', async () => {
@@ -135,7 +169,7 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('navigation').getByRole('link', { name: 'Library' }).click();
     await page.getByLabel('Search techniques').fill('knee cut');
     await page.getByRole('link', { name: /Knee cut pass/ }).waitFor();
-    await page.getByRole('navigation').getByRole('link', { name: 'Positions' }).click();
+    await page.getByRole('navigation').getByRole('link', { name: 'Game' }).click();
     await page.getByRole('link', { name: /Side control/ }).first().click();
     await page.getByRole('heading', { name: 'Side control' }).waitFor();
     await page.getByText('Ghost escape').first().waitFor();
@@ -410,7 +444,7 @@ describe.runIf(run)('web app (end to end)', () => {
     await desktop.getByRole('heading', { name: 'Lab' }).waitFor();
     for (const [tab, heading] of [
       ['Library', 'Library'],
-      ['Positions', 'Positions'],
+      ['Game', 'Game'],
       ['Inbox', 'Inbox'],
       ['Focus', 'Lab'],
     ] as const) {

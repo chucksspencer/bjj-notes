@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Link } from 'react-router';
-import type { FocusItemView, TechniqueRef } from '../../../src/shared/api';
-import { useAddFocus, useFocus, useFocusAction } from '../api';
-import { DescriptionField, FocusActions, FocusEditSheet } from '../components/FocusControls';
+import { Link, useNavigate } from 'react-router';
+import type { AreaView, TechniqueRef } from '../../../src/shared/api';
+import { useAreas, useCreateArea, useFocus, useFocusAction } from '../api';
+import { DescriptionField, FocusControls } from '../components/AreaControls';
 import { Icon } from '../components/Icon';
 import { Sheet } from '../components/Sheet';
 import { TechniquePicker } from '../components/TechniquePicker';
@@ -10,11 +10,11 @@ import { useToast } from '../components/Toast';
 import { firstLine, isQuiet, lastNoteText } from '../lib/format';
 import { FocusHeader } from './Lab';
 
+/** The focus list: the areas you're working on now, most important first. */
 export function Focus() {
   const focus = useFocus();
   const [open, setOpen] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<FocusItemView | null>(null);
   const view = focus.data;
 
   return (
@@ -37,50 +37,46 @@ export function Focus() {
             {view.active.length === 0 && (
               <div className="empty">Nothing on your focus list yet. Add what you're working on, most important first.</div>
             )}
-            {view.active.map((item, i) => (
+            {view.active.map(item => (
               <FocusRow
                 key={item.id}
                 item={item}
+                count={view.active.length}
                 today={view.today}
-                first={i === 0}
-                last={i === view.active.length - 1}
                 expanded={open === item.id}
                 onToggle={() => setOpen(open === item.id ? null : item.id)}
-                onEdit={() => setEditing(item)}
               />
             ))}
           </section>
-
-          {view.paused.length > 0 && <OffList title="Paused" items={view.paused} />}
-          {view.backlog.length > 0 && <OffList title="Backlog" items={view.backlog} />}
+          <p className="section-hint list-foot">
+            Areas you've moved on from stay in <Link to="/game">Game</Link>, plans and notes included.
+          </p>
         </>
       )}
 
-      {adding && <AddFocus onClose={() => setAdding(false)} />}
-      {editing && <FocusEditSheet item={editing} onClose={() => setEditing(null)} />}
+      {adding && <AddToFocus onClose={() => setAdding(false)} />}
     </div>
   );
 }
 
 function FocusRow({
   item,
+  count,
   today,
-  first,
-  last,
   expanded,
   onToggle,
-  onEdit,
 }: {
-  item: FocusItemView;
+  item: AreaView;
+  count: number;
   today: string;
-  first: boolean;
-  last: boolean;
   expanded: boolean;
   onToggle: () => void;
-  onEdit: () => void;
 }) {
   const quiet = isQuiet(item.lastNoteOn, today);
-  const gist = firstLine(item.description);
+  const gist = firstLine(item.premise ? `When ${item.premise.charAt(0).toLowerCase()}${item.premise.slice(1)}` : item.description);
+  const meta = [lastNoteText(item.lastNoteOn, today), item.stepCount ? `plan of ${item.stepCount} step${item.stepCount === 1 ? '' : 's'}` : null]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <div className={`row focus-row${quiet ? ' quiet' : ''}`}>
@@ -88,83 +84,51 @@ function FocusRow({
         {item.rank}
       </span>
       <div>
-        <Link className="row-title" to={`/focus/${item.id}`}>
-          {item.label}
+        <Link className="row-title" to={`/areas/${item.id}`}>
+          {item.name}
         </Link>
-        <span className="row-meta">{lastNoteText(item.lastNoteOn, today)}</span>
+        <span className="row-meta">{meta}</span>
         {gist && <span className="focus-gist">{gist}</span>}
-        {item.techniques.length > 0 && (
-          <div className="chips">
-            {item.techniques.map(t => (
-              <Link key={t.id} className="chip" to={`/t/${t.id}`}>
-                {t.name}
-              </Link>
-            ))}
-          </div>
-        )}
       </div>
-      <button type="button" className="btn ghost focus-more" aria-expanded={expanded} aria-label={`Change ${item.label}`} onClick={onToggle}>
+      <button type="button" className="btn ghost focus-more" aria-expanded={expanded} aria-label={`Change ${item.name}`} onClick={onToggle}>
         <Icon name="more" />
       </button>
-      {expanded && <FocusActions item={item} first={first} last={last} onEdit={onEdit} />}
+      {expanded && <FocusControls area={item} count={count} compact />}
     </div>
   );
 }
 
-function OffList({ title, items }: { title: string; items: FocusItemView[] }) {
-  const act = useFocusAction();
-  const toast = useToast();
-  return (
-    <>
-      <h2 className="section-title">{title}</h2>
-      <section className="panel" aria-label={title}>
-        {items.map(item => (
-          <div key={item.id} className="row row-split">
-            <span className="grow">
-              <Link className="row-title" to={`/focus/${item.id}`}>
-                {item.label}
-              </Link>
-            </span>
-            <button
-              type="button"
-              className="btn quiet small"
-              disabled={act.isPending}
-              onClick={() =>
-                act.mutate(
-                  { id: item.id, action: 'resume', position: 1 },
-                  { onSuccess: () => toast.show(`${item.label} is back at the top`, { undoable: true }), onError: toast.error },
-                )
-              }
-            >
-              Resume
-            </button>
-          </div>
-        ))}
-      </section>
-    </>
-  );
-}
-
-function AddFocus({ onClose }: { onClose: () => void }) {
-  const [label, setLabel] = useState('');
+/** Put an area you have back on focus, or start a new one. */
+function AddToFocus({ onClose }: { onClose: () => void }) {
+  const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [techniques, setTechniques] = useState<TechniqueRef[]>([]);
   const [top, setTop] = useState(true);
-  const add = useAddFocus();
+  const areas = useAreas();
+  const create = useCreateArea();
+  const act = useFocusAction();
   const toast = useToast();
+  const navigate = useNavigate();
+  const words = name.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const off = (areas.data?.areas ?? []).filter(a => a.rank === null);
+  const matching = words.length ? off.filter(a => words.every(w => [a.name, ...a.aliases].some(n => n.toLowerCase().includes(w)))) : off;
+  const position = top ? 1 : 999;
+
   return (
     <Sheet title="Add to focus" onClose={onClose}>
       <form
         onSubmit={e => {
           e.preventDefault();
-          const name = label.trim() || techniques[0]?.name;
-          if (!name) return;
-          add.mutate(
-            { label: name, description: description.trim() || undefined, techniqueIds: techniques.map(t => t.id), position: top ? 1 : 999 },
+          const label = name.trim() || techniques[0]?.name;
+          if (!label) return;
+          create.mutate(
+            { name: label, description: description.trim() || undefined, techniqueIds: techniques.map(t => t.id), position },
             {
-              onSuccess: () => {
-                toast.show(`Added ${name}`, { undoable: true });
+              onSuccess: r => {
+                toast.show(`Added ${label}`, { undoable: true });
                 onClose();
+                // A new area with nothing in it yet: open it, to describe it or give it a plan.
+                if (!r.area.techniques.length && !r.area.description) navigate(`/areas/${r.area.id}`);
               },
               onError: toast.error,
             },
@@ -177,10 +141,44 @@ function AddFocus({ onClose }: { onClose: () => void }) {
             className="input"
             autoFocus
             placeholder="Stop getting flattened in half guard"
-            value={label}
-            onChange={e => setLabel(e.target.value)}
+            value={name}
+            onChange={e => setName(e.target.value)}
           />
         </label>
+        {matching.length > 0 && (
+          <div className="field">
+            <span className="label">{words.length ? 'Areas you have' : 'Back on focus'}</span>
+            <div className="panel">
+              {matching.slice(0, 5).map(a => (
+                <div key={a.id} className="row row-split">
+                  <span className="grow">
+                    <span className="row-title">{a.name}</span>
+                    {a.stepCount > 0 && <span className="row-meta">Plan of {a.stepCount} steps</span>}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn quiet small"
+                    disabled={act.isPending}
+                    onClick={() =>
+                      act.mutate(
+                        { id: a.id, action: 'add', position },
+                        {
+                          onSuccess: () => {
+                            toast.show(`${a.name} is back on focus`, { undoable: true });
+                            onClose();
+                          },
+                          onError: toast.error,
+                        },
+                      )
+                    }
+                  >
+                    Put on focus
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <DescriptionField value={description} onChange={setDescription} />
         <TechniquePicker label="Technique cards (optional)" selected={techniques} onChange={setTechniques} />
         <div className="field">
@@ -194,8 +192,8 @@ function AddFocus({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         </div>
-        <button className="btn block" type="submit" disabled={add.isPending || !(label.trim() || techniques.length)}>
-          Add to focus
+        <button className="btn block" type="submit" disabled={create.isPending || !(name.trim() || techniques.length)}>
+          Add as a new area
         </button>
       </form>
     </Sheet>

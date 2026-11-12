@@ -19,8 +19,8 @@ export type NoteKind = 'instruction' | 'rolling' | 'drilling' | 'question' | 'id
 export type SourceKind = 'class' | 'youtube' | 'instagram' | 'instructional' | 'book' | 'article' | 'other';
 export type SessionKind = 'class' | 'open_mat' | 'private' | 'seminar' | 'competition' | 'drilling' | 'other';
 export type LinkKind = 'chain' | 'counter' | 'variation' | 'setup' | 'related';
-export type FocusStatus = 'active' | 'backlog' | 'paused' | 'done' | 'dropped';
-export type FocusAction = 'move' | 'resume' | 'pause' | 'backlog' | 'complete' | 'drop';
+/** add puts an area on the focus list (at a position, default the top), move re-ranks it, remove takes it off. */
+export type FocusAction = 'add' | 'move' | 'remove';
 export type PositionCategory = 'standing' | 'guard' | 'pin' | 'back' | 'leg' | 'transitional';
 
 export interface TechniqueRef {
@@ -119,8 +119,8 @@ export interface NoteView {
   answered: boolean;
   /** Photos and videos, kept in Apple Photos; the still is at /api/v1/attachments/:id/thumb. */
   attachments: AttachmentView[];
-  /** Focus items the note is linked to. */
-  focus: FocusRef[];
+  /** Areas the note is filed under. */
+  areas: AreaRef[];
   sessionId: number | null;
   /** Where the note came from. */
   session: SessionView | null;
@@ -136,7 +136,8 @@ export interface TechniqueView extends TechniqueRef {
   updatedAt: string;
   edges: EdgeView[];
   links: LinkView[];
-  focus: { id: number; label: string; status: FocusStatus; rank: number | null }[];
+  /** Areas it's part of: linked to the area, or a step in its plan. */
+  areas: AreaRef[];
   notes: NoteView[];
   noteCount: number;
   lastNoteOn: string | null;
@@ -157,54 +158,137 @@ export interface TechniqueListItem extends TechniqueRef {
   edges: { from: string | null; fromRole: Role | null; to: string | null; toRole: Role | null }[];
 }
 
-export interface FocusRef {
+/** An area, briefly. */
+export interface AreaRef {
   id: number;
-  /** The item's title. */
-  label: string;
-  status: FocusStatus;
+  name: string;
+  /** Its place on the focus list (1 = top), or null when it's off focus. */
+  rank: number | null;
 }
 
-export interface FocusItemView {
-  id: number;
-  /** The item's title. */
-  label: string;
+/**
+ * An area: a part of your game, with a description, techniques and notes, and optionally a plan (where it
+ * starts, then steps that branch on how the opponent reacts). An area with a plan is what's called a system.
+ */
+export interface AreaView extends AreaRef {
+  aliases: string[];
   /** What this is about: the strategy, cues, what success looks like. */
   description: string | null;
-  status: FocusStatus;
-  rank: number | null;
+  /** Where the plan starts. */
+  start: PositionRef | null;
+  startRole: Role | null;
+  /** The situation the plan is for, e.g. "top has the underhook and crossface". */
+  premise: string | null;
+  /** Linked techniques, including every technique a step of the plan is. */
   techniques: TechniqueRef[];
+  /** How many steps the plan has (0 = no plan). */
+  stepCount: number;
   /** How many notes are linked to it directly. */
   noteCount: number;
   /** The latest note linked to it, or on one of its techniques. */
   lastNoteOn: string | null;
 }
 
-/** One focus item's page. */
-export interface FocusItemDetail extends FocusItemView {
+/** One step of a plan, with what follows it. */
+export interface PlanStep {
+  id: number;
+  /** The reaction that leads here ("they post the far leg"); null for "then". */
+  trigger: string | null;
+  /** What to do, as said ("octopus sweeps", "go to deep half"). */
+  action: string;
+  /** The technique card it is, when it is one. */
+  technique: TechniqueRef | null;
+  /** Where it leaves you. */
+  to: PositionRef | null;
+  toRole: Role | null;
+  /** Why, or the cue. */
+  note: string | null;
+  /** Other areas whose plan starts where this step leaves you. */
+  continuesIn: AreaRef[];
+  children: PlanStep[];
+}
+
+/** One area's page. */
+export interface AreaDetail extends AreaView {
   /** ISO 8601 */
   createdAt: string;
+  /** The main line, in order. */
+  plan: PlanStep[];
   /** Linked notes, newest first. */
   notes: NoteView[];
   /** The newest notes on its techniques that aren't linked to it yet. */
   relatedNotes: NoteView[];
   /** How many notes on its techniques aren't linked to it. */
   relatedCount: number;
-  /** Every add, move, pause and completion, oldest first. */
+  /** Every time it went on or off the focus list or moved on it, oldest first. */
   history: { at: string; event: string; toRank: number | null }[];
 }
 
-/** Links to add to or remove from a focus item. */
-export interface FocusLinksInput {
+/** One line of a plan to save. Steps are flat, in reading order; depth says where each one hangs. */
+export interface PlanStepInput {
+  /** 0 = main line; 1 = a branch off the nearest step above it at depth 0; and so on. */
+  depth: number;
+  trigger?: string | null;
+  action: string;
+  techniqueId?: number | null;
+  toPositionId?: number | null;
+  toRole?: Role | null;
+  note?: string | null;
+}
+
+/** A plan Claude outlined from a description, matched to cards and positions, to check before saving. */
+export interface PlanDraft {
+  start: { id: number; name: string } | null;
+  startRole: Role | null;
+  premise: string | null;
+  plan: (PlanStepInput & { techniqueName: string | null; toName: string | null })[];
+}
+
+export interface AreaCreateInput {
+  name: string;
+  description?: string;
+  techniqueIds?: number[];
+  noteIds?: number[];
+  /** Put it on the focus list (default true), at this position (default 1, the top). */
+  focus?: boolean;
+  position?: number;
+}
+
+/** Changes to an area; leave out what shouldn't change. */
+export interface AreaPatch {
+  name?: string;
+  description?: string | null;
+  aliases?: string[];
+  startPositionId?: number | null;
+  startRole?: Role | null;
+  premise?: string | null;
+  /** Replaces the whole plan. */
+  plan?: PlanStepInput[];
+}
+
+/** Links to add to or remove from an area. */
+export interface AreaLinksInput {
   add?: { techniqueIds?: number[]; noteIds?: number[] };
   remove?: { techniqueIds?: number[]; noteIds?: number[] };
+}
+
+/** An item on the focus list. */
+export interface FocusItem extends AreaView {
+  /** The same as name, for app builds from before areas. */
+  label: string;
 }
 
 export interface FocusView {
   /** Today's date in the server's configured time zone, YYYY-MM-DD. */
   today: string;
-  active: FocusItemView[];
-  paused: FocusItemView[];
-  backlog: FocusItemView[];
+  /** The focus list, top first. */
+  active: FocusItem[];
+}
+
+/** Every area: the ones on focus first (in order), then the rest by name. */
+export interface AreasView {
+  today: string;
+  areas: AreaView[];
 }
 
 export interface Starred {
@@ -252,6 +336,8 @@ export interface PositionView {
   from: PositionTechnique[];
   into: PositionTechnique[];
   gaps: { role: Role; type: TechniqueType }[];
+  /** Areas whose plan starts here (in the role shown, if one is). */
+  plans: AreaRef[];
 }
 
 export interface MessageResult {
@@ -272,8 +358,8 @@ export interface NoteCreateInput {
   /** Put it on the To try list instead of filing it. */
   toTry?: boolean;
   starred?: boolean;
-  /** Focus items to link the new note to. */
-  focusItemIds?: number[];
+  /** Areas to file the new note under. */
+  areaIds?: number[];
 }
 
 export interface NotePatch {
@@ -288,8 +374,8 @@ export interface NotePatch {
   /** Mark a question answered (true) or open again (false). */
   answered?: boolean;
   newTechniques?: { name: string; type: TechniqueType; role?: Role }[];
-  /** The focus items the note is linked to (replaces the set). */
-  focusItemIds?: number[];
+  /** The areas the note is filed under (replaces the set). */
+  areaIds?: number[];
 }
 
 export interface NoteCreateResult extends MessageResult {

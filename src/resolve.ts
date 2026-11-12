@@ -82,20 +82,20 @@ export async function techniquesMentionedIn(q: Queryable, text: string, limit = 
   return rows;
 }
 
-/** Focus items match on their label or on the name of any linked technique. */
-export async function resolveFocusItem(q: Queryable, name: string, includeClosed = false): Promise<Resolution> {
+/** Areas match on their name, an alias, or the name of a linked technique. */
+export async function resolveArea(q: Queryable, name: string, onFocusOnly = false): Promise<Resolution> {
   return decide(
     await rank(
       q,
-      `select f.id, f.label as name,
+      `select a.id, a.name,
               max(bjj_name_score(c, $1)) as score,
               bool_or(bjj_norm(c) = bjj_norm($1)) as exact
-       from focus_items f
-       left join focus_item_techniques ft on ft.focus_item_id = f.id
-       left join techniques t on t.id = ft.technique_id
-       cross join lateral unnest(array_remove(array[f.label, t.name], null)) as c
-       where f.user_id = $2 and ${includeClosed ? 'true' : "f.status in ('active', 'paused', 'backlog')"}
-       group by f.id, f.label
+       from areas a
+       left join area_techniques ax on ax.area_id = a.id
+       left join techniques t on t.id = ax.technique_id
+       cross join lateral unnest(array_remove(array_cat(array[a.name, t.name], a.aliases), null)) as c
+       where a.user_id = $2 and ${onFocusOnly ? 'a.rank is not null' : 'true'}
+       group by a.id, a.name
        order by exact desc, score desc
        limit 5`,
       [name, uid(q)],
