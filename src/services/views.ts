@@ -509,6 +509,7 @@ export const RELATED_NOTES = 10;
 interface StepRow {
   id: number;
   parent_id: number | null;
+  alt: boolean;
   trigger: string | null;
   action: string;
   note: string | null;
@@ -526,7 +527,7 @@ interface StepRow {
  */
 export async function planOf(q: Queryable, areaId: number): Promise<PlanStep[]> {
   const { rows } = await q.query<StepRow>(
-    `select st.id, st.parent_id, st.trigger, st.action, st.note, st.to_role,
+    `select st.id, st.parent_id, st.alt, st.trigger, st.action, st.note, st.to_role,
             (select ${TECH_REF_JSON} from techniques t where t.id = st.technique_id) as technique,
             tp.id as tp_id, tp.slug as tp_slug, tp.name as tp_name,
             coalesce((select json_agg(${AREA_REF_JSON} order by ${AREA_ORDER})
@@ -545,6 +546,7 @@ export async function planOf(q: Queryable, areaId: number): Promise<PlanStep[]> 
   for (const r of rows) {
     byId.set(r.id, {
       id: r.id,
+      or: r.alt,
       trigger: r.trigger,
       action: r.action,
       technique: json<TechniqueRef | null>(r.technique),

@@ -5,6 +5,7 @@ const PATHS = {
   inbox: 'M3 13l3-8h12l3 8v6H3zM3 13h5l1.5 3h5L16 13h5',
   plus: 'M12 5v14M5 12h14',
   back: 'M15 5l-7 7 7 7',
+  forward: 'M9 5l7 7-7 7',
   search: 'M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM15.5 15.5 20 20',
   close: 'M6 6l12 12M18 6 6 18',
   play: 'M8 5v14l11-7z',

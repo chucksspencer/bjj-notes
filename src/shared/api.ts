@@ -192,6 +192,12 @@ export interface AreaView extends AreaRef {
 /** One step of a plan, with what follows it. */
 export interface PlanStep {
   id: number;
+  /**
+   * True when this is an alternative to the step before it in the same list ("or": plan B, plan C, in order
+   * of preference). It answers the same reaction, so it has no trigger of its own; its children are its own.
+   * On the main line, the next step follows whichever alternative was used.
+   */
+  or: boolean;
   /** The reaction that leads here ("they post the far leg"); null for "then". */
   trigger: string | null;
   /** What to do, as said ("octopus sweeps", "go to deep half"). */
@@ -228,6 +234,8 @@ export interface AreaDetail extends AreaView {
 export interface PlanStepInput {
   /** 0 = main line; 1 = a branch off the nearest step above it at depth 0; and so on. */
   depth: number;
+  /** An alternative to the nearest step above it at the same depth (under the same step): plan B. */
+  or?: boolean;
   trigger?: string | null;
   action: string;
   techniqueId?: number | null;

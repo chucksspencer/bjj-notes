@@ -333,6 +333,8 @@ const AREA_SNAPSHOT_SQL = `select id, name, aliases, description, start_position
 /** A step ready to store: names already matched to cards and positions. */
 interface ResolvedStep {
   depth: number;
+  /** An alternative to the step before it at this depth. */
+  alt: boolean;
   trigger: string | null;
   action: string;
   technique_id: number | null;
@@ -342,9 +344,11 @@ interface ResolvedStep {
 }
 
 /** Checks the outline's shape: it starts on the main line and goes at most one level deeper per step. */
-function checkOutline(steps: { depth: number }[]): void {
+function checkOutline(steps: { depth: number; alt?: boolean }[]): void {
   if (steps.length > MAX_STEPS) throw new UserError(`A plan can have at most ${MAX_STEPS} steps.`);
   let prev = -1;
+  // Whether there's already a step at each depth under the current parent (for "or" to be an alternative to).
+  const has: boolean[] = [];
   for (const [i, s] of steps.entries()) {
     if (!Number.isInteger(s.depth) || s.depth < 0 || s.depth > MAX_DEPTH) throw new UserError(`Step ${i + 1}: depth must be 0 to ${MAX_DEPTH}.`);
     if (s.depth > prev + 1) {
@@ -352,6 +356,9 @@ function checkOutline(steps: { depth: number }[]): void {
         i === 0 ? 'The first step must be on the main line (depth 0).' : `Step ${i + 1} is ${s.depth - prev} levels deeper than the step before it.`,
       );
     }
+    if (s.alt && !has[s.depth]) throw new UserError(`Step ${i + 1}: "or" needs a step before it at the same level to be an alternative to.`);
+    has[s.depth] = true;
+    has.length = s.depth + 1;
     prev = s.depth;
   }
 }
@@ -371,9 +378,9 @@ async function writePlan(q: Queryable, areaId: number, steps: ResolvedStep[]): P
     const ordinal = (ordinals.get(parent) ?? 0) + 1;
     ordinals.set(parent, ordinal);
     const { rows } = await q.query<{ id: number }>(
-      `insert into area_steps (area_id, user_id, parent_id, ordinal, trigger, action, technique_id, to_position_id, to_role, note)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id`,
-      [areaId, me, parent, ordinal, s.trigger, s.action, s.technique_id, s.to_position_id, s.to_role, s.note],
+      `insert into area_steps (area_id, user_id, parent_id, ordinal, trigger, action, technique_id, to_position_id, to_role, note, alt)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id`,
+      [areaId, me, parent, ordinal, s.alt ? null : s.trigger, s.action, s.technique_id, s.to_position_id, s.to_role, s.note, s.alt],
     );
     parents[s.depth] = rows[0]!.id;
     parents.length = s.depth + 1;
@@ -400,6 +407,7 @@ async function resolveStepIds(q: Queryable, steps: PlanStepInput[]): Promise<Res
   );
   return steps.map(s => ({
     depth: s.depth,
+    alt: s.or === true,
     trigger: clean(s.trigger),
     action: s.action.trim(),
     technique_id: s.techniqueId && techniques.has(s.techniqueId) ? s.techniqueId : null,
@@ -413,6 +421,8 @@ async function resolveStepIds(q: Queryable, steps: PlanStepInput[]): Promise<Res
 export interface StepInput {
   /** 0 = main line; 1 = a branch off the nearest depth-0 step above it; and so on. */
   depth: number;
+  /** An alternative to the nearest step above it at the same depth: plan B (then C...), in order of preference. */
+  or?: boolean;
   /** The reaction that leads here ("they post the far leg"). */
   when?: string;
   /** What to do, as said. Linked to a technique card when it names one clearly. */
@@ -449,7 +459,7 @@ export async function resolveStepNames(q: Queryable, steps: StepInput[], misses:
       if (r.match) to = r.match.id;
       else misses.push(describeMiss('position', s.to, r).replace(/\.$/, ''));
     }
-    out.push({ depth: s.depth, trigger: clean(s.when), action, technique_id: technique, to_position_id: to, to_role: s.to_role ?? null, note: clean(s.note) });
+    out.push({ depth: s.depth, alt: s.or === true, trigger: clean(s.when), action, technique_id: technique, to_position_id: to, to_role: s.to_role ?? null, note: clean(s.note) });
   }
   if (noCard.length) misses.push(`no technique card for: ${noCard.join('; ')}`);
   return out;
@@ -707,12 +717,20 @@ export async function deleteArea(ctx: Ctx, target: { id?: number; name?: string 
 
 // ---------- reading, for Claude and Siri ----------
 
-/** A plan as indented if/then lines. */
+/** A plan as indented if/then lines. Alternatives ("or") follow the step they're alternatives to: 1a, 1b on the main line. */
 export function planLines(plan: PlanStep[], indent = ''): string[] {
   const lines: string[] = [];
+  let n = 0;
+  let letter = 0;
   plan.forEach((s, i) => {
-    const marker = indent ? '' : `${i + 1}. `;
-    const head = s.trigger ? `If ${s.trigger}: ${lowerFirst(s.action)}` : s.action;
+    if (s.or) letter++;
+    else {
+      n++;
+      letter = 0;
+    }
+    const choice = s.or || plan[i + 1]?.or === true;
+    const marker = indent ? '' : `${n}${choice ? String.fromCharCode(97 + letter) : ''}. `;
+    const head = s.or ? `Or: ${lowerFirst(s.action)}` : s.trigger ? `If ${s.trigger}: ${lowerFirst(s.action)}` : s.action;
     const card = s.technique ? ` (${s.technique.status})` : '';
     const leads = s.to ? ` → ${s.to.name}${s.toRole ? ` (${s.toRole})` : ''}` : '';
     const why = s.note ? `: ${s.note}` : '';
@@ -823,8 +841,8 @@ export async function planSpeech(ctx: Ctx, query: string): Promise<{ areaId: num
   const step = (s: PlanStep) => `${lowerFirst(s.action)}${s.note ? `, to ${lowerFirst(s.note)}` : ''}`;
   const parts: string[] = [];
   v.plan.forEach((s, i) => {
-    parts.push(`${i === 0 ? capitalise(step(s)) : `Then ${step(s)}`}.`);
-    for (const b of s.children) parts.push(`${b.trigger ? `If ${b.trigger}, ` : 'Then '}${step(b)}.`);
+    parts.push(`${i === 0 ? capitalise(step(s)) : s.or ? `Or ${step(s)}` : `Then ${step(s)}`}.`);
+    for (const b of s.children) parts.push(`${b.or ? 'Or ' : b.trigger ? `If ${b.trigger}, ` : 'Then '}${step(b)}.`);
   });
   const when = v.premise ? ` When ${lowerFirst(v.premise)}:` : '';
   return { areaId: id, speech: `${v.name}.${when} ${parts.join(' ')}`.replace(/\.\./g, '.') };
