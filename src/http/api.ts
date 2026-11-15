@@ -144,6 +144,7 @@ const focusActionBody = z.object({
 const optLine = (max: number) => z.string().trim().max(max).nullable().optional();
 const planStep = z.object({
   depth: z.number().int().min(0).max(MAX_DEPTH),
+  or: z.boolean().optional(),
   trigger: optLine(300),
   action: z.string().trim().min(1).max(300),
   techniqueId: z.number().int().nullable().optional(),

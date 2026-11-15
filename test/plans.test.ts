@@ -10,14 +10,18 @@ const DESCRIBED =
   'their underhook hand so you can win that underhook. Try to do a shuck pass. If they post their far leg, go to deep half. ' +
   'If they base back, go to octopus sweeps.';
 
-/** What Claude sends back for DESCRIBED: one step nested too deep and one blank, to check the outline is made valid. */
+/**
+ * What Claude sends back for DESCRIBED: one step nested too deep and one blank, to check the outline is made valid,
+ * and two alternatives ("or"): one with nothing before it to be an alternative to, which becomes a plain step.
+ */
 const OUTLINE = {
   start: 'side control',
   start_role: 'bottom',
   premise: 'Top has the underhook and crossface',
   steps: [
-    { depth: 0, do: 'John Wayne sweep', note: 'force them to post the underhook hand, win the underhook' },
+    { depth: 0, or: true, do: 'John Wayne sweep', note: 'force them to post the underhook hand, win the underhook' },
     { depth: 0, do: 'Shuck pass', technique: 'Shuck' },
+    { depth: 0, or: true, when: 'never mind', do: 'Knee lever' },
     { depth: 1, when: 'they post the far leg', do: 'Go to deep half', to: 'deep half', to_role: 'bottom' },
     { depth: 3, when: 'they base back', do: 'Octopus sweeps' },
     { depth: 0, do: '   ' },
@@ -99,11 +103,12 @@ describe('describing a plan', () => {
     const d = draft.body;
     expect(d.start).toMatchObject({ name: 'Side control' });
     expect([d.startRole, d.premise]).toEqual(['bottom', 'Top has the underhook and crossface']);
-    expect(d.plan.map(p => [p.depth, p.trigger, p.action, p.techniqueId, p.toName])).toEqual([
-      [0, null, 'John Wayne sweep', jw.id, null],
-      [0, null, 'Shuck pass', shuck.id, null],
-      [1, 'they post the far leg', 'Go to deep half', null, 'Deep half guard'],
-      [2, 'they base back', 'Octopus sweeps', null, null], // pulled up from 3 to one below the step before; the blank step left out
+    expect(d.plan.map(p => [p.depth, p.or, p.trigger, p.action, p.techniqueId, p.toName])).toEqual([
+      [0, false, null, 'John Wayne sweep', jw.id, null], // nothing before it to be an alternative to
+      [0, false, null, 'Shuck pass', shuck.id, null],
+      [0, true, null, 'Knee lever', null, null], // an alternative has no trigger of its own
+      [1, false, 'they post the far leg', 'Go to deep half', null, 'Deep half guard'],
+      [2, false, 'they base back', 'Octopus sweeps', null, null], // pulled up from 3 to one below the step before; the blank step left out
     ]);
     expect(d.plan[0]!.note).toBe('force them to post the underhook hand, win the underhook');
     expect((await api('GET', '/api/v1/areas')).body.areas).toHaveLength(areasBefore);

@@ -407,6 +407,34 @@ describe('MCP tools over HTTP', () => {
     expect(await call('get_area', { name: 'winning the underhook' })).toContain('go to deep half → Deep half guard (bottom). Continues in: Deep half sweeps.');
     expect(await call('get_area')).toMatch(/Deep half guard \(bottom\): Deep half sweeps \[1 step\]\nHalf guard \(bottom\): Bottom half: winning the underhook \[4 steps\]/);
 
+    // Alternatives ("or") read back after the step they're alternatives to, lettered on the main line.
+    expect(
+      await call('save_area', {
+        name: 'winning the underhook',
+        steps: [
+          { depth: 0, do: 'John Wayne sweep' },
+          { depth: 0, or: true, do: 'Wrestle up from the knee shield' },
+          { depth: 0, do: 'shuck pass', technique: 'shuck' },
+          { depth: 1, when: 'they post the far leg', do: 'Go to deep half' },
+          { depth: 1, or: 'true', when: 'ignored', do: 'Come up to dogfight' },
+        ],
+      }),
+    ).toMatch(/^Bottom half: winning the underhook: plan saved \(5 steps\)/);
+    expect(await call('get_area', { name: 'winning the underhook' })).toContain(
+      [
+        'Plan:',
+        '1a. John Wayne sweep (drilling).',
+        '1b. Or: wrestle up from the knee shield.',
+        '2. shuck pass (learning).',
+        '   If they post the far leg: go to deep half.',
+        '   Or: come up to dogfight.',
+      ].join('\n'),
+    );
+    await expect(call('save_area', { name: 'winning the underhook', steps: [{ depth: 0, or: true, do: 'a' }] })).rejects.toThrow(
+      'Error: Step 1: "or" needs a step before it at the same level to be an alternative to.',
+    );
+    expect(await call('undo_last')).toBe('Undid: edit to "Bottom half: winning the underhook"');
+
     // Putting it on focus, and a bad outline.
     expect(await call('save_area', { name: 'winning the underhook', focus: true })).toBe('Bottom half: winning the underhook: on focus at #1.');
     await expect(call('save_area', { name: 'winning the underhook', steps: [{ depth: 0, do: 'a' }, { depth: 2, do: 'b' }] })).rejects.toThrow(

@@ -132,6 +132,23 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
     await page.getByText('If crossface hard').waitFor();
+
+    // An alternative: plan B for the first step, which can be made plan A.
+    await page.getByRole('button', { name: 'Or', exact: true }).first().click();
+    await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Bridge and shrimp');
+    await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
+    await page.getByText('Step added').waitFor();
+    const letters = page.getByRole('list', { name: 'Plan' }).locator('.plan-step.numbered').first().locator('> .plan-option');
+    expect(await letters.locator('> .plan-line .plan-do').allTextContents()).toEqual(['Frame on the hip', 'Bridge and shrimp']);
+    expect(await letters.locator('> .plan-line .plan-letter').allTextContents()).toEqual(['A', 'B']);
+    await page.getByRole('button', { name: 'Edit step: Bridge and shrimp' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Make this plan A' }).click();
+    await page.getByText('Now plan A').waitFor();
+    expect(await letters.locator('> .plan-line .plan-do').allTextContents()).toEqual(['Bridge and shrimp', 'Frame on the hip']);
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.getByText(/^Undid: edit to/).waitFor();
+    expect(await letters.locator('> .plan-line .plan-do').allTextContents()).toEqual(['Frame on the hip', 'Bridge and shrimp']);
+
     await page.getByRole('button', { name: 'Edit step: Frame on the hip' }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Delete step and the 1 after it' }).click();
     await page.getByText('Step deleted').waitFor();

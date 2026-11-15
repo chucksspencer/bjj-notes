@@ -47,6 +47,8 @@ export interface StepSnapshot {
   id: number;
   parent_id: number | null;
   ordinal: number;
+  /** An alternative to the step before it (absent in undo entries from before alternatives). */
+  alt?: boolean;
   trigger: string | null;
   action: string;
   technique_id: number | null;
@@ -55,7 +57,7 @@ export interface StepSnapshot {
   note: string | null;
 }
 
-export const STEP_SNAPSHOT_SQL = `select id, parent_id, ordinal, trigger, action, technique_id, to_position_id, to_role, note
+export const STEP_SNAPSHOT_SQL = `select id, parent_id, ordinal, alt, trigger, action, technique_id, to_position_id, to_role, note
   from area_steps where area_id = $1 and user_id = $2 order by id`;
 
 /** A session's details, to put back after they were filled in. */
@@ -498,9 +500,9 @@ export async function insertSteps(q: Queryable, areaId: number, steps: StepSnaps
   const me = uid(q);
   for (const st of steps) {
     await q.query(
-      `insert into area_steps (id, area_id, user_id, parent_id, ordinal, trigger, action, technique_id, to_position_id, to_role, note)
-       values ($1, $2, $3, null, $4, $5, $6, (select id from techniques where id = $7 and user_id = $3), $8, $9, $10)`,
-      [st.id, areaId, me, st.ordinal, st.trigger, st.action, st.technique_id, st.to_position_id, st.to_role, st.note],
+      `insert into area_steps (id, area_id, user_id, parent_id, ordinal, trigger, action, technique_id, to_position_id, to_role, note, alt)
+       values ($1, $2, $3, null, $4, $5, $6, (select id from techniques where id = $7 and user_id = $3), $8, $9, $10, $11)`,
+      [st.id, areaId, me, st.ordinal, st.trigger, st.action, st.technique_id, st.to_position_id, st.to_role, st.note, st.alt ?? false],
     );
   }
   for (const st of steps) {

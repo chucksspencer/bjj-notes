@@ -675,6 +675,42 @@ describe('JSON API', () => {
     expect(await said('half guard top')).toBe("You don't have a plan from Half guard on top yet.");
     expect(await said('qwxz zzyq')).toBe("I couldn't find a plan called qwxz zzyq.");
 
+    // Alternatives ("or"): plan B for a step, after it and its branches, at the same depth. Undone with the rest.
+    const withOr = await api<{ message: string; area: AreaDetail }>('PATCH', `/api/v1/areas/${area.id}`, {
+      plan: [
+        plan[0],
+        { depth: 0, or: true, trigger: 'ignored', action: 'Knee lever' },
+        { depth: 1, action: 'Come up on the single' },
+        plan[1],
+        plan[2],
+        { depth: 1, or: true, action: 'Underhook to dogfight' },
+        plan[3],
+      ],
+    });
+    expect(withOr.body.message).toBe('Bottom half: winning the underhook: plan saved (7 steps).');
+    expect(withOr.body.area.plan.map(st => [st.or, st.trigger, st.action, st.children.length])).toEqual([
+      [false, null, 'John Wayne sweep', 0],
+      [true, null, 'Knee lever', 1],
+      [false, null, 'Shuck', 3],
+    ]);
+    expect(withOr.body.area.plan[2]!.children.map(c => [c.or, c.trigger, c.action])).toEqual([
+      [false, 'they post the far leg', 'Go to deep half'],
+      [true, null, 'Underhook to dogfight'],
+      [false, 'they base back', 'Octopus sweeps'],
+    ]);
+    expect(await said('winning the underhook')).toBe(
+      'Bottom half: winning the underhook. When top has the underhook and crossface: John Wayne sweep, to force them to post the underhook hand. Or knee lever. Then come up on the single. Then shuck. If they post the far leg, go to deep half. Or underhook to dogfight. If they base back, octopus sweeps.',
+    );
+    for (const orphan of [[{ depth: 0, or: true, action: 'A' }], [{ depth: 0, action: 'A' }, { depth: 1, or: true, action: 'B' }]]) {
+      const r = await api('PATCH', `/api/v1/areas/${area.id}`, { plan: orphan });
+      expect([r.status, r.body.message]).toEqual([400, `Step ${orphan.length}: "or" needs a step before it at the same level to be an alternative to.`]);
+    }
+    expect(await undo()).toBe('Undid: edit to "Bottom half: winning the underhook"');
+    expect((await api<AreaDetail>('GET', `/api/v1/areas/${area.id}`)).body.plan.map(st => [st.or, st.action])).toEqual([
+      [false, 'John Wayne sweep'],
+      [false, 'Shuck'],
+    ]);
+
     // A bad outline is refused whole.
     const bad = await api('PATCH', `/api/v1/areas/${area.id}`, { plan: [{ depth: 1, action: 'Orphan' }] });
     expect([bad.status, bad.body.message]).toEqual([400, 'The first step must be on the main line (depth 0).']);

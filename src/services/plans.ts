@@ -36,11 +36,14 @@ const PLAN_TOOL = {
         type: 'array',
         description:
           'Every step in reading order. The main line is depth 0, in order. A branch (what to do if the opponent ' +
-          'reacts a certain way) goes right after the step it follows, one level deeper, with "when" saying the reaction.',
+          'reacts a certain way) goes right after the step it follows, one level deeper, with "when" saying the reaction. ' +
+          'An alternative ("do X, or Y"; "plan B is...") goes after the step it is an alternative to (and that step\'s own ' +
+          'branches), at the same depth, with "or": true; the preferred one comes first.',
         items: {
           type: 'object',
           properties: {
             depth: { type: 'integer', minimum: 0, maximum: MAX_DEPTH },
+            or: { type: 'boolean', description: 'True when this is an alternative to the nearest step above it at the same depth. Leave out "when".' },
             when: { type: 'string', description: 'The reaction that leads to this step, e.g. "they post the far leg". Leave out for "then".' },
             do: { type: 'string', description: 'What to do, in their words, e.g. "shuck pass", "go to deep half", "octopus sweeps".' },
             technique: { type: 'string', description: 'The known technique this step is, spelled exactly as listed. Leave out if none clearly is.' },
@@ -65,7 +68,7 @@ export function claudePlanDrafter(apiKey: string, model: string, opts: { baseURL
       max_tokens: 2000,
       system:
         'You write down Brazilian jiu-jitsu plans ("systems"): where they start, a main line of steps, and branches for ' +
-        'how the opponent reacts. The description may be dictated, so names can be misheard ("barra toe plata" is ' +
+        'how the opponent reacts, and alternatives (plan A, plan B) where they give more than one option. The description may be dictated, so names can be misheard ("barra toe plata" is ' +
         'Baratoplata). Keep the person\'s own words for steps; use known technique and position names where they ' +
         'clearly match. Leave out nothing they said, and add nothing they did not.\n\n' +
         `Known techniques: ${known.techniques.join('; ') || '(none yet)'}\n` +
@@ -108,14 +111,20 @@ export async function draftPlan(ctx: Ctx, text: string): Promise<PlanDraft> {
 
   const raw = Array.isArray(drafted.steps) ? drafted.steps.filter(s => s && typeof s.do === 'string' && s.do.trim()) : [];
   let prev = -1;
+  const has: boolean[] = [];
   const steps: StepInput[] = raw.slice(0, MAX_STEPS).map(s => {
     const depth = Math.min(Math.max(0, Math.round(Number(s.depth) || 0)), prev + 1, MAX_DEPTH);
     prev = depth;
+    // An "or" with nothing before it to be an alternative to is just a step.
+    const or = s.or === true && has[depth] === true;
+    has[depth] = true;
+    has.length = depth + 1;
     return {
       depth,
+      or,
       do: s.do.trim(),
       technique: typeof s.technique === 'string' && s.technique.trim() ? s.technique : undefined,
-      when: typeof s.when === 'string' ? s.when : undefined,
+      when: typeof s.when === 'string' && !or ? s.when : undefined,
       to: typeof s.to === 'string' ? s.to : undefined,
       to_role: isRole(s.to_role) ? s.to_role : undefined,
       note: typeof s.note === 'string' ? s.note : undefined,
@@ -149,6 +158,7 @@ export async function draftPlan(ctx: Ctx, text: string): Promise<PlanDraft> {
     premise: drafted.premise?.trim() || null,
     plan: resolved.map(s => ({
       depth: s.depth,
+      or: s.alt,
       trigger: s.trigger,
       action: s.action,
       techniqueId: s.technique_id,
