@@ -585,10 +585,11 @@ describe.runIf(run)('web app (end to end)', () => {
     await phone.getByText('https://www.instagram.com/reel/SHARE123/', { exact: true }).waitFor();
     await phone.getByLabel("What's the takeaway? (optional)").fill('Knee line entry from single leg X');
     await phone.getByRole('button', { name: 'Save to To try' }).click();
-    await phone.getByRole('heading', { name: 'To try' }).waitFor();
-    await phone.getByText('Knee line entry from single leg X').waitFor();
+    // Exact: the save screen's own heading, "Save to try", would match otherwise, before the page has moved on.
+    await phone.getByRole('heading', { name: 'To try', exact: true }).waitFor();
+    await phone.getByText('Knee line entry from single leg X').first().waitFor();
     // The save screen is replaced, so Back leaves BJJ Notes instead of saving again.
-    expect(await phone.evaluate(() => location.pathname)).toBe('/try');
+    await phone.waitForURL(url => url.pathname === '/try');
 
     // Text shared without a link becomes a note.
     await phone.goto(`${s.base}/share?${new URLSearchParams({ text: 'Frame on the hip before shrimping' })}`);
