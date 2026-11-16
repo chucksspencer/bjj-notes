@@ -1,6 +1,6 @@
 import { useDeferredValue, useId, useState } from 'react';
-import type { AreaRef, Role, TechniqueRef, TechniqueType } from '../../../src/shared/api';
-import { useAreas, useTechniques } from '../api';
+import type { GamePlanRef, Role, TechniqueRef, TechniqueType } from '../../../src/shared/api';
+import { useGamePlans, useTechniques } from '../api';
 import { ROLE_LABEL, ROLES, techniqueLine, TYPE_LABEL, TYPES } from '../lib/format';
 import { Icon } from './Icon';
 import { RankBar } from './Belt';
@@ -12,8 +12,8 @@ export interface NewTechnique {
 }
 
 /**
- * Pick existing techniques by name (fuzzy), or add a new one inline. Given `areas`, it's "File under": the same
- * search finds areas too, and a note can be filed under either.
+ * Pick existing techniques by name (fuzzy), or add a new one inline. Given `gamePlans`, it's "File under": the same
+ * search finds game plans too, and a note can be filed under either.
  */
 export function TechniquePicker({
   selected,
@@ -22,8 +22,8 @@ export function TechniquePicker({
   onNewChange,
   label = 'Techniques',
   single = false,
-  areas,
-  onAreasChange,
+  gamePlans,
+  onGamePlansChange,
 }: {
   selected: TechniqueRef[];
   onChange: (t: TechniqueRef[]) => void;
@@ -31,11 +31,11 @@ export function TechniquePicker({
   onNewChange?: (n: NewTechnique[]) => void;
   label?: string;
   single?: boolean;
-  areas?: AreaRef[];
-  onAreasChange?: (a: AreaRef[]) => void;
+  gamePlans?: GamePlanRef[];
+  onGamePlansChange?: (a: GamePlanRef[]) => void;
 }) {
-  const withAreas = areas !== undefined && onAreasChange !== undefined;
-  const allAreas = useAreas(withAreas);
+  const withGamePlans = gamePlans !== undefined && onGamePlansChange !== undefined;
+  const allGamePlans = useGamePlans(withGamePlans);
   const inputId = useId();
   const [text, setText] = useState('');
   const query = useDeferredValue(text.trim());
@@ -51,17 +51,17 @@ export function TechniquePicker({
   const exact = results.data?.some(r => r.name.toLowerCase() === query.toLowerCase()) ?? false;
   const shown = (results.data ?? []).filter(r => !selected.some(s => s.id === r.id)).slice(0, 6);
   const full = single && selected.length + newOnes.length >= 1;
-  // Areas match on any word of their name or other names; there are few, so it's done here.
+  // Game plans match on any word of their name or other names; there are few, so it's done here.
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   // Shown once the card search has answered, so the list doesn't shift under a tap.
-  const areaHits = withAreas && results.isFetched && !results.isFetching
-    ? (allAreas.data?.areas ?? [])
-        .filter(a => !areas.some(x => x.id === a.id))
+  const gamePlanHits = withGamePlans && results.isFetched && !results.isFetching
+    ? (allGamePlans.data?.gamePlans ?? [])
+        .filter(a => !gamePlans.some(x => x.id === a.id))
         .filter(a => words.length && words.every(w => [a.name, ...a.aliases].some(n => n.toLowerCase().includes(w))))
         .slice(0, 4)
     : [];
-  const addArea = (a: AreaRef) => {
-    onAreasChange?.([...(areas ?? []), { id: a.id, name: a.name, rank: a.rank }]);
+  const addGamePlan = (a: GamePlanRef) => {
+    onGamePlansChange?.([...(gamePlans ?? []), { id: a.id, name: a.name, rank: a.rank }]);
     setText('');
   };
 
@@ -70,13 +70,13 @@ export function TechniquePicker({
       <label className="label" htmlFor={inputId}>
         {label}
       </label>
-      {(selected.length > 0 || newOnes.length > 0 || (areas?.length ?? 0) > 0) && (
+      {(selected.length > 0 || newOnes.length > 0 || (gamePlans?.length ?? 0) > 0) && (
         <div className="chips" style={{ marginBottom: 8 }}>
-          {areas?.map(a => (
+          {gamePlans?.map(a => (
             <span className="chip chip-focus" key={`a${a.id}`}>
               <Icon name="focus" size={16} />
               {a.name}
-              <button type="button" aria-label={`Remove ${a.name}`} onClick={() => onAreasChange?.(areas.filter(x => x.id !== a.id))}>
+              <button type="button" aria-label={`Remove ${a.name}`} onClick={() => onGamePlansChange?.(gamePlans.filter(x => x.id !== a.id))}>
                 <Icon name="close" size={16} />
               </button>
             </span>
@@ -107,7 +107,7 @@ export function TechniquePicker({
           enterKeyHint="search"
           autoComplete="off"
           autoCapitalize="none"
-          placeholder={withAreas ? 'Search techniques and areas' : 'Search techniques'}
+          placeholder={withGamePlans ? 'Search techniques and game plans' : 'Search techniques'}
           value={text}
           onChange={e => {
             setText(e.target.value);
@@ -126,12 +126,12 @@ export function TechniquePicker({
               <RankBar status={t.status} />
             </button>
           ))}
-          {/* Cards first: a note is usually about a technique, even when an area shares its name. */}
-          {areaHits.map(a => (
-            <button key={`a${a.id}`} type="button" className="row row-split" aria-label={`Area: ${a.name}`} onClick={() => addArea(a)}>
+          {/* Cards first: a note is usually about a technique, even when a game plan shares its name. */}
+          {gamePlanHits.map(a => (
+            <button key={`a${a.id}`} type="button" className="row row-split" aria-label={`Game plan: ${a.name}`} onClick={() => addGamePlan(a)}>
               <span className="grow">
                 <span className="row-title">{a.name}</span>
-                <span className="row-meta">Area{a.rank ? `, #${a.rank} on your focus` : ''}</span>
+                <span className="row-meta">Game plan{a.rank ? `, #${a.rank} on your focus` : ''}</span>
               </span>
               <Icon name="focus" size={18} />
             </button>
@@ -176,7 +176,7 @@ export function TechniquePicker({
               </button>
             </div>
           )}
-          {shown.length === 0 && areaHits.length === 0 && exact && <div className="empty">Already added.</div>}
+          {shown.length === 0 && gamePlanHits.length === 0 && exact && <div className="empty">Already added.</div>}
         </div>
       )}
     </div>

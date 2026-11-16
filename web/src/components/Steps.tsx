@@ -1,7 +1,7 @@
 import { createContext, Fragment, useContext, useState } from 'react';
 import { Link } from 'react-router';
-import type { AreaDetail, PlanDraft, PlanStep, PlanStepInput, Role, TechniqueRef } from '../../../src/shared/api';
-import { useDraftPlan, useEditArea, usePositions } from '../api';
+import type { GamePlanDetail, GamePlanDraft, GamePlanStep, GamePlanStepInput, Role, TechniqueRef } from '../../../src/shared/api';
+import { useDraftGamePlan, useEditGamePlan, usePositions } from '../api';
 import { CATEGORY_LABEL, CATEGORY_ORDER, ROLE_LABEL, ROLES } from '../lib/format';
 import { RankBar } from './Belt';
 import { Icon } from './Icon';
@@ -9,7 +9,7 @@ import { Sheet } from './Sheet';
 import { TechniquePicker } from './TechniquePicker';
 import { useToast } from './Toast';
 
-// ---------- the plan as an editable tree ----------
+// ---------- the steps as an editable tree ----------
 
 /** One step while editing: what's stored, plus names to show. */
 export interface Node {
@@ -28,8 +28,8 @@ export interface Node {
 /** Where a step is: its index at each level, from the main line down. */
 type Path = number[];
 
-export const fromPlan = (plan: PlanStep[]): Node[] =>
-  plan.map(s => ({
+export const fromSteps = (steps: GamePlanStep[]): Node[] =>
+  steps.map(s => ({
     or: s.or,
     trigger: s.trigger,
     action: s.action,
@@ -38,11 +38,11 @@ export const fromPlan = (plan: PlanStep[]): Node[] =>
     toName: s.to?.name ?? null,
     toRole: s.toRole,
     note: s.note,
-    children: fromPlan(s.children),
+    children: fromSteps(s.children),
   }));
 
 /** The tree as the flat outline the server takes. */
-export function toInput(nodes: Node[], depth = 0): PlanStepInput[] {
+export function toInput(nodes: Node[], depth = 0): GamePlanStepInput[] {
   return nodes.flatMap(n => [
     {
       depth,
@@ -59,10 +59,10 @@ export function toInput(nodes: Node[], depth = 0): PlanStepInput[] {
 }
 
 /** A drafted outline (flat, with depths) as a tree. */
-function fromDraft(draft: PlanDraft): Node[] {
+function fromDraft(draft: GamePlanDraft): Node[] {
   const top: Node[] = [];
   const stack: Node[] = [];
-  for (const s of draft.plan) {
+  for (const s of draft.steps) {
     const node: Node = {
       or: s.or === true,
       trigger: s.trigger ?? null,
@@ -99,12 +99,12 @@ function choiceAt(list: { or: boolean }[], i: number): [number, number] {
   return [start, end];
 }
 
-const countSteps = (nodes: { children: Node[] | PlanStep[] }[]): number => nodes.reduce((n, s) => n + 1 + countSteps(s.children), 0);
+const countSteps = (nodes: { children: Node[] | GamePlanStep[] }[]): number => nodes.reduce((n, s) => n + 1 + countSteps(s.children), 0);
 
 // ---------- reading ----------
 
 /** A saved step, or one being drafted or edited: the outline draws both. */
-type AnyStep = PlanStep | Node;
+type AnyStep = GamePlanStep | Node;
 
 interface Outline {
   /** Given while editing: tapping a step edits it, and each step offers what can come next. */
@@ -114,7 +114,7 @@ interface Outline {
   };
   /** Opens one step's part of the tree on its own. Without it (a draft), everything shows in place. */
   zoom?: (path: Path) => void;
-  /** Every step showing, whatever the size of the plan. */
+  /** Every step showing, however many there are. */
   all: boolean;
   /** A drafted outline: no card links or rank bars, since nothing is saved yet. */
   draft: boolean;
@@ -124,8 +124,8 @@ const OutlineContext = createContext<Outline>({ all: true, draft: false });
 
 /** How far branches indent before a branch opens on its own instead. */
 const MAX_LEVEL = 3;
-/** A plan this short shows whole; a longer one starts with its branches folded. */
-const SMALL_PLAN = 10;
+/** This few steps show whole; more start with their branches folded. */
+const SMALL_STEPS = 10;
 
 /** Steps in a list, each with its alternatives: [index of the step, ...indexes of its "or"s]. */
 function choices(list: AnyStep[]): number[][] {
@@ -137,8 +137,8 @@ function choices(list: AnyStep[]): number[][] {
   return out;
 }
 
-const stepAt = (plan: AnyStep[], path: Path): AnyStep | null => {
-  let list = plan;
+const stepAt = (steps: AnyStep[], path: Path): AnyStep | null => {
+  let list = steps;
   let step: AnyStep | null = null;
   for (const i of path) {
     step = list[i] ?? null;
@@ -152,52 +152,52 @@ const stepAt = (plan: AnyStep[], path: Path): AnyStep | null => {
 const crumb = (s: AnyStep) => `${s.trigger && !s.or ? `If ${s.trigger}: ` : ''}${s.action}`;
 
 /**
- * The plan as an outline. The main line is numbered; "if they…" branches hang under the step they follow;
+ * A game plan's steps as an outline. The main line is numbered; "if they…" branches hang under the step they follow;
  * what comes next in a branch ("then") stays at the same indent, so a long sequence doesn't creep sideways;
  * alternatives ("or") stack under the step they're alternatives to, lettered A, B, C in order of preference.
  * Anything under a step folds away, and a branch that's deep in the tree opens on its own, with a trail back.
  */
-export function PlanOutline({ plan, onEdit, draft = false }: { plan: AnyStep[]; onEdit?: Outline['onEdit']; draft?: boolean }) {
+export function StepsOutline({ steps, onEdit, draft = false }: { steps: AnyStep[]; onEdit?: Outline['onEdit']; draft?: boolean }) {
   const [root, setRoot] = useState<Path>([]);
   const [all, setAll] = useState(false);
-  const total = countSteps(plan);
-  const small = total <= SMALL_PLAN;
+  const total = countSteps(steps);
+  const small = total <= SMALL_STEPS;
   // The step the view is opened on may have been deleted or moved since.
-  const rootStep = root.length ? stepAt(plan, root) : null;
+  const rootStep = root.length ? stepAt(steps, root) : null;
   const at = rootStep ? root : [];
-  const foldable = plan.some(s => s.children.length > 0);
+  const foldable = steps.some(s => s.children.length > 0);
   const ctx: Outline = { onEdit, zoom: draft ? undefined : setRoot, all: all || small || draft, draft };
   return (
     <OutlineContext.Provider value={ctx}>
       {rootStep && (
-        <nav className="plan-trail" aria-label="Where this is in the plan">
+        <nav className="steps-trail" aria-label="Where this is in the game plan">
           <button type="button" className="btn ghost small" onClick={() => setRoot([])}>
             <Icon name="back" size={16} />
-            Whole plan
+            All steps
           </button>
           {at.slice(0, -1).map((_, i) => {
             const to = at.slice(0, i + 1);
             return (
-              <button key={i} type="button" className="plan-crumb" onClick={() => setRoot(to)}>
-                {crumb(stepAt(plan, to)!)}
+              <button key={i} type="button" className="steps-crumb" onClick={() => setRoot(to)}>
+                {crumb(stepAt(steps, to)!)}
               </button>
             );
           })}
         </nav>
       )}
       {/* Remounted when everything is opened or folded, so each step starts from the new default. */}
-      <ol key={`${all}-${at.join('.')}`} className={`plan${onEdit ? ' editing' : ''}${rootStep ? ' zoomed' : ''}`} aria-label={draft ? 'Outline' : 'Plan'}>
+      <ol key={`${all}-${at.join('.')}`} className={`steps${onEdit ? ' editing' : ''}${rootStep ? ' zoomed' : ''}`} aria-label={draft ? 'Outline' : 'Steps'}>
         {rootStep ? (
-          <li className="plan-step level-0">
-            {(rootStep.trigger || rootStep.or) && <span className="plan-when">{rootStep.or ? 'Or' : `If ${rootStep.trigger}`}</span>}
+          <li className="step level-0">
+            {(rootStep.trigger || rootStep.or) && <span className="step-when">{rootStep.or ? 'Or' : `If ${rootStep.trigger}`}</span>}
             <Option step={rootStep} path={at} level={0} marker={null} choice={false} root />
           </li>
         ) : (
-          <Choices list={plan} base={[]} level={0} numbered />
+          <Choices list={steps} base={[]} level={0} numbered />
         )}
       </ol>
       {!onEdit && !small && !draft && foldable && (
-        <button type="button" className="btn ghost small plan-all" aria-pressed={all} onClick={() => setAll(!all)}>
+        <button type="button" className="btn ghost small steps-all" aria-pressed={all} onClick={() => setAll(!all)}>
           {all ? 'Fold the branches' : `Show all ${total} steps`}
         </button>
       )}
@@ -226,11 +226,11 @@ function Choices({
         if (only && !only(first)) return null;
         const choice = at.length > 1;
         return (
-          <li key={'id' in first ? first.id : at[0]} className={`plan-step level-${Math.min(level, MAX_LEVEL)}${numbered ? ' numbered' : ''}`}>
-            {!numbered && <span className="plan-when">{first.trigger ? `If ${first.trigger}` : 'Then'}</span>}
+          <li key={'id' in first ? first.id : at[0]} className={`step level-${Math.min(level, MAX_LEVEL)}${numbered ? ' numbered' : ''}`}>
+            {!numbered && <span className="step-when">{first.trigger ? `If ${first.trigger}` : 'Then'}</span>}
             {at.map((i, k) => (
               <Fragment key={i}>
-                {k > 0 && <span className="plan-or">or</span>}
+                {k > 0 && <span className="step-or">or</span>}
                 <Option
                   step={list[i]!}
                   path={[...base, i]}
@@ -274,7 +274,7 @@ function Option({
   root?: boolean;
 }) {
   const { onEdit, zoom, all, draft } = useContext(OutlineContext);
-  // The main line shows its branches; deeper ones, and fallbacks, wait behind a tap unless the plan is short.
+  // The main line shows its branches; deeper ones, and fallbacks, wait behind a tap unless there are only a few steps.
   const [unfolded, setOpen] = useState(all || (level === 0 && !second));
   const under = countSteps(step.children);
   // Deep in the tree there's no room left to indent: what's under this step opens on its own instead.
@@ -284,54 +284,54 @@ function Option({
   const saved = 'id' in step ? step : null;
   const body = (
     <>
-      <span className="plan-do">{step.action}</span>
+      <span className="step-do">{step.action}</span>
       {saved && (saved.to || saved.continuesIn.length > 0) && (
-        <span className="plan-meta">
+        <span className="step-meta">
           {saved.to && `→ ${saved.to.name}${saved.toRole ? ` (${ROLE_LABEL[saved.toRole].toLowerCase()})` : ''}`}
           {saved.continuesIn.map(a => (
             <span key={a.id}>
               {' '}
-              · continues in <Link to={`/areas/${a.id}`}>{a.name}</Link>
+              · continues in <Link to={`/game-plans/${a.id}`}>{a.name}</Link>
             </span>
           ))}
         </span>
       )}
       {!saved && (step.technique || (step as Node).toName) && (
-        <span className="plan-meta">
+        <span className="step-meta">
           {step.technique && step.technique.name.toLowerCase() !== step.action.toLowerCase() ? `Card: ${step.technique.name} ` : ''}
           {(step as Node).toName ? `→ ${(step as Node).toName}` : ''}
         </span>
       )}
-      {step.note && <span className="plan-note">{step.note}</span>}
+      {step.note && <span className="step-note">{step.note}</span>}
     </>
   );
   // In a branch, what comes next stays at this indent; one of several alternatives keeps its own steps under it.
   const flat = level >= 1 && !choice;
   return (
-    <div className="plan-option">
-      <div className="plan-line">
-        {marker && <span className="plan-num">{marker}</span>}
+    <div className="step-option">
+      <div className="step-line">
+        {marker && <span className="step-num">{marker}</span>}
         {letter && (
-          <span className="plan-letter" aria-label={`Plan ${letter}`}>
+          <span className="step-letter" aria-label={`Plan ${letter}`}>
             {letter}
           </span>
         )}
         {onEdit ? (
-          <button type="button" className="plan-body" aria-label={`Edit step: ${step.action}`} onClick={() => onEdit.step(path)}>
+          <button type="button" className="step-body" aria-label={`Edit step: ${step.action}`} onClick={() => onEdit.step(path)}>
             {body}
           </button>
         ) : step.technique && !draft ? (
-          <Link className="plan-body" to={`/t/${step.technique.id}`}>
+          <Link className="step-body" to={`/t/${step.technique.id}`}>
             {body}
           </Link>
         ) : (
-          <div className="plan-body">{body}</div>
+          <div className="step-body">{body}</div>
         )}
         {step.technique && !draft && <RankBar status={step.technique.status} />}
         {under > 0 && !root && (elsewhere || !onEdit) && (
           <button
             type="button"
-            className="plan-fold"
+            className="step-fold"
             aria-expanded={elsewhere ? undefined : open}
             aria-label={`${elsewhere ? 'Open' : open ? 'Fold' : 'Show'} the ${under} step${under === 1 ? '' : 's'} after ${step.action}`}
             onClick={() => (elsewhere ? zoom?.(path) : setOpen(!open))}
@@ -342,7 +342,7 @@ function Option({
         )}
       </div>
       {onEdit && (
-        <div className="plan-add">
+        <div className="step-add">
           <button type="button" className="btn ghost small" onClick={() => onEdit.add(path, 'then')}>
             <Icon name="plus" size={16} />
             Then
@@ -360,12 +360,12 @@ function Option({
       {open && step.children.length > 0 && (
         <>
           {(!flat || step.children.some(c => !c.or && c.trigger)) && (
-            <ol className="plan-branches">
+            <ol className="step-branches">
               <Choices list={step.children} base={path} level={level + 1} only={flat ? first => !!first.trigger : undefined} />
             </ol>
           )}
           {flat && step.children.some(c => !c.or && !c.trigger) && (
-            <ol className="plan-then">
+            <ol className="step-then">
               <Choices list={step.children} base={path} level={level} only={first => !first.trigger} />
             </ol>
           )}
@@ -377,25 +377,25 @@ function Option({
 
 // ---------- editing ----------
 
-/** Editing state on an area's page: which step's sheet is open, if any. */
+/** Editing state on a game plan's page: which step's sheet is open, if any. */
 type StepEdit = { path: Path; mode: 'edit' } | { path: Path; mode: 'then' | 'branch' | 'or' } | { path: null; mode: 'first' };
 
 /**
- * The plan section of an area's page: the outline, and editing it a step at a time. Every change saves the
- * whole plan at once, with Undo.
+ * The steps section of a game plan's page: the outline, and editing it a step at a time. Every change saves all
+ * the steps at once, with Undo.
  */
-export function PlanSection({ area }: { area: AreaDetail }) {
+export function StepsSection({ gamePlan }: { gamePlan: GamePlanDetail }) {
   const [editing, setEditing] = useState(false);
   const [step, setStep] = useState<StepEdit | null>(null);
   const [describing, setDescribing] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
-  const edit = useEditArea();
+  const edit = useEditGamePlan();
   const toast = useToast();
-  const tree = fromPlan(area.plan);
+  const tree = fromSteps(gamePlan.steps);
 
   const save = (next: Node[], done: string, after?: () => void) =>
     edit.mutate(
-      { id: area.id, plan: toInput(next) },
+      { id: gamePlan.id, steps: toInput(next) },
       {
         onSuccess: () => {
           toast.show(done, { undoable: true });
@@ -410,8 +410,8 @@ export function PlanSection({ area }: { area: AreaDetail }) {
   return (
     <>
       <div className="row-split section-row">
-        <h2 className="section-title grow">Plan</h2>
-        {area.plan.length > 0 ? (
+        <h2 className="section-title grow">Steps</h2>
+        {gamePlan.steps.length > 0 ? (
           <button type="button" className="btn ghost small" aria-pressed={editing} onClick={() => setEditing(!editing)}>
             {editing ? 'Done' : 'Edit'}
           </button>
@@ -421,32 +421,32 @@ export function PlanSection({ area }: { area: AreaDetail }) {
         </button>
       </div>
 
-      <button type="button" className="plan-start" onClick={() => setStartOpen(true)}>
-        {area.start || area.premise ? (
+      <button type="button" className="game-plan-start" onClick={() => setStartOpen(true)}>
+        {gamePlan.start || gamePlan.premise ? (
           <>
-            <span className="plan-start-label">Starts</span>
-            {area.start ? (
+            <span className="game-plan-start-label">Starts</span>
+            {gamePlan.start ? (
               <>
                 {' '}
-                in <strong>{area.start.name}</strong>
-                {area.startRole ? `, ${ROLE_LABEL[area.startRole].toLowerCase()}` : ''}
+                in <strong>{gamePlan.start.name}</strong>
+                {gamePlan.startRole ? `, ${ROLE_LABEL[gamePlan.startRole].toLowerCase()}` : ''}
               </>
             ) : null}
-            {area.premise && <span className="plan-premise">When {lowerFirst(area.premise)}</span>}
+            {gamePlan.premise && <span className="game-plan-premise">When {lowerFirst(gamePlan.premise)}</span>}
           </>
         ) : (
           <span className="muted">Where does it start? Add a position and the situation it's for.</span>
         )}
       </button>
 
-      {area.plan.length > 0 ? (
-        <section className="panel plan-panel">
-          <PlanOutline
-            plan={area.plan}
+      {gamePlan.steps.length > 0 ? (
+        <section className="panel steps-panel">
+          <StepsOutline
+            steps={gamePlan.steps}
             onEdit={editing ? { step: path => setStep({ path, mode: 'edit' }), add: (path, kind) => setStep({ path, mode: kind }) } : undefined}
           />
           {editing && (
-            <div className="plan-add plan-add-end">
+            <div className="step-add steps-add-end">
               <button type="button" className="btn ghost small" onClick={() => setStep({ path: [choiceAt(tree, tree.length - 1)[0]], mode: 'then' })}>
                 <Icon name="plus" size={16} />
                 Add a step at the end
@@ -528,8 +528,8 @@ export function PlanSection({ area }: { area: AreaDetail }) {
           }
         />
       )}
-      {startOpen && <StartSheet area={area} onClose={() => setStartOpen(false)} />}
-      {describing && <DescribeSheet area={area} onClose={() => setDescribing(false)} />}
+      {startOpen && <StartSheet gamePlan={gamePlan} onClose={() => setStartOpen(false)} />}
+      {describing && <DescribeSheet gamePlan={gamePlan} onClose={() => setDescribing(false)} />}
     </>
   );
 }
@@ -682,12 +682,12 @@ function RoleSegments({ value, onChange }: { value: Role | null; onChange: (r: R
   );
 }
 
-/** Where the plan starts and the situation it's for. */
-function StartSheet({ area, onClose }: { area: AreaDetail; onClose: () => void }) {
-  const [start, setStart] = useState<number | null>(area.start?.id ?? null);
-  const [role, setRole] = useState<Role | null>(area.startRole);
-  const [premise, setPremise] = useState(area.premise ?? '');
-  const edit = useEditArea();
+/** Where the game plan starts and the situation it's for. */
+function StartSheet({ gamePlan, onClose }: { gamePlan: GamePlanDetail; onClose: () => void }) {
+  const [start, setStart] = useState<number | null>(gamePlan.start?.id ?? null);
+  const [role, setRole] = useState<Role | null>(gamePlan.startRole);
+  const [premise, setPremise] = useState(gamePlan.premise ?? '');
+  const edit = useEditGamePlan();
   const toast = useToast();
   return (
     <Sheet title="Where it starts" onClose={onClose}>
@@ -695,7 +695,7 @@ function StartSheet({ area, onClose }: { area: AreaDetail; onClose: () => void }
         onSubmit={e => {
           e.preventDefault();
           edit.mutate(
-            { id: area.id, startPositionId: start, startRole: start ? role : null, premise: premise.trim() || null },
+            { id: gamePlan.id, startPositionId: start, startRole: start ? role : null, premise: premise.trim() || null },
             {
               onSuccess: () => {
                 toast.show('Saved', { undoable: true });
@@ -720,16 +720,16 @@ function StartSheet({ area, onClose }: { area: AreaDetail; onClose: () => void }
   );
 }
 
-/** Say the plan in your own words; Claude outlines it; check it, then save it (replacing the plan). */
-function DescribeSheet({ area, onClose }: { area: AreaDetail; onClose: () => void }) {
+/** Say the game plan in your own words; Claude outlines it; check it, then save it (replacing the steps). */
+function DescribeSheet({ gamePlan, onClose }: { gamePlan: GamePlanDetail; onClose: () => void }) {
   const [text, setText] = useState('');
-  const draft = useDraftPlan();
-  const edit = useEditArea();
+  const draft = useDraftGamePlan();
+  const edit = useEditGamePlan();
   const toast = useToast();
   const d = draft.data;
   const tree = d ? fromDraft(d) : [];
   return (
-    <Sheet title="Describe the plan" onClose={onClose}>
+    <Sheet title="Describe the game plan" onClose={onClose}>
       {!d ? (
         <form
           onSubmit={e => {
@@ -751,13 +751,13 @@ function DescribeSheet({ area, onClose }: { area: AreaDetail; onClose: () => voi
           <button className="btn block" type="submit" disabled={draft.isPending || !text.trim()}>
             {draft.isPending ? 'Outlining…' : 'Outline it'}
           </button>
-          {area.plan.length > 0 && <p className="muted small">You'll see the outline before it replaces the plan you have.</p>}
+          {gamePlan.steps.length > 0 && <p className="muted small">You'll see the outline before it replaces the steps you have.</p>}
         </form>
       ) : (
         <>
           {(d.start || d.premise) && (
-            <p className="plan-start static">
-              <span className="plan-start-label">Starts</span>
+            <p className="game-plan-start static">
+              <span className="game-plan-start-label">Starts</span>
               {d.start && (
                 <>
                   {' '}
@@ -765,11 +765,11 @@ function DescribeSheet({ area, onClose }: { area: AreaDetail; onClose: () => voi
                   {d.startRole ? `, ${d.startRole}` : ''}
                 </>
               )}
-              {d.premise && <span className="plan-premise">When {lowerFirst(d.premise)}</span>}
+              {d.premise && <span className="game-plan-premise">When {lowerFirst(d.premise)}</span>}
             </p>
           )}
-          <section className="panel plan-panel">
-            {tree.length ? <PlanOutline plan={tree} draft /> : <div className="empty">Claude didn't find any steps in that.</div>}
+          <section className="panel steps-panel">
+            {tree.length ? <StepsOutline steps={tree} draft /> : <div className="empty">Claude didn't find any steps in that.</div>}
           </section>
           <div className="row-split" style={{ marginTop: 12 }}>
             <button type="button" className="btn quiet grow" onClick={() => draft.reset()}>
@@ -782,14 +782,14 @@ function DescribeSheet({ area, onClose }: { area: AreaDetail; onClose: () => voi
               onClick={() =>
                 edit.mutate(
                   {
-                    id: area.id,
-                    plan: toInput(tree),
+                    id: gamePlan.id,
+                    steps: toInput(tree),
                     ...(d.start ? { startPositionId: d.start.id, startRole: d.startRole } : {}),
                     ...(d.premise ? { premise: d.premise } : {}),
                   },
                   {
                     onSuccess: () => {
-                      toast.show('Plan saved', { undoable: true });
+                      toast.show('Steps saved', { undoable: true });
                       onClose();
                     },
                     onError: toast.error,
@@ -797,7 +797,7 @@ function DescribeSheet({ area, onClose }: { area: AreaDetail; onClose: () => voi
                 )
               }
             >
-              Save plan
+              Save steps
             </button>
           </div>
         </>

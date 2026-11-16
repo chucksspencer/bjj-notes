@@ -8,7 +8,7 @@ import { Icon } from './components/Icon';
 import { applyBelt } from './lib/belt';
 import { ToastProvider } from './components/Toast';
 import { Account } from './pages/Account';
-import { Area } from './pages/Area';
+import { GamePlan } from './pages/GamePlan';
 import { Focus } from './pages/Focus';
 import { Inbox } from './pages/Inbox';
 import { Join } from './pages/Join';
@@ -69,8 +69,9 @@ function Shell() {
           <Routes>
             <Route path="/" element={<Lab />} />
             <Route path="/focus" element={<Focus />} />
-            <Route path="/focus/:id" element={<OldFocusItem />} />
-            <Route path="/areas/:id" element={<Area />} />
+            <Route path="/focus/:id" element={<OldGamePlanLink />} />
+            <Route path="/areas/:id" element={<OldGamePlanLink />} />
+            <Route path="/game-plans/:id" element={<GamePlan />} />
             <Route path="/try" element={<ToTry />} />
             <Route path="/library" element={<Library />} />
             <Route path="/t/:id" element={<Technique />} />
@@ -109,7 +110,7 @@ function TabBar() {
       <button type="button" className="tab-note" aria-label="New note" onClick={() => capture.open()}>
         <Icon name="plus" size={28} />
       </button>
-      <Tab to="/game" active={under('/game', '/p', '/areas')}>
+      <Tab to="/game" active={under('/game', '/p', '/game-plans')}>
         <Icon name="positions" />
         Game
       </Tab>
@@ -135,9 +136,9 @@ function Tab({ to, active, children }: { to: string; active: boolean; children: 
   );
 }
 
-/** Focus items became areas: old links (bookmarks, shared URLs) still land on the same page. */
-function OldFocusItem() {
-  return <Navigate to={`/areas/${useParams().id}`} replace />;
+/** Focus items became areas, then game plans: old links (bookmarks, shared URLs) still land on the same page. */
+function OldGamePlanLink() {
+  return <Navigate to={`/game-plans/${useParams().id}`} replace />;
 }
 
 function NotFound() {

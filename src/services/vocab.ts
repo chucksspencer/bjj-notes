@@ -32,7 +32,7 @@ export type SourceKind = (typeof SOURCE_KINDS)[number];
 
 export const SESSION_KINDS = ['class', 'open_mat', 'private', 'seminar', 'competition', 'drilling', 'other'] as const;
 
-/** add puts an area on the focus list, move re-ranks it, remove takes it off (the area stays). */
+/** add puts a game plan on the focus list, move re-ranks it, remove takes it off (the game plan stays). */
 export const FOCUS_ACTIONS = ['add', 'move', 'remove'] as const;
 /** Older names, still accepted: resume = add; pause, backlog, complete and drop = remove. */
 export const OLD_FOCUS_ACTIONS = ['resume', 'pause', 'backlog', 'complete', 'drop'] as const;

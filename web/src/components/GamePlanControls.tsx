@@ -1,22 +1,22 @@
 import { useState } from 'react';
-import type { AreaView } from '../../../src/shared/api';
-import { useEditArea, useFocusAction } from '../api';
+import type { GamePlanView } from '../../../src/shared/api';
+import { useEditGamePlan, useFocusAction } from '../api';
 import { Icon } from './Icon';
 import { Sheet } from './Sheet';
 import { useToast } from './Toast';
 
 /**
- * An area's place on the focus list: a switch to put it on or take it off, and (when it's on) Up, Down and Top.
- * Taking it off means "moved on to other things": the area, its plan and notes all stay.
+ * A game plan's place on the focus list: a switch to put it on or take it off, and (when it's on) Up, Down and Top.
+ * Taking it off means "moved on to other things": the game plan, its steps and notes all stay.
  */
-export function FocusControls({ area, count, compact = false }: { area: AreaView; count: number; compact?: boolean }) {
+export function FocusControls({ gamePlan, count, compact = false }: { gamePlan: GamePlanView; count: number; compact?: boolean }) {
   const act = useFocusAction();
   const toast = useToast();
-  const on = area.rank !== null;
+  const on = gamePlan.rank !== null;
   const run = (action: 'add' | 'move' | 'remove', position?: number) =>
-    act.mutate({ id: area.id, action, position }, { onSuccess: r => toast.show(r.message.replace(/\.$/, ''), { undoable: true }), onError: toast.error });
-  const first = area.rank === 1;
-  const last = area.rank === count;
+    act.mutate({ id: gamePlan.id, action, position }, { onSuccess: r => toast.show(r.message.replace(/\.$/, ''), { undoable: true }), onError: toast.error });
+  const first = gamePlan.rank === 1;
+  const last = gamePlan.rank === count;
   return (
     <div className="focus-actions">
       {!compact && (
@@ -35,13 +35,13 @@ export function FocusControls({ area, count, compact = false }: { area: AreaView
         </button>
       )}
       {on && !first && (
-        <button type="button" className="btn quiet small" disabled={act.isPending} onClick={() => run('move', area.rank! - 1)}>
+        <button type="button" className="btn quiet small" disabled={act.isPending} onClick={() => run('move', gamePlan.rank! - 1)}>
           <Icon name="up" size={18} />
           Up
         </button>
       )}
       {on && !last && (
-        <button type="button" className="btn quiet small" disabled={act.isPending} onClick={() => run('move', area.rank! + 1)}>
+        <button type="button" className="btn quiet small" disabled={act.isPending} onClick={() => run('move', gamePlan.rank! + 1)}>
           <Icon name="down" size={18} />
           Down
         </button>
@@ -60,21 +60,21 @@ export function FocusControls({ area, count, compact = false }: { area: AreaView
   );
 }
 
-/** An area's name, other names and description. */
-export function AreaEditSheet({ area, onClose }: { area: AreaView; onClose: () => void }) {
-  const [name, setName] = useState(area.name);
-  const [aliases, setAliases] = useState(area.aliases.join(', '));
-  const [description, setDescription] = useState(area.description ?? '');
-  const edit = useEditArea();
+/** A game plan's name, other names and description. */
+export function GamePlanEditSheet({ gamePlan, onClose }: { gamePlan: GamePlanView; onClose: () => void }) {
+  const [name, setName] = useState(gamePlan.name);
+  const [aliases, setAliases] = useState(gamePlan.aliases.join(', '));
+  const [description, setDescription] = useState(gamePlan.description ?? '');
+  const edit = useEditGamePlan();
   const toast = useToast();
   return (
-    <Sheet title="Edit area" onClose={onClose}>
+    <Sheet title="Edit game plan" onClose={onClose}>
       <form
         onSubmit={e => {
           e.preventDefault();
           edit.mutate(
             {
-              id: area.id,
+              id: gamePlan.id,
               name: name.trim(),
               description: description.trim() || null,
               aliases: aliases

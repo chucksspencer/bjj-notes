@@ -10,20 +10,20 @@ import { Icon } from './Icon';
 import { NoteStar } from './Star';
 import { SourceLink } from './Video';
 
-/** One note: when, what kind, where it came from, the text, its source, and the areas and techniques it's filed under. */
+/** One note: when, what kind, where it came from, the text, its source, and the game plans and techniques it's filed under. */
 export function NoteItem({
   note,
   today,
   hideTechnique,
-  hideArea,
+  hideGamePlan,
   actions,
   meta,
 }: {
   note: NoteView;
   today: string;
   hideTechnique?: number;
-  /** The area whose page this is (not repeated as a chip). */
-  hideArea?: number;
+  /** The game plan whose page this is (not repeated as a chip). */
+  hideGamePlan?: number;
   /** Extra buttons under the note. */
   actions?: ReactNode;
   /** An extra line under the date, e.g. when it was starred. */
@@ -31,7 +31,7 @@ export function NoteItem({
 }) {
   const capture = useCapture();
   const others = note.techniques.filter(t => t.id !== hideTechnique);
-  const areas = note.areas.filter(a => a.id !== hideArea);
+  const gamePlans = note.gamePlans.filter(a => a.id !== hideGamePlan);
   const origin = noteOrigin(note, d => datePhrase(d, today));
   return (
     <article className="row">
@@ -60,10 +60,10 @@ export function NoteItem({
       {!note.source?.url && (note.source?.author || note.source?.title) && (
         <div className="muted small note-foot">From {[note.source.title, note.source.author].filter(Boolean).join(' by ')}</div>
       )}
-      {others.length + areas.length > 0 && (
+      {others.length + gamePlans.length > 0 && (
         <div className="chips note-foot">
-          {areas.map(a => (
-            <Link key={`a${a.id}`} className="chip chip-focus" to={`/areas/${a.id}`} aria-label={`Area: ${a.name}`}>
+          {gamePlans.map(a => (
+            <Link key={`a${a.id}`} className="chip chip-focus" to={`/game-plans/${a.id}`} aria-label={`Game plan: ${a.name}`}>
               <Icon name="focus" size={16} />
               {a.name}
             </Link>

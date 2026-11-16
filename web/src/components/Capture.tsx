@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
-import type { AreaRef, NoteKind, NoteView, TechniqueRef } from '../../../src/shared/api';
+import type { GamePlanRef, NoteKind, NoteView, TechniqueRef } from '../../../src/shared/api';
 import { useAddNote, useDeleteNote, useEditNote } from '../api';
 import { localToday, NOTE_KIND_LABEL, NOTE_KINDS } from '../lib/format';
 import { OriginPicker, originPayload, type Origin } from './OriginPicker';
@@ -8,20 +8,20 @@ import { TechniquePicker, type NewTechnique } from './TechniquePicker';
 import { useToast } from './Toast';
 
 interface CaptureApi {
-  /** New note, optionally about some techniques, or filed under an area, already. */
-  open: (preset?: { techniques?: TechniqueRef[]; areas?: AreaRef[] }) => void;
+  /** New note, optionally about some techniques, or filed under a game plan, already. */
+  open: (preset?: { techniques?: TechniqueRef[]; gamePlans?: GamePlanRef[] }) => void;
   edit: (note: NoteView) => void;
 }
 
 const Ctx = createContext<CaptureApi>({ open: () => {}, edit: () => {} });
 export const useCapture = () => useContext(Ctx);
 
-type State = { mode: 'new'; techniques: TechniqueRef[]; areas: AreaRef[] } | { mode: 'edit'; note: NoteView } | null;
+type State = { mode: 'new'; techniques: TechniqueRef[]; gamePlans: GamePlanRef[] } | { mode: 'edit'; note: NoteView } | null;
 
 export function CaptureProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<State>(null);
   const api: CaptureApi = {
-    open: useCallback(preset => setState({ mode: 'new', techniques: preset?.techniques ?? [], areas: preset?.areas ?? [] }), []),
+    open: useCallback(preset => setState({ mode: 'new', techniques: preset?.techniques ?? [], gamePlans: preset?.gamePlans ?? [] }), []),
     edit: useCallback(note => setState({ mode: 'edit', note }), []),
   };
   const close = useCallback(() => setState(null), []);
@@ -38,8 +38,8 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
   const [text, setText] = useState(editing?.body ?? '');
   const [techniques, setTechniques] = useState<TechniqueRef[]>(editing?.techniques ?? (state.mode === 'new' ? state.techniques : []));
   const [newOnes, setNewOnes] = useState<NewTechnique[]>([]);
-  const [areas, setAreas] = useState<AreaRef[]>(editing?.areas ?? (state.mode === 'new' ? state.areas : []));
-  const areasChanged = !editing || areas.map(f => f.id).sort().join() !== editing.areas.map(f => f.id).sort().join();
+  const [gamePlans, setGamePlans] = useState<GamePlanRef[]>(editing?.gamePlans ?? (state.mode === 'new' ? state.gamePlans : []));
+  const gamePlansChanged = !editing || gamePlans.map(f => f.id).sort().join() !== editing.gamePlans.map(f => f.id).sort().join();
   const [kind, setKind] = useState<NoteKind>(editing?.kind ?? 'instruction');
   const [date, setDate] = useState(editing?.observedOn ?? localToday());
   const [origin, setOrigin] = useState<Origin>(
@@ -69,7 +69,7 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
           kind,
           date,
           techniqueIds: techniques.map(t => t.id),
-          ...(areasChanged ? { areaIds: areas.map(f => f.id) } : {}),
+          ...(gamePlansChanged ? { gamePlanIds: gamePlans.map(f => f.id) } : {}),
           ...(unchanged ? {} : originPayload(origin, date)),
         },
         {
@@ -89,7 +89,7 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
         date,
         techniqueIds: techniques.map(t => t.id),
         newTechniques: newOnes,
-        areaIds: areas.length ? areas.map(f => f.id) : undefined,
+        gamePlanIds: gamePlans.length ? gamePlans.map(f => f.id) : undefined,
         source: url.trim() ? { url: url.trim(), timestamp: timestamp.trim() || undefined } : undefined,
         toTry: url.trim() ? toTry : undefined,
         starred: starred || undefined,
@@ -97,7 +97,7 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
       },
       {
         onSuccess: r => {
-          const names = [...r.note.areas.map(a => a.name), ...r.note.techniques.map(t => t.name)];
+          const names = [...r.note.gamePlans.map(a => a.name), ...r.note.techniques.map(t => t.name)];
           toast.show(r.note.toTry ? 'Added to To try' : names.length ? `Saved to ${names.join(', ')}` : 'Saved to your inbox', {
             undoable: true,
           });
@@ -129,8 +129,8 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
           onChange={setTechniques}
           newOnes={newOnes}
           onNewChange={editing ? undefined : setNewOnes}
-          areas={areas}
-          onAreasChange={setAreas}
+          gamePlans={gamePlans}
+          onGamePlansChange={setGamePlans}
         />
 
         <div className="field">
@@ -213,9 +213,9 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
             Delete note
           </button>
         )}
-        {!editing && techniques.length === 0 && newOnes.length === 0 && areas.length === 0 && !(url.trim() && toTry) && (
+        {!editing && techniques.length === 0 && newOnes.length === 0 && gamePlans.length === 0 && !(url.trim() && toTry) && (
           <p className="muted small" style={{ marginTop: 8 }}>
-            Notes without a technique or area go to your inbox to file later.
+            Notes without a technique or game plan go to your inbox to file later.
           </p>
         )}
       </form>

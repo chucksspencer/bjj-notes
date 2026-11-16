@@ -82,16 +82,16 @@ export async function techniquesMentionedIn(q: Queryable, text: string, limit = 
   return rows;
 }
 
-/** Areas match on their name, an alias, or the name of a linked technique. */
-export async function resolveArea(q: Queryable, name: string, onFocusOnly = false): Promise<Resolution> {
+/** Game plans match on their name, an alias, or the name of a linked technique. */
+export async function resolveGamePlan(q: Queryable, name: string, onFocusOnly = false): Promise<Resolution> {
   return decide(
     await rank(
       q,
       `select a.id, a.name,
               max(bjj_name_score(c, $1)) as score,
               bool_or(bjj_norm(c) = bjj_norm($1)) as exact
-       from areas a
-       left join area_techniques ax on ax.area_id = a.id
+       from game_plans a
+       left join game_plan_techniques ax on ax.game_plan_id = a.id
        left join techniques t on t.id = ax.technique_id
        cross join lateral unnest(array_remove(array_cat(array[a.name, t.name], a.aliases), null)) as c
        where a.user_id = $2 and ${onFocusOnly ? 'a.rank is not null' : 'true'}

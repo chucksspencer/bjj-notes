@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import type { AreaView, PositionTechnique, Role } from '../../../src/shared/api';
-import { useAreas, useCreateArea, usePosition, usePositions } from '../api';
+import type { GamePlanView, PositionTechnique, Role } from '../../../src/shared/api';
+import { useGamePlans, useCreateGamePlan, usePosition, usePositions } from '../api';
 import { RankBar } from '../components/Belt';
 import { Icon } from '../components/Icon';
 import { Sheet } from '../components/Sheet';
@@ -9,26 +9,26 @@ import { useToast } from '../components/Toast';
 import { CATEGORY_LABEL, CATEGORY_ORDER, lastNoteText, localToday, ROLE_LABEL, TYPE_LABEL, TYPE_PLURAL } from '../lib/format';
 
 /**
- * Game: your areas (and the plans in them) by where they start, then the positions they start from. Empty
+ * Game: your game plans by where they start, then the positions they start from. Empty
  * positions fold away.
  */
 export function Game() {
-  const areas = useAreas();
+  const gamePlans = useGamePlans();
   const positions = usePositions();
   const [all, setAll] = useState(false);
   const [adding, setAdding] = useState(false);
-  const today = areas.data?.today ?? localToday();
+  const today = gamePlans.data?.today ?? localToday();
 
-  const groups = new Map<string, { title: string; slug: string | null; areas: AreaView[] }>();
-  for (const a of areas.data?.areas ?? []) {
+  const groups = new Map<string, { title: string; slug: string | null; gamePlans: GamePlanView[] }>();
+  for (const a of gamePlans.data?.gamePlans ?? []) {
     const key = a.start ? `${a.start.id}-${a.startRole ?? ''}` : 'none';
     const title = a.start ? `${a.start.name}${a.startRole ? `, ${a.startRole}` : ''}` : 'Not tied to a position';
-    const g = groups.get(key) ?? { title, slug: a.start?.slug ?? null, areas: [] };
-    g.areas.push(a);
+    const g = groups.get(key) ?? { title, slug: a.start?.slug ?? null, gamePlans: [] };
+    g.gamePlans.push(a);
     groups.set(key, g);
   }
   const ordered = [...groups.entries()].sort(([ka, a], [kb, b]) => (ka === 'none' ? 1 : kb === 'none' ? -1 : a.title.localeCompare(b.title)));
-  const planned = new Set((areas.data?.areas ?? []).map(a => a.start?.id).filter(Boolean));
+  const planned = new Set((gamePlans.data?.gamePlans ?? []).map(a => a.start?.id).filter(Boolean));
   const used = (p: { id: number; techniqueCount: number }) => p.techniqueCount > 0 || planned.has(p.id);
   const hidden = (positions.data ?? []).filter(p => !used(p)).length;
 
@@ -38,28 +38,28 @@ export function Game() {
         <h1 className="display page-title grow">Game</h1>
         <button type="button" className="btn small" onClick={() => setAdding(true)}>
           <Icon name="plus" size={18} />
-          New area
+          New game plan
         </button>
       </header>
-      <p className="section-hint">Your areas by where they start: the ones with a plan are your systems. Areas on your focus list are numbered.</p>
+      <p className="section-hint">Your game plans by where they start: the ones with steps are your systems. Game plans on your focus list are numbered.</p>
 
-      {areas.isError && <div className="panel empty">Couldn't load your areas. {areas.error.message}</div>}
-      {areas.data?.areas.length === 0 && <div className="panel empty">No areas yet. Make one, or add something to your focus list.</div>}
+      {gamePlans.isError && <div className="panel empty">Couldn't load your game plans. {gamePlans.error.message}</div>}
+      {gamePlans.data?.gamePlans.length === 0 && <div className="panel empty">No game plans yet. Make one, or add something to your focus list.</div>}
       {ordered.map(([key, g]) => (
         <section key={key}>
           <h2 className="group-title">{g.slug ? <Link to={`/p/${g.slug}`}>{g.title}</Link> : g.title}</h2>
           <div className="panel">
-            {g.areas.map(a => (
-              <Link key={a.id} className="row row-split" to={`/areas/${a.id}`}>
+            {g.gamePlans.map(a => (
+              <Link key={a.id} className="row row-split" to={`/game-plans/${a.id}`}>
                 {a.rank !== null && (
-                  <span className="area-rank" aria-label={`Number ${a.rank} on your focus`}>
+                  <span className="game-plan-rank" aria-label={`Number ${a.rank} on your focus`}>
                     {a.rank}
                   </span>
                 )}
                 <span className="grow">
                   <span className="row-title">{a.name}</span>
                   <span className="row-meta">
-                    {[a.stepCount ? `Plan of ${a.stepCount} step${a.stepCount === 1 ? '' : 's'}` : null, lastNoteText(a.lastNoteOn, today)]
+                    {[a.stepCount ? `${a.stepCount} step${a.stepCount === 1 ? '' : 's'}` : null, lastNoteText(a.lastNoteOn, today)]
                       .filter(Boolean)
                       .join(' · ')}
                   </span>
@@ -98,20 +98,20 @@ export function Game() {
         </button>
       )}
 
-      {adding && <NewArea onClose={() => setAdding(false)} />}
+      {adding && <NewGamePlan onClose={() => setAdding(false)} />}
     </div>
   );
 }
 
-/** A new area, off focus unless asked: often a system to write down. */
-function NewArea({ onClose }: { onClose: () => void }) {
+/** A new game plan, off focus unless asked: often a system to write down. */
+function NewGamePlan({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('');
   const [focus, setFocus] = useState(false);
-  const create = useCreateArea();
+  const create = useCreateGamePlan();
   const toast = useToast();
   const navigate = useNavigate();
   return (
-    <Sheet title="New area" onClose={onClose}>
+    <Sheet title="New game plan" onClose={onClose}>
       <form
         onSubmit={e => {
           e.preventDefault();
@@ -120,9 +120,9 @@ function NewArea({ onClose }: { onClose: () => void }) {
             { name: name.trim(), focus },
             {
               onSuccess: r => {
-                toast.show(`Made ${r.area.name}`, { undoable: true });
+                toast.show(`Made ${r.gamePlan.name}`, { undoable: true });
                 onClose();
-                navigate(`/areas/${r.area.id}`);
+                navigate(`/game-plans/${r.gamePlan.id}`);
               },
               onError: toast.error,
             },
@@ -141,7 +141,7 @@ function NewArea({ onClose }: { onClose: () => void }) {
           Make it
         </button>
         <p className="muted small" style={{ marginTop: 8 }}>
-          Then give it a plan: where it starts and what to do when they react.
+          Then give it steps: where it starts and what to do when they react.
         </p>
       </form>
     </Sheet>
@@ -188,13 +188,13 @@ export function Position() {
             ))}
           </div>
 
-          {v.plans.length > 0 && (
+          {v.gamePlans.length > 0 && (
             <>
-              <h2 className="section-title">Plans from here</h2>
+              <h2 className="section-title">Game plans from here</h2>
               <section className="panel">
-                {v.plans.map(a => (
-                  <Link key={a.id} className="row row-split" to={`/areas/${a.id}`}>
-                    {a.rank !== null && <span className="area-rank">{a.rank}</span>}
+                {v.gamePlans.map(a => (
+                  <Link key={a.id} className="row row-split" to={`/game-plans/${a.id}`}>
+                    {a.rank !== null && <span className="game-plan-rank">{a.rank}</span>}
                     <span className="grow row-title">{a.name}</span>
                   </Link>
                 ))}

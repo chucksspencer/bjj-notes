@@ -1,33 +1,33 @@
-// "Describe it": Claude turns a plan said in plain words ("from bottom side, if they have the underhook and
+// "Describe it": Claude turns a game plan said in plain words ("from bottom side, if they have the underhook and
 // crossface, John Wayne sweep to make them post...") into an outline the person checks before saving.
 import Anthropic from '@anthropic-ai/sdk';
 import type { Config } from '../config.js';
 import { uid } from '../db.js';
 import { resolvePosition } from '../resolve.js';
-import type { PlanDraft, Role } from '../shared/api.js';
-import { MAX_DEPTH, MAX_STEPS, resolveStepNames, type StepInput } from './areas.js';
+import type { GamePlanDraft, Role } from '../shared/api.js';
+import { MAX_DEPTH, MAX_STEPS, resolveStepNames, type NamedStepInput } from './gamePlans.js';
 import type { Ctx } from './context.js';
 import { UserError } from './errors.js';
 import { ROLES } from './vocab.js';
 
-/** What Claude makes of a described plan, before names are matched to cards and positions. */
-export interface DraftedPlan {
+/** What Claude makes of a described game plan, before names are matched to cards and positions. */
+export interface DraftedGamePlan {
   start?: string;
   start_role?: Role;
   premise?: string;
-  steps: StepInput[];
+  steps: NamedStepInput[];
 }
 
-export type PlanDrafter = (text: string, known: { techniques: string[]; positions: string[] }) => Promise<DraftedPlan>;
+export type GamePlanDrafter = (text: string, known: { techniques: string[]; positions: string[] }) => Promise<DraftedGamePlan>;
 
-const PLAN_TOOL = {
-  name: 'outline_plan',
-  description: 'Write down a jiu-jitsu plan (a "system") as an outline of steps with branches.',
+const GAME_PLAN_TOOL = {
+  name: 'outline_game_plan',
+  description: 'Write down a jiu-jitsu game plan (a "system") as an outline of steps with branches.',
   input_schema: {
     type: 'object' as const,
     properties: {
-      start: { type: 'string', description: 'The position the plan starts from, from the known positions list.' },
-      start_role: { type: 'string', enum: [...ROLES], description: 'Whose side the plan is for: top or bottom.' },
+      start: { type: 'string', description: 'The position the game plan starts from, from the known positions list.' },
+      start_role: { type: 'string', enum: [...ROLES], description: 'Whose side the game plan is for: top or bottom.' },
       premise: {
         type: 'string',
         description: 'The situation it is for, if one is given, e.g. "top has the underhook and crossface". Short.',
@@ -59,52 +59,52 @@ const PLAN_TOOL = {
   },
 };
 
-/** Asks Claude (via the Messages API) to outline a described plan. */
-export function claudePlanDrafter(apiKey: string, model: string, opts: { baseURL?: string; timeoutMs?: number } = {}): PlanDrafter {
+/** Asks Claude (via the Messages API) to outline a described game plan. */
+export function claudeGamePlanDrafter(apiKey: string, model: string, opts: { baseURL?: string; timeoutMs?: number } = {}): GamePlanDrafter {
   const client = new Anthropic({ apiKey, baseURL: opts.baseURL, timeout: opts.timeoutMs ?? 30_000, maxRetries: 1 });
   return async (text, known) => {
     const msg = await client.messages.create({
       model,
       max_tokens: 2000,
       system:
-        'You write down Brazilian jiu-jitsu plans ("systems"): where they start, a main line of steps, and branches for ' +
+        'You write down Brazilian jiu-jitsu game plans ("systems"): where they start, a main line of steps, and branches for ' +
         'how the opponent reacts, and alternatives (plan A, plan B) where they give more than one option. The description may be dictated, so names can be misheard ("barra toe plata" is ' +
         'Baratoplata). Keep the person\'s own words for steps; use known technique and position names where they ' +
         'clearly match. Leave out nothing they said, and add nothing they did not.\n\n' +
         `Known techniques: ${known.techniques.join('; ') || '(none yet)'}\n` +
         `Known positions: ${known.positions.join('; ')}`,
-      tools: [PLAN_TOOL],
-      tool_choice: { type: 'tool', name: PLAN_TOOL.name },
+      tools: [GAME_PLAN_TOOL],
+      tool_choice: { type: 'tool', name: GAME_PLAN_TOOL.name },
       messages: [{ role: 'user', content: text }],
     });
     const block = msg.content.find(b => b.type === 'tool_use');
     if (!block || block.type !== 'tool_use') throw new Error('Claude sent no outline.');
-    return block.input as DraftedPlan;
+    return block.input as DraftedGamePlan;
   };
 }
 
 /** The drafter the config asks for: on whenever there's an Anthropic key (it uses the capture model). */
-export function drafterFor(config: Config): PlanDrafter | null {
+export function drafterFor(config: Config): GamePlanDrafter | null {
   if (!config.anthropicApiKey) return null;
-  return claudePlanDrafter(config.anthropicApiKey, config.captureModel, { baseURL: config.anthropicBaseUrl });
+  return claudeGamePlanDrafter(config.anthropicApiKey, config.captureModel, { baseURL: config.anthropicBaseUrl });
 }
 
 const isRole = (r: unknown): r is Role => typeof r === 'string' && (ROLES as readonly string[]).includes(r);
 
 /**
- * Turns a described plan into an outline to check and save, with cards and positions matched. Nothing is saved.
+ * Turns a described game plan into an outline to check and save, with cards and positions matched. Nothing is saved.
  * Steps Claude nested too deeply are pulled up so the outline is always valid.
  */
-export async function draftPlan(ctx: Ctx, text: string): Promise<PlanDraft> {
-  if (!ctx.planDrafter) throw new UserError("Describing a plan needs Claude, and this server isn't set up with an Anthropic key.");
+export async function draftGamePlan(ctx: Ctx, text: string): Promise<GamePlanDraft> {
+  if (!ctx.gamePlanDrafter) throw new UserError("Describing a game plan needs Claude, and this server isn't set up with an Anthropic key.");
   const q = ctx.db;
   const techniques = (
     await q.query<{ name: string; aliases: string[] }>('select name, aliases from techniques where user_id = $1 order by name', [uid(q)])
   ).rows.map(r => (r.aliases.length ? `${r.name} (also: ${r.aliases.join(', ')})` : r.name));
   const positions = (await q.query<{ name: string }>('select name from positions order by name')).rows.map(r => r.name);
-  let drafted: DraftedPlan;
+  let drafted: DraftedGamePlan;
   try {
-    drafted = await ctx.planDrafter(text, { techniques, positions });
+    drafted = await ctx.gamePlanDrafter(text, { techniques, positions });
   } catch (err) {
     throw new UserError(`Couldn't outline that: ${(err as Error).message}`);
   }
@@ -112,7 +112,7 @@ export async function draftPlan(ctx: Ctx, text: string): Promise<PlanDraft> {
   const raw = Array.isArray(drafted.steps) ? drafted.steps.filter(s => s && typeof s.do === 'string' && s.do.trim()) : [];
   let prev = -1;
   const has: boolean[] = [];
-  const steps: StepInput[] = raw.slice(0, MAX_STEPS).map(s => {
+  const steps: NamedStepInput[] = raw.slice(0, MAX_STEPS).map(s => {
     const depth = Math.min(Math.max(0, Math.round(Number(s.depth) || 0)), prev + 1, MAX_DEPTH);
     prev = depth;
     // An "or" with nothing before it to be an alternative to is just a step.
@@ -156,7 +156,7 @@ export async function draftPlan(ctx: Ctx, text: string): Promise<PlanDraft> {
     start: startPositionId ? { id: startPositionId, name: positionNames.get(startPositionId)! } : null,
     startRole: isRole(drafted.start_role) ? drafted.start_role : null,
     premise: drafted.premise?.trim() || null,
-    plan: resolved.map(s => ({
+    steps: resolved.map(s => ({
       depth: s.depth,
       or: s.alt,
       trigger: s.trigger,

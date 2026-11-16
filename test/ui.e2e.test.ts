@@ -86,7 +86,7 @@ describe.runIf(run)('web app (end to end)', () => {
     expect(await page.locator('.focus-row .row-title').first().textContent()).toBe('Baratoplata');
   });
 
-  it('opens an area, writes its description and files a note under it', async () => {
+  it('opens a game plan, writes its description and files a note under it', async () => {
     await page.locator('.focus-row .row-title', { hasText: 'Ghost escape' }).click();
     await page.getByRole('heading', { name: 'Ghost escape', level: 1 }).waitFor();
     await page.getByText(/^Number 5 on your focus list\./).waitFor();
@@ -107,22 +107,22 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('region', { name: 'Notes filed here' }).getByText('Turn to the knees before the hips.').waitFor();
     expect(await page.getByRole('region', { name: 'From its techniques' }).count()).toBe(0);
 
-    // The card points at the area, and the note shows the area it's filed under.
+    // The card points at the game plan, and the note shows the game plan it's filed under.
     await page.getByRole('link', { name: 'Ghost escape', exact: true }).first().click();
-    await page.getByRole('link', { name: 'Area: Ghost escape' }).waitFor();
-    await page.locator('.tech-areas').getByRole('link', { name: '#5 Ghost escape' }).click();
+    await page.getByRole('link', { name: 'Game plan: Ghost escape' }).waitFor();
+    await page.locator('.tech-game-plans').getByRole('link', { name: '#5 Ghost escape' }).click();
     await page.getByRole('heading', { name: 'Ghost escape', level: 1 }).waitFor();
     await page.getByRole('region', { name: 'Notes filed here' }).getByRole('button', { name: 'Take out' }).click();
     await page.getByText('Taken out').waitFor();
     await page.getByRole('region', { name: 'From its techniques' }).getByText('Turn to the knees before the hips.').waitFor();
   });
 
-  it('builds a plan a step at a time, and takes the area off focus and back', async () => {
+  it('builds a game plan a step at a time, and takes the game plan off focus and back', async () => {
     await page.getByRole('button', { name: 'First step' }).click();
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Frame on the hip');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
-    await page.getByRole('list', { name: 'Plan' }).getByText('Frame on the hip').waitFor();
+    await page.getByRole('list', { name: 'Steps' }).getByText('Frame on the hip').waitFor();
 
     // A branch: what to do when they react.
     await page.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
@@ -138,16 +138,16 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Bridge and shrimp');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
-    const letters = page.getByRole('list', { name: 'Plan' }).locator('.plan-step.numbered').first().locator('> .plan-option');
-    expect(await letters.locator('> .plan-line .plan-do').allTextContents()).toEqual(['Frame on the hip', 'Bridge and shrimp']);
-    expect(await letters.locator('> .plan-line .plan-letter').allTextContents()).toEqual(['A', 'B']);
+    const letters = page.getByRole('list', { name: 'Steps' }).locator('.step.numbered').first().locator('> .step-option');
+    expect(await letters.locator('> .step-line .step-do').allTextContents()).toEqual(['Frame on the hip', 'Bridge and shrimp']);
+    expect(await letters.locator('> .step-line .step-letter').allTextContents()).toEqual(['A', 'B']);
     await page.getByRole('button', { name: 'Edit step: Bridge and shrimp' }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Make this plan A' }).click();
     await page.getByText('Now plan A').waitFor();
-    expect(await letters.locator('> .plan-line .plan-do').allTextContents()).toEqual(['Bridge and shrimp', 'Frame on the hip']);
+    expect(await letters.locator('> .step-line .step-do').allTextContents()).toEqual(['Bridge and shrimp', 'Frame on the hip']);
     await page.getByRole('button', { name: 'Undo' }).click();
     await page.getByText(/^Undid: edit to/).waitFor();
-    expect(await letters.locator('> .plan-line .plan-do').allTextContents()).toEqual(['Frame on the hip', 'Bridge and shrimp']);
+    expect(await letters.locator('> .step-line .step-do').allTextContents()).toEqual(['Frame on the hip', 'Bridge and shrimp']);
 
     await page.getByRole('button', { name: 'Edit step: Frame on the hip' }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Delete step and the 1 after it' }).click();

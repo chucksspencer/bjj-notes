@@ -1924,9 +1924,9 @@ button.clip:active {
   margin: -6px 0 16px;
 }
 
-/* ---------- areas and plans ---------- */
+/* ---------- game plans and their steps ---------- */
 
-/* On focus or off: a switch, since it's a state of the area rather than something done to it. */
+/* On focus or off: a switch, since it's a state of the game plan rather than something done to it. */
 .switch {
   display: inline-flex;
   align-items: center;
@@ -2002,8 +2002,8 @@ button.clip:active {
   margin-top: 12px;
 }
 
-/* Where a plan starts: tap to change it. */
-.plan-start {
+/* Where a game plan starts: tap to change it. */
+.game-plan-start {
   display: block;
   width: 100%;
   margin: 0 0 10px;
@@ -2018,68 +2018,68 @@ button.clip:active {
   cursor: pointer;
 }
 
-.plan-start.static {
+.game-plan-start.static {
   cursor: default;
 }
 
-.plan-start-label {
+.game-plan-start-label {
   color: var(--muted);
 }
 
-.plan-premise {
+.game-plan-premise {
   display: block;
   margin-top: 2px;
   color: var(--muted);
   font-size: 15px;
 }
 
-.plan-panel {
+.steps-panel {
   padding: 6px 0;
 }
 
-.plan,
-.plan-branches {
+.steps,
+.step-branches {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 /* Branches hang under the step they follow, on a rule, so the tree reads at a glance. */
-.plan-branches {
+.step-branches {
   margin-left: calc(var(--pad) + 22px);
   border-left: 2px solid var(--rule);
 }
 
 /* Deeper branches step in only a little: a phone has no width to spare. */
-.plan-branches .plan-branches,
-.plan.zoomed > .plan-step > .plan-option > .plan-branches {
+.step-branches .step-branches,
+.steps.zoomed > .step > .step-option > .step-branches {
   margin-left: 12px;
 }
 
 /* What comes next in a branch stays at the same indent, so a long sequence doesn't creep sideways. */
-.plan-then {
+.step-then {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.plan-step.numbered + .plan-step.numbered {
+.step.numbered + .step.numbered {
   border-top: 1px solid var(--rule);
 }
 
-.plan-line {
+.step-line {
   display: flex;
   align-items: flex-start;
   gap: 10px;
   padding: 10px var(--pad);
 }
 
-.plan-branches .plan-line,
-.plan.zoomed .plan-line {
+.step-branches .step-line,
+.steps.zoomed .step-line {
   padding-left: 12px;
 }
 
-.plan-num {
+.step-num {
   flex: none;
   width: 22px;
   font-variation-settings: 'wdth' 62;
@@ -2090,7 +2090,7 @@ button.clip:active {
 }
 
 /* Which alternative this is: A is the one you'd rather. */
-.plan-letter {
+.step-letter {
   flex: none;
   width: 22px;
   height: 22px;
@@ -2105,13 +2105,13 @@ button.clip:active {
   text-align: center;
 }
 
-.plan-option:first-of-type > .plan-line > .plan-letter {
+.step-option:first-of-type > .step-line > .step-letter {
   background: var(--belt-wash);
   box-shadow: none;
   color: var(--belt);
 }
 
-.plan-body {
+.step-body {
   flex: 1;
   min-width: 0;
   padding: 0;
@@ -2122,16 +2122,16 @@ button.clip:active {
   text-align: left;
 }
 
-button.plan-body {
+button.step-body {
   cursor: pointer;
 }
 
-.plan-line .rank-bar {
+.step-line .rank-bar {
   margin-top: 4px;
 }
 
 /* What leads to a step: "If they post the far leg", or "Then". */
-.plan-when {
+.step-when {
   display: block;
   padding: 8px var(--pad) 0 12px;
   color: var(--muted);
@@ -2139,13 +2139,13 @@ button.plan-body {
   font-weight: 650;
 }
 
-.plan-when + .plan-option > .plan-line,
-.plan-or + .plan-option > .plan-line {
+.step-when + .step-option > .step-line,
+.step-or + .step-option > .step-line {
   padding-top: 2px;
 }
 
 /* Between alternatives. */
-.plan-or {
+.step-or {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2157,18 +2157,18 @@ button.plan-body {
   letter-spacing: 0.04em;
 }
 
-.plan-or::after {
+.step-or::after {
   flex: 1;
   height: 1px;
   background: var(--rule);
   content: '';
 }
 
-.plan-step.numbered > .plan-or {
+.step.numbered > .step-or {
   padding-left: var(--pad);
 }
 
-.plan-do {
+.step-do {
   display: block;
   font-size: 18px;
   font-variation-settings: 'wdth' 74;
@@ -2176,25 +2176,25 @@ button.plan-body {
   line-height: 1.2;
 }
 
-.plan-meta,
-.plan-note {
+.step-meta,
+.step-note {
   display: block;
   margin-top: 2px;
   color: var(--muted);
   font-size: 15px;
 }
 
-.plan-note {
+.step-note {
   color: var(--ink);
 }
 
-.plan-meta a {
+.step-meta a {
   color: var(--belt);
   font-weight: 600;
 }
 
 /* Folds away what's under a step, or (deep in the tree) opens it on its own. */
-.plan-fold {
+.step-fold {
   display: flex;
   flex: none;
   align-items: center;
@@ -2214,16 +2214,16 @@ button.plan-body {
   cursor: pointer;
 }
 
-.plan-fold[aria-expanded='true'] svg {
+.step-fold[aria-expanded='true'] svg {
   transform: rotate(180deg);
 }
 
-.plan-all {
+.steps-all {
   margin: 4px 8px 2px;
 }
 
 /* Opened on one branch: the way back up. */
-.plan-trail {
+.steps-trail {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2232,7 +2232,7 @@ button.plan-body {
   border-bottom: 1px solid var(--rule);
 }
 
-.plan-crumb {
+.steps-crumb {
   max-width: 100%;
   padding: 4px 6px;
   overflow: hidden;
@@ -2248,43 +2248,43 @@ button.plan-body {
   cursor: pointer;
 }
 
-.plan-crumb::before {
+.steps-crumb::before {
   margin-right: 8px;
   color: var(--muted);
   content: '›';
 }
 
 /* While editing: a step is tappable, and offers what can follow it. */
-.plan.editing .plan-body {
+.steps.editing .step-body {
   margin: -6px -8px;
   padding: 6px 8px;
   border-radius: var(--radius-small);
   background: var(--surface-2);
 }
 
-.plan.editing .plan-when + .plan-option > .plan-line,
-.plan.editing .plan-or + .plan-option > .plan-line {
+.steps.editing .step-when + .step-option > .step-line,
+.steps.editing .step-or + .step-option > .step-line {
   padding-top: 10px;
 }
 
-.plan-add {
+.step-add {
   display: flex;
   flex-wrap: wrap;
   gap: 0 4px;
   margin: -4px 0 6px calc(var(--pad) + 26px);
 }
 
-.plan-branches .plan-add,
-.plan.zoomed .plan-add {
+.step-branches .step-add,
+.steps.zoomed .step-add {
   margin-left: 6px;
 }
 
-.plan-add-end {
+.steps-add-end {
   margin: 4px var(--pad) 6px;
 }
 
-/* An area's place on the focus list, in lists of areas. */
-.area-rank {
+/* A game plan's place on the focus list, in lists of game plans. */
+.game-plan-rank {
   flex: none;
   min-width: 28px;
   font-variation-settings: 'wdth' 62;
@@ -2298,8 +2298,8 @@ button.plan-body {
   color: inherit;
 }
 
-/* The areas a technique is part of, under its belt. */
-.tech-areas {
+/* The game plans a technique is part of, under its belt. */
+.tech-game-plans {
   display: flex;
   align-items: center;
   gap: 8px;

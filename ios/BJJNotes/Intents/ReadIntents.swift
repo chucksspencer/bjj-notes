@@ -22,18 +22,18 @@ struct FocusIntent: AppIntent {
     }
 }
 
-/// "What's my plan from bottom half?": an area's plan (a system), read aloud. Needs the server, so nothing offline.
-struct PlanIntent: AppIntent {
-    static var title: LocalizedStringResource = "What's my plan"
-    static var description = IntentDescription("Reads out one of your plans: where it starts, the steps, and what to do when they react.")
+/// "What's my game plan from bottom half?": a game plan's steps (a system), read aloud. Needs the server, so nothing offline.
+struct GamePlanIntent: AppIntent {
+    static var title: LocalizedStringResource = "What's my game plan"
+    static var description = IntentDescription("Reads out one of your game plans: where it starts, the steps, and what to do when they react.")
 
-    @Parameter(title: "Plan or position", requestValueDialog: IntentDialog("From where? Say a position or the name of the plan."))
+    @Parameter(title: "Game plan or position", requestValueDialog: IntentDialog("From where? Say a position or the name of the game plan."))
     var name: String
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         do {
-            let plan = try await API.shared.plan(name)
-            return .result(dialog: spoken(plan.speech))
+            let gamePlan = try await API.shared.gamePlan(name)
+            return .result(dialog: spoken(gamePlan.speech))
         } catch let error as APIError {
             return .result(dialog: spoken(error.message))
         }

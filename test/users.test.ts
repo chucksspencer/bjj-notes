@@ -3,7 +3,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { AccountView, AreaDetail, AreasView, FocusView, LabView, NoteCreateResult, NoteView, PositionListItem, TechniqueListItem, TechniqueView } from '../src/shared/api.js';
+import type { AccountView, GamePlanDetail, GamePlansView, FocusView, LabView, NoteCreateResult, NoteView, PositionListItem, TechniqueListItem, TechniqueView } from '../src/shared/api.js';
 import { search } from '../src/services/explore.js';
 import { API_TOKEN, connect, OWNER_PASSWORD, startServer, type TestServer } from './helpers.js';
 
@@ -157,7 +157,7 @@ describe('separate notebooks over the JSON API', () => {
   it('starts a new person with an empty notebook and the shared positions', async () => {
     expect((await api<TechniqueListItem[]>(sam, 'GET', '/api/v1/techniques')).body).toEqual([]);
     expect((await api<FocusView>(sam, 'GET', '/api/v1/focus')).body.active).toEqual([]);
-    expect((await api<AreasView>(sam, 'GET', '/api/v1/areas')).body.areas).toEqual([]);
+    expect((await api<GamePlansView>(sam, 'GET', '/api/v1/game-plans')).body.gamePlans).toEqual([]);
     const positions = (await api<PositionListItem[]>(sam, 'GET', '/api/v1/positions')).body;
     expect(positions.length).toBeGreaterThan(20);
     expect(positions.every(p => p.techniqueCount === 0)).toBe(true);
@@ -187,10 +187,10 @@ describe('separate notebooks over the JSON API', () => {
     expect((await api(sam, 'POST', '/api/v1/notes/delete', { ids: [ownerNote.id] })).body.message).toBe('Nothing to delete.');
     expect((await api(sam, 'POST', '/api/v1/notes/answered', { ids: [ownerNote.id] })).body.message).toBe('No open questions to mark.');
     expect((await api(sam, 'POST', `/api/v1/focus/1/actions`, { action: 'remove' })).status).toBe(404);
-    expect((await api(sam, 'PATCH', `/api/v1/areas/1`, { name: 'hijacked' })).status).toBe(404);
-    expect((await api(sam, 'GET', '/api/v1/areas/1')).status).toBe(404);
-    expect((await api(sam, 'DELETE', '/api/v1/areas/1')).status).toBe(404);
-    expect((await api(sam, 'POST', '/api/v1/areas/1/links', { add: { noteIds: [ownerNote.id] } })).status).toBe(404);
+    expect((await api(sam, 'PATCH', `/api/v1/game-plans/1`, { name: 'hijacked' })).status).toBe(404);
+    expect((await api(sam, 'GET', '/api/v1/game-plans/1')).status).toBe(404);
+    expect((await api(sam, 'DELETE', '/api/v1/game-plans/1')).status).toBe(404);
+    expect((await api(sam, 'POST', '/api/v1/game-plans/1/links', { add: { noteIds: [ownerNote.id] } })).status).toBe(404);
     expect((await api(sam, 'POST', '/api/v1/stars/clear', {})).body.message).toBe('Nothing is starred.');
 
     // Everything of the owner's is as it was.
@@ -217,24 +217,24 @@ describe('separate notebooks over the JSON API', () => {
     const linked = await api<TechniqueView>(sam, 'POST', `/api/v1/techniques/${mine.body.id}/links`, { kind: 'related', techniqueId: ownerGhost.id });
     expect(linked.body.links).toEqual([]);
     const escapes = (
-      await api<{ area: AreaDetail }>(sam, 'POST', '/api/v1/areas', { name: 'Escapes', techniqueIds: [ownerGhost.id], noteIds: [ownerNote.id] })
-    ).body.area;
+      await api<{ gamePlan: GamePlanDetail }>(sam, 'POST', '/api/v1/game-plans', { name: 'Escapes', techniqueIds: [ownerGhost.id], noteIds: [ownerNote.id] })
+    ).body.gamePlan;
     expect(escapes).toMatchObject({ rank: 1, techniques: [], noteCount: 0 });
-    // Nor will the owner's note or card link to Sam's area, or Sam's note to the owner's.
-    const links = await api(sam, 'POST', `/api/v1/areas/${escapes.id}/links`, { add: { noteIds: [ownerNote.id], techniqueIds: [ownerGhost.id] } });
+    // Nor will the owner's note or card link to Sam's game plan, or Sam's note to the owner's.
+    const links = await api(sam, 'POST', `/api/v1/game-plans/${escapes.id}/links`, { add: { noteIds: [ownerNote.id], techniqueIds: [ownerGhost.id] } });
     expect(links.body.message).toBe('Nothing changed on Escapes.');
-    expect(links.body.area).toMatchObject({ notes: [], techniques: [] });
-    // Nor a plan step naming the owner's card, or a start that isn't a position.
-    const planned = await api<{ area: AreaDetail }>(sam, 'PATCH', `/api/v1/areas/${escapes.id}`, {
-      plan: [{ depth: 0, action: 'Ghost escape', techniqueId: ownerGhost.id }],
+    expect(links.body.gamePlan).toMatchObject({ notes: [], techniques: [] });
+    // Nor a step naming the owner's card, or a start that isn't a position.
+    const planned = await api<{ gamePlan: GamePlanDetail }>(sam, 'PATCH', `/api/v1/game-plans/${escapes.id}`, {
+      steps: [{ depth: 0, action: 'Ghost escape', techniqueId: ownerGhost.id }],
     });
-    expect(planned.body.area.plan).toMatchObject([{ action: 'Ghost escape', technique: null }]);
-    expect((await api(sam, 'PATCH', `/api/v1/areas/${escapes.id}`, { startPositionId: 999_999 })).status).toBe(400);
-    expect((await api<NoteView>(sam, 'PATCH', `/api/v1/notes/${note.body.note.id}`, { areaIds: [1, escapes.id] })).body.areas.map(f => f.id)).toEqual([
+    expect(planned.body.gamePlan.steps).toMatchObject([{ action: 'Ghost escape', technique: null }]);
+    expect((await api(sam, 'PATCH', `/api/v1/game-plans/${escapes.id}`, { startPositionId: 999_999 })).status).toBe(400);
+    expect((await api<NoteView>(sam, 'PATCH', `/api/v1/notes/${note.body.note.id}`, { gamePlanIds: [1, escapes.id] })).body.gamePlans.map(f => f.id)).toEqual([
       escapes.id,
     ]);
-    const frames = (await api<NoteCreateResult>(sam, 'POST', '/api/v1/notes', { text: 'Frames', areaIds: [1] })).body.note;
-    expect(frames.areas).toEqual([]);
+    const frames = (await api<NoteCreateResult>(sam, 'POST', '/api/v1/notes', { text: 'Frames', gamePlanIds: [1] })).body.note;
+    expect(frames.gamePlans).toEqual([]);
     await api(sam, 'DELETE', `/api/v1/notes/${frames.id}`);
     // Filing under it, or adding a position to it, does nothing either.
     const filed = await api<NoteView>(sam, 'POST', `/api/v1/notes/${note.body.note.id}/file`, { techniqueIds: [ownerGhost.id] });
@@ -256,10 +256,10 @@ describe('separate notebooks over the JSON API', () => {
       s.db.query('insert into note_techniques (note_id, technique_id, user_id) values ($1, $2, $3)', [note.body.note.id, ownerGhost.id, 1]),
     ).rejects.toThrow(/foreign key/);
     await expect(
-      s.db.query('insert into area_notes (area_id, note_id, user_id) values ($1, $2, $3)', [escapes.id, ownerNote.id, samId]),
+      s.db.query('insert into game_plan_notes (game_plan_id, note_id, user_id) values ($1, $2, $3)', [escapes.id, ownerNote.id, samId]),
     ).rejects.toThrow(/foreign key/);
     await expect(
-      s.db.query('insert into area_steps (area_id, technique_id, action, user_id) values ($1, $2, $3, $4)', [escapes.id, ownerGhost.id, 'x', samId]),
+      s.db.query('insert into game_plan_steps (game_plan_id, technique_id, action, user_id) values ($1, $2, $3, $4)', [escapes.id, ownerGhost.id, 'x', samId]),
     ).rejects.toThrow(/foreign key/);
   });
 
@@ -317,8 +317,8 @@ describe('separate notebooks for Claude and Siri', () => {
       expect(await ownerMcp.call('get_technique', { name: 'ghost escape' })).not.toContain('Frame on the hip');
       expect(await samMcp.call('update_note', { note_id: ownerNote.id, body: 'mine' })).toBe(`No note #${ownerNote.id}.`);
       expect(await samMcp.call('file_note', { note_id: ownerNote.id, techniques: ['Ghost escape'] })).toBe(`No note #${ownerNote.id}.`);
-      expect(await samMcp.call('update_focus', { action: 'drop', item: 'Baratoplata' })).toMatch(/^No (confident )?area match/);
-      expect(await samMcp.call('get_area', { name: 'Baratoplata' })).toMatch(/^No (confident )?area match/);
+      expect(await samMcp.call('update_focus', { action: 'drop', item: 'Baratoplata' })).toMatch(/^No (confident )?game plan match/);
+      expect(await samMcp.call('get_game_plan', { name: 'Baratoplata' })).toMatch(/^No (confident )?game plan match/);
       expect(await samMcp.call('review', { days: 30 })).not.toContain('Ghost escape (2)');
 
       // Undo over MCP is per person too.
@@ -391,7 +391,7 @@ describe('passwords and removing people', () => {
     expect(before).toBeGreaterThan(0);
 
     expect((await api(owner, 'DELETE', `/api/v1/people/${samId}`)).body.message).toBe('Removed Sam and their notebook.');
-    for (const table of ['techniques', 'notes', 'sessions', 'sources', 'areas', 'area_notes', 'area_steps', 'activity_log', 'web_sessions', 'oauth_tokens', 'api_tokens']) {
+    for (const table of ['techniques', 'notes', 'sessions', 'sources', 'game_plans', 'game_plan_notes', 'game_plan_techniques', 'game_plan_steps', 'activity_log', 'web_sessions', 'oauth_tokens', 'api_tokens']) {
       const left = (await s.db.query<{ c: number }>(`select count(*)::int as c from ${table} where user_id = $1`, [samId])).rows[0]!.c;
       expect(left, table).toBe(0);
     }

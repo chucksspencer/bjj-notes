@@ -36,13 +36,13 @@ struct BJJShortcuts: AppShortcutsProvider {
             systemImageName: "scope"
         )
         AppShortcut(
-            intent: PlanIntent(),
+            intent: GamePlanIntent(),
             phrases: [
-                "What's my plan in \(.applicationName)",
-                "Read a plan from \(.applicationName)",
                 "What's my game plan in \(.applicationName)",
+                "Read a game plan from \(.applicationName)",
+                "What's my plan in \(.applicationName)",
             ],
-            shortTitle: "Plan",
+            shortTitle: "Game plan",
             systemImageName: "point.topleft.down.to.point.bottomright.curvepath"
         )
         AppShortcut(

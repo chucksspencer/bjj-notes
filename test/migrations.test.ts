@@ -89,3 +89,72 @@ describe('016: areas', () => {
     expect((await q<{ c: number }>('select count(*)::int as c from area_steps'))[0]!.c).toBe(0);
   });
 });
+
+describe('018: game plans', () => {
+  const q = async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows;
+
+  it('renames areas to game plans and keeps everything in them', async () => {
+    await migrateUpTo('018_game_plans.sql');
+    const user = (await q<{ id: number }>('select id from users where is_owner'))[0]!.id;
+    const area = (await q<{ id: number }>('select id from areas order by rank limit 1'))[0]!.id;
+    const step = (
+      await q<{ id: number }>("insert into area_steps (area_id, user_id, action) values ($1, $2, 'Shuck') returning id", [area, user])
+    )[0]!.id;
+    await db.query("insert into area_steps (area_id, user_id, parent_id, action, trigger) values ($1, $2, $3, 'Go to deep half', 'they post')", [area, user, step]);
+    const note = (await q<{ id: number }>("insert into notes (body, user_id) values ('filed', $1) returning id", [user]))[0]!.id;
+    await db.query('insert into area_notes (area_id, note_id, user_id) values ($1, $2, $3)', [area, note, user]);
+    const before = {
+      areas: await q('select id, name, rank from areas order by id'),
+      steps: await q('select id, area_id, parent_id, action, trigger from area_steps order by id'),
+      techniques: await q('select area_id, technique_id from area_techniques order by 1, 2'),
+      notes: await q('select area_id, note_id from area_notes order by 1, 2'),
+      events: await q('select id, area_id, event from focus_events order by id'),
+    };
+
+    expect(await migrate(db, { through: '018_game_plans.sql' })).toEqual(['018_game_plans.sql']);
+    const rekey = (rows: Record<string, unknown>[]) => rows.map(({ area_id, ...r }) => ({ ...r, game_plan_id: area_id }));
+    expect(await q('select id, name, rank from game_plans order by id')).toEqual(before.areas);
+    expect(await q('select id, parent_id, action, trigger, game_plan_id from game_plan_steps order by id')).toEqual(rekey(before.steps));
+    expect(await q('select technique_id, game_plan_id from game_plan_techniques order by game_plan_id, technique_id')).toEqual(rekey(before.techniques));
+    expect(await q('select note_id, game_plan_id from game_plan_notes order by game_plan_id, note_id')).toEqual(rekey(before.notes));
+    expect(await q('select id, event, game_plan_id from focus_events order by id')).toEqual(rekey(before.events));
+
+    // New rows still get the next id from the renamed sequences.
+    const maxPlan = Math.max(...before.areas.map(a => a.id as number));
+    const fresh = (await q<{ id: number }>("insert into game_plans (name, user_id) values ('New', $1) returning id", [user]))[0]!.id;
+    expect(fresh).toBeGreaterThan(maxPlan);
+    const freshStep = (await q<{ id: number }>("insert into game_plan_steps (game_plan_id, user_id, action) values ($1, $2, 'A') returning id", [fresh, user]))[0]!
+      .id;
+    expect(freshStep).toBeGreaterThan(step);
+
+    // And the constraints still hold: a step can't hang under another game plan's step; deleting cascades.
+    await expect(
+      db.query("insert into game_plan_steps (game_plan_id, user_id, parent_id, action) values ($1, $2, $3, 'B')", [fresh, user, step]),
+    ).rejects.toThrow();
+    await db.query('delete from game_plans where id = $1', [area]);
+    expect(await q('select id from game_plan_steps where game_plan_id = $1', [area])).toEqual([]);
+    expect(await q('select note_id from game_plan_notes where game_plan_id = $1', [area])).toEqual([]);
+    expect(await q('select id from focus_events where game_plan_id = $1', [area])).toEqual([]);
+  });
+
+  it('leaves no names from areas or focus items in the schema', async () => {
+    db = await pgliteDb();
+    await migrate(db);
+    const old = '(^|_)(areas?|focus_items?)(_|$)';
+    const names = [
+      ...(await q<{ n: string }>(
+        `select c.relname as n from pg_class c join pg_namespace s on s.oid = c.relnamespace where s.nspname = 'public' and c.relname ~ $1`,
+        [old],
+      )),
+      ...(await q<{ n: string }>(
+        `select c.conname as n from pg_constraint c join pg_namespace s on s.oid = c.connamespace where s.nspname = 'public' and c.conname ~ $1`,
+        [old],
+      )),
+      ...(await q<{ n: string }>(
+        `select table_name || '.' || column_name as n from information_schema.columns where table_schema = 'public' and column_name ~ $1`,
+        [old],
+      )),
+    ].map(r => r.n);
+    expect(names).toEqual([]);
+  });
+});
