@@ -44,7 +44,9 @@ async function fakeClaude() {
       }
       const body = JSON.parse(raw) as { model: string; system: string; messages: { content: string }[]; tool_choice: unknown };
       const query = body.messages[0]!.content;
-      calls.push({ apiKey: req.headers['x-api-key'] as string, model: body.model, system: body.system, query, toolChoice: body.tool_choice });
+      // SDK 0.x sends the key as x-api-key; 1.x (API version 2026-10-21) as a bearer token.
+      const apiKey = (req.headers['x-api-key'] as string | undefined) ?? req.headers.authorization?.replace(/^Bearer /, '');
+      calls.push({ apiKey, model: body.model, system: body.system, query, toolChoice: body.tool_choice });
       if (failWith) {
         const message = failWith === 401 ? 'invalid x-api-key' : 'Something broke';
         res
