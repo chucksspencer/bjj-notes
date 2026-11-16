@@ -825,6 +825,24 @@ describe('JSON API', () => {
     expect(mainLine(back)).toEqual(mainLine(start));
     expect(back.steps).toEqual(start.steps);
 
+    // A step and its alternative are branches side by side, each said with what comes after it.
+    const sided = (await api<{ gamePlan: GamePlanDetail }>('POST', '/api/v1/game-plans', { name: 'Side by side', focus: false })).body.gamePlan;
+    await api('PATCH', `/api/v1/game-plans/${sided.id}`, {
+      steps: [
+        { depth: 0, action: 'Do A' },
+        { depth: 1, action: 'Step one of A' },
+        { depth: 1, action: 'Step two of A' },
+        { depth: 0, or: true, action: 'Do B' },
+        { depth: 1, action: 'Step one of B' },
+        { depth: 1, trigger: 'they stall', action: 'Step two of B' },
+        { depth: 0, action: 'Get up' },
+      ],
+    });
+    expect((await api('GET', `/api/v1/game-plans/speech?q=${encodeURIComponent('side by side')}`)).body.speech).toBe(
+      'Side by side. Do A, then step one of A, then step two of A. Or instead, do B, then step one of B; if they stall, step two of B. Then get up.',
+    );
+    await api('DELETE', `/api/v1/game-plans/${sided.id}`);
+
     await api('DELETE', `/api/v1/game-plans/${gamePlan.id}`);
   });
 

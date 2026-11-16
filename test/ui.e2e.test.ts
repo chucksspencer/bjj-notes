@@ -138,20 +138,25 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Bridge and shrimp');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
-    // Plan A on the step's own line; plan B as an "Or" branch of its own under it.
+    // Plan A and plan B side by side, each a branch with its own steps under it.
     const first = page.getByRole('list', { name: 'Steps' }).locator('> .step.numbered').first();
-    const planAB = async () => [
-      ...(await first.locator('> .step-option > .step-line .step-do').allTextContents()),
-      ...(await first.locator('> .step-option > .step-branches > .step.alternative > .step-option > .step-line .step-do').allTextContents()),
-    ];
+    const planAB = async () => first.locator('> .step-option > .step-line .step-do').allTextContents();
     expect(await planAB()).toEqual(['Frame on the hip', 'Bridge and shrimp']);
-    expect(await first.locator('.step.alternative > .step-when').allTextContents()).toEqual(['Or']);
-    // What comes after plan B goes inside its branch.
-    await first.locator('.step.alternative').getByRole('button', { name: 'Then', exact: true }).click();
-    await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Take the back');
-    await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
-    await page.getByText('Step added').waitFor();
-    await first.locator('.step.alternative').getByText('Take the back').waitFor();
+    expect(await first.locator('> .step-or').allTextContents()).toEqual(['Or']);
+    // Then on either one goes under it, in the order added; the main line stays one step.
+    const add = async (on: number, action: string) => {
+      await first.locator('> .step-option').nth(on).locator('> .step-add').getByRole('button', { name: 'Then', exact: true }).click();
+      await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill(action);
+      await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
+      await page.getByText('Step added').waitFor();
+    };
+    await add(1, 'Take the back');
+    await add(0, 'Hold the hip');
+    await add(0, 'Knee through');
+    const under = (on: number) => first.locator('> .step-option').nth(on).locator('> .step-branches > .step > .step-option > .step-line .step-do').allTextContents();
+    expect(await under(0)).toEqual(['Ghost escape', 'Hold the hip', 'Knee through']);
+    expect(await under(1)).toEqual(['Take the back']);
+    expect(await page.getByRole('list', { name: 'Steps' }).locator('> .step.numbered').count()).toBe(1);
     await page.getByRole('button', { name: 'Edit step: Bridge and shrimp' }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Make this plan A' }).click();
     await page.getByText('Bridge and shrimp is now plan A.').waitFor();
@@ -174,11 +179,11 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByRole('button', { name: 'Make this plan A' }).click();
     await page.getByText('Frame on the hip is now plan A.').waitFor();
 
-    await page.getByRole('button', { name: 'Then', exact: true }).first().click();
+    await page.getByRole('button', { name: 'Add a step at the end' }).click();
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Knee to elbow');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
-    const mainLine = page.getByRole('list', { name: 'Steps' }).locator('> .step.numbered > .step-option > .step-line .step-do');
+    const mainLine = page.getByRole('list', { name: 'Steps' }).locator('> .step.numbered > .step-option:first-of-type > .step-line .step-do');
     expect(await mainLine.allTextContents()).toEqual(['Frame on the hip', 'Knee to elbow']);
     expect(await page.getByRole('button', { name: 'Move Knee to elbow down' }).isDisabled()).toBe(true);
     await page.getByRole('button', { name: 'Move Knee to elbow up' }).click();
@@ -192,7 +197,7 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByText('Step deleted').waitFor();
 
     await page.getByRole('button', { name: 'Edit step: Frame on the hip' }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Delete step and the 1 after it' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete step and the 3 after it' }).click();
     await page.getByText('Step deleted').waitFor();
     await page.getByRole('button', { name: 'Undo' }).click();
     await page.getByText(/^Undid: edit to/).waitFor();
