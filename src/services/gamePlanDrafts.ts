@@ -38,9 +38,9 @@ const GAME_PLAN_TOOL = {
           'Every step in reading order. The main line is depth 0, in order. A branch (what to do if the opponent ' +
           'reacts a certain way) goes right after the step it follows, one level deeper, with "when" saying the reaction. ' +
           'An alternative ("do X, or Y"; "plan B is...") goes after the step it is an alternative to (and that step\'s own ' +
-          'branches), at the same depth, with "or": true; the preferred one comes first. An alternative starts a branch of ' +
-          'its own: what to do after it ("or Y, then Z") goes right after it, one level deeper. The next step at the ' +
-          'same depth follows the preferred one.',
+          'branches), at the same depth, with "or": true; the preferred one comes first. A step and its alternatives are ' +
+          'branches side by side: what to do after each ("X, then W, or Y, then Z") goes right after it, one level deeper. ' +
+          'A step after them at the same depth follows whichever was used.',
         items: {
           type: 'object',
           properties: {
