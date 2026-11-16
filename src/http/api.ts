@@ -290,17 +290,6 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
     h(async (ctx, req): Promise<GamePlanDraft> => draftGamePlan(ctx, z.object({ text: z.string().trim().min(1).max(5000) }).parse(req.body).text)),
   );
 
-  // ---------- legacy routes ----------
-  // For iPhone app builds from before game plans had that name (1.1 and older). Remove once everyone's on a
-  // newer TestFlight build (docs/operations.md, "Legacy routes").
-  r.get(
-    '/api/v1/plan',
-    h(async (ctx, req) => {
-      const out = await gamePlanSpeech(ctx, speechQuery.parse(req.query).q);
-      return { ...out, areaId: out.gamePlanId };
-    }),
-  );
-
   // Photos and videos: the still image, and recording where the original is in Photos
   r.get('/api/v1/attachments/:id/thumb', async (req, res, next) => {
     try {
