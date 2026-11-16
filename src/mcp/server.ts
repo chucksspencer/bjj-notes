@@ -4,7 +4,18 @@ import { z } from 'zod';
 import { undoLast } from '../services/activity.js';
 import type { Ctx } from '../services/context.js';
 import { getLab, getPosition, review, search } from '../services/explore.js';
-import { deleteGamePlan, focusHistory, getGamePlan, getFocus, listGamePlans, MAX_DEPTH, MAX_STEPS, saveGamePlan, updateFocus } from '../services/gamePlans.js';
+import {
+  deleteGamePlan,
+  focusHistory,
+  getFocus,
+  getGamePlan,
+  listGamePlans,
+  MAX_DEPTH,
+  MAX_STEPS,
+  moveStepByName,
+  saveGamePlan,
+  updateFocus,
+} from '../services/gamePlans.js';
 import { clearStars } from '../services/marks.js';
 import { addNote, fileNote, getInbox, updateNote } from '../services/notes.js';
 import { logSession } from '../services/sessions.js';
@@ -370,7 +381,7 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
     {
       title: 'Create or change a game plan',
       description:
-        'A game plan is a part of the game; with steps it is a system. Changes the game plan that matches name (or a linked technique), or makes one. steps, when given, replaces all the steps, in reading order: to change one branch, get_game_plan first and send the full outline back. focus: true puts it on the focus list (at position, default the top); false takes it off. delete: true removes the game plan for good (its notes and techniques stay). Leave out what should not change.',
+        'A game plan is a part of the game; with steps it is a system. Changes the game plan that matches name (or a linked technique), or makes one. steps, when given, replaces all the steps, in reading order: to change one branch, get_game_plan first and send the full outline back. To reorder ("move the kimura before the guillotine", "put the hip bump first", "make the knee cut plan A"), use move on its own instead of resending steps: a step moves with its alternatives among the steps under the same one. focus: true puts it on the focus list (at position, default the top); false takes it off. delete: true removes the game plan for good (its notes and techniques stay). Leave out what should not change.',
       inputSchema: {
         name: z.string(),
         rename_to: z.string().optional(),
@@ -384,13 +395,25 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
         focus: flag.optional(),
         position: z.number().int().min(1).optional(),
         delete: flag.optional(),
+        move: z
+          .object({
+            step: z.string().describe('The step to move, by what it says to do (or the reaction that leads to it)'),
+            to: z.enum(['up', 'down', 'first', 'last']).optional(),
+            before: z.string().optional().describe('Another step under the same one: put it just before that'),
+            after: z.string().optional().describe('Another step under the same one: put it just after that'),
+            prefer: flag.optional().describe('Make it plan A: first among its alternatives'),
+          })
+          .optional()
+          .describe('Reorder one step; nothing else changes. Give one of to, before, after or prefer.'),
       },
       annotations: write,
     },
     args =>
       run(() => {
-        const { delete: del, ...rest } = args;
-        return del ? deleteGamePlan(ctx, { name: args.name }) : saveGamePlan(ctx, rest);
+        const { delete: del, move, ...rest } = args;
+        if (del) return deleteGamePlan(ctx, { name: args.name });
+        if (move) return moveStepByName(ctx, args.name, move);
+        return saveGamePlan(ctx, rest);
       }),
   );
 

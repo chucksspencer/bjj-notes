@@ -763,6 +763,95 @@ describe('JSON API', () => {
     await api('POST', '/api/v1/techniques/delete', { ids: [jw.id, shuck.id] });
   });
 
+  it('moves a step among the steps next to it, with its alternatives, or among its alternatives', async () => {
+    const undo = async () => (await api('POST', '/api/v1/undo')).body.message as string;
+    const gamePlan = (await api<{ gamePlan: GamePlanDetail }>('POST', '/api/v1/game-plans', { name: 'Closed guard attacks', focus: false })).body.gamePlan;
+    await api('PATCH', `/api/v1/game-plans/${gamePlan.id}`, {
+      steps: [
+        { depth: 0, action: 'Hip bump' },
+        { depth: 0, or: true, action: 'Kimura' },
+        { depth: 0, action: 'Guillotine' },
+        { depth: 1, trigger: 'they posture up', action: 'Sit up' },
+        { depth: 1, trigger: 'they post a hand', action: 'Kimura grip' },
+        { depth: 1, or: true, action: 'Hip bump again' },
+        { depth: 0, action: 'Armbar' },
+      ],
+    });
+    const read = async () => (await api<GamePlanDetail>('GET', `/api/v1/game-plans/${gamePlan.id}`)).body;
+    const mainLine = (v: GamePlanDetail) => v.steps.map(s => `${s.or ? 'or ' : ''}${s.action}`);
+    const branches = (v: GamePlanDetail) => v.steps.find(s => s.action === 'Guillotine')!.children.map(c => [c.or, c.trigger, c.action]);
+    const idOf = (v: GamePlanDetail, action: string) => {
+      const all = (list: GamePlanDetail['steps']): GamePlanDetail['steps'] => list.flatMap(s => [s, ...all(s.children)]);
+      return all(v.steps).find(s => s.action === action)!.id;
+    };
+    const start = await read();
+    const ids = Object.fromEntries(['Hip bump', 'Kimura', 'Guillotine', 'Sit up', 'Kimura grip', 'Hip bump again', 'Armbar'].map(a => [a, idOf(start, a)]));
+    const move = (step: string, body: object) => api<{ message: string; gamePlan: GamePlanDetail }>('POST', `/api/v1/game-plans/${gamePlan.id}/steps/${ids[step]}/move`, body);
+
+    // A step moves with its alternatives; the steps under it go with it.
+    let r = await move('Armbar', { to: 'up' });
+    expect(r.body.message).toBe('Moved Armbar up.');
+    expect(mainLine(r.body.gamePlan)).toEqual(['Hip bump', 'or Kimura', 'Armbar', 'Guillotine']);
+    r = await move('Guillotine', { to: 'first' });
+    expect(r.body.message).toBe('Moved Guillotine to first.');
+    expect(mainLine(r.body.gamePlan)).toEqual(['Guillotine', 'Hip bump', 'or Kimura', 'Armbar']);
+    expect(branches(r.body.gamePlan)).toEqual([
+      [false, 'they posture up', 'Sit up'],
+      [false, 'they post a hand', 'Kimura grip'],
+      [true, null, 'Hip bump again'],
+    ]);
+    r = await move('Hip bump', { after: ids['Armbar'] });
+    expect(r.body.message).toBe('Moved Hip bump after Armbar.');
+    expect(mainLine(r.body.gamePlan)).toEqual(['Guillotine', 'Armbar', 'Hip bump', 'or Kimura']);
+    r = await move('Hip bump', { before: ids['Guillotine'] });
+    expect(mainLine(r.body.gamePlan)).toEqual(['Hip bump', 'or Kimura', 'Guillotine', 'Armbar']);
+    // Moving the first step of a choice by one of its alternatives' ids moves the same choice.
+    r = await move('Kimura', { to: 'last' });
+    expect(mainLine(r.body.gamePlan)).toEqual(['Guillotine', 'Armbar', 'Hip bump', 'or Kimura']);
+
+    // Among its alternatives: plan B becomes plan A, and takes over the reaction it answers.
+    r = await move('Hip bump again', { within: 'choice', to: 'up' });
+    expect(r.body.message).toBe('Hip bump again is now plan A.');
+    expect(branches(r.body.gamePlan)).toEqual([
+      [false, 'they posture up', 'Sit up'],
+      [false, 'they post a hand', 'Hip bump again'],
+      [true, null, 'Kimura grip'],
+    ]);
+    // Read back and said aloud in the new order.
+    const said = (await api('GET', `/api/v1/game-plans/speech?q=${encodeURIComponent('closed guard attacks')}`)).body.speech as string;
+    expect(said).toBe(
+      'Closed guard attacks. Guillotine. If they posture up, sit up. If they post a hand, hip bump again. Or kimura grip. Then armbar. Then hip bump. Or kimura.',
+    );
+
+    // Things that don't move anything are said, not logged.
+    expect((await move('Guillotine', { to: 'up' })).body.message).toBe('Guillotine is already first.');
+    expect((await move('Hip bump again', { within: 'choice', to: 'first' })).body.message).toBe('Hip bump again is already plan A.');
+    expect((await move('Armbar', { within: 'choice', to: 'up' })).body.message).toBe('Armbar has no alternatives to move among.');
+    expect((await move('Hip bump', { before: ids['Kimura'] })).body.message).toMatch(/alternatives to each other/);
+    // Steps move among the steps next to them, not across the tree.
+    let bad = await move('Sit up', { before: ids['Armbar'] });
+    expect([bad.status, bad.body.message]).toEqual([400, 'That step is somewhere else in the game plan: steps move among the steps next to them.']);
+    bad = await move('Armbar', { to: 'up', before: ids['Guillotine'] });
+    expect(bad.status).toBe(400);
+    bad = await move('Armbar', { within: 'choice', before: ids['Guillotine'] });
+    expect(bad.status).toBe(400);
+    expect((await api('POST', `/api/v1/game-plans/${gamePlan.id}/steps/999999/move`, { to: 'up' })).status).toBe(404);
+
+    // Each move is one undo; ids stay the same throughout.
+    expect(await undo()).toBe('Undid: move in "Closed guard attacks"');
+    expect(branches(await read())).toEqual([
+      [false, 'they posture up', 'Sit up'],
+      [false, 'they post a hand', 'Kimura grip'],
+      [true, null, 'Hip bump again'],
+    ]);
+    for (let i = 0; i < 5; i++) await undo();
+    const back = await read();
+    expect(mainLine(back)).toEqual(mainLine(start));
+    expect(back.steps).toEqual(start.steps);
+
+    await api('DELETE', `/api/v1/game-plans/${gamePlan.id}`);
+  });
+
   it('explores positions', async () => {
     const view = (await api<PositionView>('GET', '/api/v1/positions/side-control?role=bottom')).body;
     expect(view.position.name).toBe('Side control');

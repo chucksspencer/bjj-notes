@@ -103,6 +103,27 @@ export async function resolveGamePlan(q: Queryable, name: string, onFocusOnly = 
   );
 }
 
+/**
+ * One step of a game plan, by what it says to do (or the reaction that leads to it): "the shuck", "if they post
+ * the far leg". Two steps that both match exactly ("Shuck" in two branches) are reported, not guessed.
+ */
+export async function resolveStep(q: Queryable, gamePlanId: number, words: string): Promise<Resolution> {
+  const rows = await rank(
+    q,
+    `select st.id, st.action as name,
+            greatest(bjj_name_score(st.action, $1), coalesce(bjj_name_score(st.trigger, $1), 0),
+                     coalesce(bjj_name_score(st.trigger || ' ' || st.action, $1), 0)) as score,
+            bjj_norm(st.action) = bjj_norm($1) or coalesce(bjj_norm(st.trigger) = bjj_norm($1), false) as exact
+     from game_plan_steps st
+     where st.game_plan_id = $2 and st.user_id = $3
+     order by exact desc, score desc, st.id
+     limit 5`,
+    [words.replace(/^\s*(the|my|if)\s+/i, ''), gamePlanId, uid(q)],
+  );
+  if (rows[0]?.exact && rows[1]?.exact) return { match: null, candidates: rows.filter(r => r.exact) };
+  return decide(rows);
+}
+
 export function describeMiss(kind: string, name: string, r: Resolution): string {
   if (r.candidates.length === 0) return `No ${kind} matches "${name}".`;
   return `No confident ${kind} match for "${name}". Closest: ${r.candidates.map(c => c.name).join(', ')}.`;

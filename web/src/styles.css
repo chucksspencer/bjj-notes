@@ -2279,6 +2279,22 @@ button.step-body {
   margin-left: 6px;
 }
 
+/* While editing, at the end of a step's row: moving it past the step above or below. */
+.step-move {
+  display: flex;
+  margin-left: auto;
+}
+
+.step-move .btn {
+  padding-left: 8px;
+  padding-right: 8px;
+  color: var(--muted);
+}
+
+.step-move .btn:disabled {
+  opacity: 0.3;
+}
+
 .steps-add-end {
   margin: 4px var(--pad) 6px;
 }

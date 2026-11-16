@@ -27,6 +27,7 @@ import type {
   SessionInfo,
   SessionView,
   Status,
+  StepMove,
   TechniqueListItem,
   TechniquePatch,
   TechniqueType,
@@ -200,6 +201,16 @@ export function useLinkGamePlan() {
   return useMutation({
     mutationFn: ({ id, ...links }: GamePlanLinksInput & { id: number }) =>
       request<MessageResult & { gamePlan: GamePlanDetail }>('POST', `/api/v1/game-plans/${id}/links`, links),
+    onSuccess: r => afterGamePlanWrite(qc, r.gamePlan),
+  });
+}
+
+/** Moves one step among the steps next to it, or among its alternatives. */
+export function useMoveStep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ gamePlanId, stepId, ...move }: StepMove & { gamePlanId: number; stepId: number }) =>
+      request<MessageResult & { gamePlan: GamePlanDetail }>('POST', `/api/v1/game-plans/${gamePlanId}/steps/${stepId}/move`, move),
     onSuccess: r => afterGamePlanWrite(qc, r.gamePlan),
   });
 }

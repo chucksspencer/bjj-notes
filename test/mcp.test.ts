@@ -443,6 +443,34 @@ describe('MCP tools over HTTP', () => {
     );
     expect(await call('update_focus', { action: 'remove', item: 'winning the underhook' })).toBe('Taken off focus: Bottom half: winning the underhook.');
 
+    // Reordering by voice: steps found by what they say, or by the reaction that leads to them.
+    const plan = { name: 'winning the underhook' };
+    expect(await call('save_game_plan', { ...plan, move: { step: 'the shuck pass', to: 'first' } })).toBe('Moved shuck pass to first.');
+    expect(await call('save_game_plan', { ...plan, move: { step: 'if they base back', before: 'go to deep half' } })).toBe(
+      'Moved Octopus sweeps before Go to deep half.',
+    );
+    expect(await call('get_game_plan', plan)).toContain(
+      ['1. shuck pass (learning).', '   If they base back: octopus sweeps.', '   If they post the far leg: go to deep half → Deep half guard (bottom).'].join('\n'),
+    );
+    await expect(call('save_game_plan', { ...plan, move: { step: 'octopus sweeps', after: 'john wayne' } })).rejects.toThrow(
+      'Error: That step is somewhere else in the game plan: steps move among the steps next to them.',
+    );
+    expect(await call('save_game_plan', { ...plan, move: { step: 'qwxz zzyq', to: 'up' } })).toBe(
+      'No step matches "qwxz zzyq" in Bottom half: winning the underhook.',
+    );
+    await expect(call('save_game_plan', { ...plan, move: { step: 'shuck pass' } })).rejects.toThrow(
+      'Error: Say where to move it: up, down, first, last, or before or after another step.',
+    );
+    expect(await call('undo_last')).toBe('Undid: move in "Bottom half: winning the underhook"');
+    expect(await call('undo_last')).toBe('Undid: move in "Bottom half: winning the underhook"');
+    expect(await call('get_game_plan', plan)).toContain('1. John Wayne sweep (drilling)');
+    // Two steps that say the same thing: asked about, not guessed.
+    await call('save_game_plan', { name: 'Side control escapes', steps: [{ depth: 0, do: 'Frame' }, { depth: 0, do: 'Shrimp' }, { depth: 1, do: 'Frame' }] });
+    expect(await call('save_game_plan', { name: 'side control escapes', move: { step: 'frame', to: 'down' } })).toBe(
+      'More than one step in Side control escapes says "Frame". Say it with the reaction that leads to it ("if they…"), or move it in the app.',
+    );
+    await call('save_game_plan', { name: 'side control escapes', delete: true });
+
     // Deleting is for good, but undoable.
     expect(await call('save_game_plan', { name: 'Deep half sweeps', delete: true })).toBe('Deleted Deep half sweeps.');
     expect(await call('get_game_plan', { name: 'winning the underhook' })).not.toContain('Continues in');
