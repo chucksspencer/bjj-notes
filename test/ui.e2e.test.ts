@@ -143,11 +143,42 @@ describe.runIf(run)('web app (end to end)', () => {
     expect(await letters.locator('> .step-line .step-letter').allTextContents()).toEqual(['A', 'B']);
     await page.getByRole('button', { name: 'Edit step: Bridge and shrimp' }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Make this plan A' }).click();
-    await page.getByText('Now plan A').waitFor();
+    await page.getByText('Bridge and shrimp is now plan A.').waitFor();
     expect(await letters.locator('> .step-line .step-do').allTextContents()).toEqual(['Bridge and shrimp', 'Frame on the hip']);
     await page.getByRole('button', { name: 'Undo' }).click();
-    await page.getByText(/^Undid: edit to/).waitFor();
+    await page.getByText(/^Undid: move in/).waitFor();
     expect(await letters.locator('> .step-line .step-do').allTextContents()).toEqual(['Frame on the hip', 'Bridge and shrimp']);
+
+    // Reordering: in a step's sheet, Try earlier and Try later change which alternative it is; on its row, the
+    // arrows move it (with its alternatives) past the step next to it.
+    await page.getByRole('button', { name: 'Edit step: Frame on the hip' }).click();
+    expect(await page.getByRole('dialog').getByRole('button', { name: 'Try earlier' }).count()).toBe(0);
+    await page.getByRole('dialog').getByRole('button', { name: 'Try later' }).click();
+    await page.getByText('Frame on the hip is now plan B.').waitFor();
+    expect(await letters.locator('> .step-line .step-do').allTextContents()).toEqual(['Bridge and shrimp', 'Frame on the hip']);
+    // The branch under it comes along: it's Frame on the hip's own.
+    await page.getByText('If crossface hard').waitFor();
+    await page.getByRole('button', { name: 'Edit step: Frame on the hip' }).click();
+    expect(await page.getByRole('dialog').getByRole('button', { name: 'Try later' }).count()).toBe(0);
+    await page.getByRole('dialog').getByRole('button', { name: 'Make this plan A' }).click();
+    await page.getByText('Frame on the hip is now plan A.').waitFor();
+
+    await page.getByRole('button', { name: 'Then', exact: true }).first().click();
+    await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Knee to elbow');
+    await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
+    await page.getByText('Step added').waitFor();
+    const mainLine = page.getByRole('list', { name: 'Steps' }).locator('> .step.numbered > .step-option:first-of-type > .step-line .step-do');
+    expect(await mainLine.allTextContents()).toEqual(['Frame on the hip', 'Knee to elbow']);
+    expect(await page.getByRole('button', { name: 'Move Knee to elbow down' }).isDisabled()).toBe(true);
+    await page.getByRole('button', { name: 'Move Knee to elbow up' }).click();
+    await page.getByText('Moved Knee to elbow before Frame on the hip.').waitFor();
+    expect(await mainLine.allTextContents()).toEqual(['Knee to elbow', 'Frame on the hip']);
+    await page.reload();
+    await page.getByRole('button', { name: 'Edit', exact: true }).nth(1).click();
+    expect(await mainLine.allTextContents()).toEqual(['Knee to elbow', 'Frame on the hip']);
+    await page.getByRole('button', { name: 'Edit step: Knee to elbow' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete step' }).click();
+    await page.getByText('Step deleted').waitFor();
 
     await page.getByRole('button', { name: 'Edit step: Frame on the hip' }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Delete step and the 1 after it' }).click();

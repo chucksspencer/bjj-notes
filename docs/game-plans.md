@@ -44,6 +44,10 @@ iPhone builds from before focus items had names.
 - Steps under the same parent are ordered by `ordinal` (1 = first). An alternative (`alt`) is plan B to the
   step before it under the same parent: it answers the same reaction, so it has no trigger of its own, and the
   first step under a parent is never an alternative.
+- A step moves among the steps under the same parent, never to another parent. It moves as a *choice*: the
+  step and its alternatives together, with everything under them. Within a choice, steps move to change which is
+  plan A, B, C; whichever is first carries the choice's trigger (`moveStep` in `src/services/gamePlans.ts`).
+  Moves update the rows in place, so step ids stay; each one is a single undo.
 - `technique_links` of kind `chain` / `setup` stay, but new chains belong in steps.
 
 ## Code
@@ -78,7 +82,7 @@ Weakest step: Shuck (learning).
 |---|---|
 | `get_focus` | The ranked list. `history` for what went on and off it. |
 | `get_game_plan` | With `name`: one game plan with its steps. Without: every game plan, on focus or not, by where it starts. |
-| `save_game_plan` | Creates or edits a game plan, including its `steps`, and can put it on or take it off focus. `delete: true` removes it for good. |
+| `save_game_plan` | Creates or edits a game plan, including its `steps`, and can put it on or take it off focus. `delete: true` removes it for good. `move` reorders one step, found by what it says ("move the kimura before the guillotine", `to: 'first'`, `prefer: true` for plan A); two steps that say the same thing are asked about, not guessed. |
 | `update_focus` | `add`, `move`, `remove`. `add` on an existing game plan puts it back on the list. `pause`, `backlog`, `complete`, `drop` and `resume` are still accepted and mean remove / add. |
 | `add_note` | `game_plan` files the note under one (`area` and `focus` are older names for it). |
 | `get_technique` | "In game plans: …". |
@@ -95,8 +99,11 @@ tool's schema handle that better than a nested one.
   description and techniques; Delete is separate and asks first.
 - **Steps, reading:** an outline with a status bar per step; deeper branches open on tap.
 - **Steps, editing:** a step at a time. Tap a step for its sheet; *Then* (the next main-line step, or what
-  follows inside a branch), *If they…* (a branch) and *Or* (an alternative) add one. "Describe it" takes a
-  paragraph and has Claude build the outline to check before saving.
+  follows inside a branch), *If they…* (a branch) and *Or* (an alternative) add one. The arrows at the end of a
+  step's row move it (and its alternatives) past the step above or below, as the outline draws them: inside a
+  branch, the "if they…" branches and the "then" steps move within their own run. In the sheet, *Make this plan
+  A*, *Try earlier* and *Try later* reorder alternatives. "Describe it" takes a paragraph and has Claude build the
+  outline to check before saving.
 - **Note sheet:** one "File under" search across techniques and game plans. Technique matches come first, and
   game plan matches wait for them, so a game plan that shares a card's name doesn't catch the tap. A note filed
   only under a game plan leaves the inbox.
@@ -112,4 +119,4 @@ half") or by name; the iPhone app's "What's my game plan" intent uses it ("What'
 - Notes pinned to a single step.
 - Normalised opponent reactions or sub-positions.
 - A graph view across game plans. The derived hand-offs give most of it as text.
-- Reordering steps: delete and add, with Undo.
+- Moving a step to another parent (out of a branch, into another): delete and add, with Undo.

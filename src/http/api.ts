@@ -22,7 +22,7 @@ import { ForbiddenError as Forbidden, NotFoundError as NotFound, UserError } fro
 import { userCtx, type Ctx } from '../services/context.js';
 import { uid } from '../db.js';
 import { userIdOf } from './auth.js';
-import { createGamePlan, deleteGamePlan, editGamePlan, linkGamePlan, MAX_DEPTH, MAX_STEPS, gamePlanSpeech, updateFocus } from '../services/gamePlans.js';
+import { createGamePlan, deleteGamePlan, editGamePlan, gamePlanSpeech, linkGamePlan, MAX_DEPTH, MAX_STEPS, moveStep, updateFocus } from '../services/gamePlans.js';
 import { draftGamePlan } from '../services/gamePlanDrafts.js';
 import { attachmentThumb, linkAttachment } from '../services/attachments.js';
 import { clearStars, markAnswered } from '../services/marks.js';
@@ -162,6 +162,17 @@ const gamePlanPatch = z.object({
   premise: optLine(1000),
   steps: z.array(gamePlanStep).max(MAX_STEPS).optional(),
 });
+const stepMove = z
+  .object({
+    to: z.enum(['up', 'down', 'first', 'last']).optional(),
+    before: z.number().int().optional(),
+    after: z.number().int().optional(),
+    within: z.literal('choice').optional(),
+  })
+  .refine(m => [m.to, m.before, m.after].filter(v => v !== undefined).length === 1, {
+    message: 'Say where to move it: to (up, down, first or last), before, or after.',
+  })
+  .refine(m => m.within === undefined || m.to !== undefined, { message: 'Among its alternatives, a step moves up, down, first or last.' });
 const linkIds = z.object({
   techniqueIds: z.array(z.number().int()).max(50).optional(),
   noteIds: z.array(z.number().int()).max(200).optional(),
@@ -257,6 +268,18 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
       const b = gamePlanLinks.parse(req.body);
       await loadGamePlan(ctx, gamePlanId);
       const message = await linkGamePlan(ctx, gamePlanId, b);
+      return { message, gamePlan: await loadGamePlan(ctx, gamePlanId) };
+    }),
+  );
+
+  r.post(
+    '/api/v1/game-plans/:id/steps/:stepId/move',
+    h(async (ctx, req): Promise<MessageResult & { gamePlan: GamePlanDetail }> => {
+      const gamePlanId = id.parse(req.params.id);
+      const stepId = id.parse(req.params.stepId);
+      const b = stepMove.parse(req.body);
+      await loadGamePlan(ctx, gamePlanId);
+      const message = await moveStep(ctx, gamePlanId, stepId, b);
       return { message, gamePlan: await loadGamePlan(ctx, gamePlanId) };
     }),
   );

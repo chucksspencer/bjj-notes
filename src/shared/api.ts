@@ -275,6 +275,21 @@ export interface GamePlanPatch {
   steps?: GamePlanStepInput[];
 }
 
+/**
+ * Moves a step among the steps under the same parent. A step and its alternatives ("or": plan A, B, C) are a
+ * choice, and move together; with `within: 'choice'`, the step moves among its alternatives instead, changing
+ * which is plan A. Give one of `to`, `before` or `after`.
+ */
+export interface StepMove {
+  /** up and down: one place; first and last: to the end. */
+  to?: 'up' | 'down' | 'first' | 'last';
+  /** Just before this step's choice (a step under the same parent). */
+  before?: number;
+  /** Just after this step's choice. */
+  after?: number;
+  within?: 'choice';
+}
+
 /** Links to add to or remove from a game plan. */
 export interface GamePlanLinksInput {
   add?: { techniqueIds?: number[]; noteIds?: number[] };

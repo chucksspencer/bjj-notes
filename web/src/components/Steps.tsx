@@ -1,7 +1,7 @@
 import { createContext, Fragment, useContext, useState } from 'react';
 import { Link } from 'react-router';
-import type { GamePlanDetail, GamePlanDraft, GamePlanStep, GamePlanStepInput, Role, TechniqueRef } from '../../../src/shared/api';
-import { useDraftGamePlan, useEditGamePlan, usePositions } from '../api';
+import type { GamePlanDetail, GamePlanDraft, GamePlanStep, GamePlanStepInput, Role, StepMove, TechniqueRef } from '../../../src/shared/api';
+import { useDraftGamePlan, useEditGamePlan, useMoveStep, usePositions } from '../api';
 import { CATEGORY_LABEL, CATEGORY_ORDER, ROLE_LABEL, ROLES } from '../lib/format';
 import { RankBar } from './Belt';
 import { Icon } from './Icon';
@@ -13,6 +13,8 @@ import { useToast } from './Toast';
 
 /** One step while editing: what's stored, plus names to show. */
 export interface Node {
+  /** Its id, once saved (a drafted step has none). */
+  id?: number;
   /** An alternative to the step before it in the same list (plan B). */
   or: boolean;
   trigger: string | null;
@@ -30,6 +32,7 @@ type Path = number[];
 
 export const fromSteps = (steps: GamePlanStep[]): Node[] =>
   steps.map(s => ({
+    id: s.id,
     or: s.or,
     trigger: s.trigger,
     action: s.action,
@@ -101,6 +104,43 @@ function choiceAt(list: { or: boolean }[], i: number): [number, number] {
 
 const countSteps = (nodes: { children: Node[] | GamePlanStep[] }[]): number => nodes.reduce((n, s) => n + 1 + countSteps(s.children), 0);
 
+/** Where a step can move: up or down with its alternatives, and earlier or later among them. */
+export type Moves = { up: StepMove | null; down: StepMove | null; earlier: StepMove | null; later: StepMove | null };
+
+/**
+ * The moves a step has, among its neighbours as the outline draws them. Inside a branch, the branches ("if
+ * they…") and what follows ("then") show as two runs, so a step moves within its own run.
+ */
+export function movesAt(tree: Node[], path: Path): Moves {
+  const none: Moves = { up: null, down: null, earlier: null, later: null };
+  const list = siblingsAt(tree, path);
+  const i = path.at(-1)!;
+  const [start, end] = choiceAt(list, i);
+  if (list[i]?.id === undefined) return none;
+  const parentPath = path.slice(0, -1);
+  const parentList = parentPath.length ? siblingsAt(tree, parentPath) : [];
+  const parentAlone = parentPath.length > 0 && (() => {
+    const [s, e] = choiceAt(parentList, parentPath.at(-1)!);
+    return e - s === 1;
+  })();
+  // Two runs only where the parent is a step inside a branch that isn't one of several alternatives.
+  const split = parentPath.length >= 2 && parentAlone;
+  const runs: [number, number][] = [];
+  for (let k = 0; k < list.length; ) {
+    const [s, e] = choiceAt(list, k);
+    if (!split || !!list[s]!.trigger === !!list[start]!.trigger) runs.push([s, e]);
+    k = e;
+  }
+  const at = runs.findIndex(([s]) => s === start);
+  const leader = i === start;
+  return {
+    up: leader && at > 0 ? { before: list[runs[at - 1]![0]]!.id! } : null,
+    down: leader && at < runs.length - 1 ? { after: list[runs[at + 1]![0]]!.id! } : null,
+    earlier: end - start > 1 && i > start ? { within: 'choice', to: 'up' } : null,
+    later: end - start > 1 && i < end - 1 ? { within: 'choice', to: 'down' } : null,
+  };
+}
+
 // ---------- reading ----------
 
 /** A saved step, or one being drafted or edited: the outline draws both. */
@@ -111,6 +151,11 @@ interface Outline {
   onEdit?: {
     step: (path: Path) => void;
     add: (path: Path, kind: 'then' | 'branch' | 'or') => void;
+    /** Where the step can move, and moving it. */
+    moves: (path: Path) => Moves;
+    move: (path: Path, move: StepMove) => void;
+    /** A change is being saved: moving waits. */
+    busy: boolean;
   };
   /** Opens one step's part of the tree on its own. Without it (a draft), everything shows in place. */
   zoom?: (path: Path) => void;
@@ -226,7 +271,7 @@ function Choices({
         if (only && !only(first)) return null;
         const choice = at.length > 1;
         return (
-          <li key={'id' in first ? first.id : at[0]} className={`step level-${Math.min(level, MAX_LEVEL)}${numbered ? ' numbered' : ''}`}>
+          <li key={first.id ?? at[0]} className={`step level-${Math.min(level, MAX_LEVEL)}${numbered ? ' numbered' : ''}`}>
             {!numbered && <span className="step-when">{first.trigger ? `If ${first.trigger}` : 'Then'}</span>}
             {at.map((i, k) => (
               <Fragment key={i}>
@@ -281,7 +326,8 @@ function Option({
   const elsewhere = !!zoom && !root && under > 0 && level >= MAX_LEVEL;
   // While editing, every step shows, so each can be tapped.
   const open = !elsewhere && (root || unfolded || !!onEdit);
-  const saved = 'id' in step ? step : null;
+  // A step as saved (with where it continues), rather than one in the editing tree or a draft.
+  const saved = 'continuesIn' in step ? step : null;
   const body = (
     <>
       <span className="step-do">{step.action}</span>
@@ -355,6 +401,7 @@ function Option({
             <Icon name="plus" size={16} />
             Or
           </button>
+          <MoveButtons action={step.action} moves={onEdit.moves(path)} busy={onEdit.busy} onMove={m => onEdit.move(path, m)} />
         </div>
       )}
       {open && step.children.length > 0 && (
@@ -375,6 +422,30 @@ function Option({
   );
 }
 
+/**
+ * While editing, at the end of a step's row: up and down move the step (with its alternatives) past the step
+ * next to it. Which alternative is plan A, B… changes in the step's sheet.
+ */
+function MoveButtons({ action, moves, busy, onMove }: { action: string; moves: Moves; busy: boolean; onMove: (m: StepMove) => void }) {
+  if (!moves.up && !moves.down) return null;
+  return (
+    <span className="step-move">
+      {(['up', 'down'] as const).map(dir => (
+        <button
+          key={dir}
+          type="button"
+          className="btn ghost small icon-only"
+          aria-label={`Move ${action} ${dir}`}
+          disabled={busy || !moves[dir]}
+          onClick={() => onMove(moves[dir]!)}
+        >
+          <Icon name={dir} size={16} />
+        </button>
+      ))}
+    </span>
+  );
+}
+
 // ---------- editing ----------
 
 /** Editing state on a game plan's page: which step's sheet is open, if any. */
@@ -390,8 +461,21 @@ export function StepsSection({ gamePlan }: { gamePlan: GamePlanDetail }) {
   const [describing, setDescribing] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
   const edit = useEditGamePlan();
+  const moveStep = useMoveStep();
   const toast = useToast();
   const tree = fromSteps(gamePlan.steps);
+
+  const move = (stepId: number, m: StepMove, after?: () => void) =>
+    moveStep.mutate(
+      { gamePlanId: gamePlan.id, stepId, ...m },
+      {
+        onSuccess: r => {
+          toast.show(r.message, { undoable: true });
+          after?.();
+        },
+        onError: toast.error,
+      },
+    );
 
   const save = (next: Node[], done: string, after?: () => void) =>
     edit.mutate(
@@ -443,7 +527,17 @@ export function StepsSection({ gamePlan }: { gamePlan: GamePlanDetail }) {
         <section className="panel steps-panel">
           <StepsOutline
             steps={gamePlan.steps}
-            onEdit={editing ? { step: path => setStep({ path, mode: 'edit' }), add: (path, kind) => setStep({ path, mode: kind }) } : undefined}
+            onEdit={
+              editing
+                ? {
+                    step: path => setStep({ path, mode: 'edit' }),
+                    add: (path, kind) => setStep({ path, mode: kind }),
+                    moves: path => movesAt(tree, path),
+                    move: (path, m) => move(siblingsAt(tree, path)[path.at(-1)!]!.id!, m),
+                    busy: edit.isPending || moveStep.isPending,
+                  }
+                : undefined
+            }
           />
           {editing && (
             <div className="step-add steps-add-end">
@@ -475,7 +569,7 @@ export function StepsSection({ gamePlan }: { gamePlan: GamePlanDetail }) {
           initial={current}
           askWhen={step.mode === 'branch' || (step.mode === 'edit' && step.path.length > 1 && !current!.or)}
           following={step.mode === 'edit' ? countSteps(current!.children) : 0}
-          busy={edit.isPending}
+          busy={edit.isPending || moveStep.isPending}
           onClose={() => setStep(null)}
           onSave={node => {
             const next = clone(tree);
@@ -512,18 +606,19 @@ export function StepsSection({ gamePlan }: { gamePlan: GamePlanDetail }) {
               : undefined
           }
           onPrefer={
-            step.mode === 'edit' && current!.or
-              ? () => {
-                  const next = clone(tree);
-                  const list = siblingsAt(next, step.path);
-                  const i = step.path.at(-1)!;
-                  const [start] = choiceAt(list, i);
-                  const [mine] = list.splice(i, 1);
-                  const was = list[start]!;
-                  list[start] = { ...was, or: true, trigger: null };
-                  list.splice(start, 0, { ...mine!, or: false, trigger: was.trigger });
-                  save(next, 'Now plan A', () => setStep(null));
-                }
+            step.mode === 'edit' && current!.or && current!.id !== undefined
+              ? () => move(current!.id!, { within: 'choice', to: 'first' }, () => setStep(null))
+              : undefined
+          }
+          onEarlier={
+            // Plan B's way earlier is "Make this plan A"; from plan C on, one place at a time too.
+            step.mode === 'edit' && current!.id !== undefined && choiceAt(siblingsAt(tree, step.path), step.path.at(-1)!)[0] < step.path.at(-1)! - 1
+              ? () => move(current!.id!, { within: 'choice', to: 'up' }, () => setStep(null))
+              : undefined
+          }
+          onLater={
+            step.mode === 'edit' && current!.id !== undefined && movesAt(tree, step.path).later
+              ? () => move(current!.id!, { within: 'choice', to: 'down' }, () => setStep(null))
               : undefined
           }
         />
@@ -546,6 +641,8 @@ function StepSheet({
   onSave,
   onDelete,
   onPrefer,
+  onEarlier,
+  onLater,
   onClose,
 }: {
   title: string;
@@ -558,6 +655,9 @@ function StepSheet({
   onDelete?: () => void;
   /** For an alternative: make it the preferred one (plan A). */
   onPrefer?: () => void;
+  /** For one of several alternatives: one place earlier or later among them (plan C to B, A to B…). */
+  onEarlier?: () => void;
+  onLater?: () => void;
   onClose: () => void;
 }) {
   const [when, setWhen] = useState(initial?.trigger ?? '');
@@ -616,6 +716,20 @@ function StepSheet({
           <button type="button" className="btn quiet block" style={{ marginTop: 8 }} disabled={busy} onClick={onPrefer}>
             Make this plan A
           </button>
+        )}
+        {(onEarlier || onLater) && (
+          <div className="row-split" style={{ marginTop: 8 }}>
+            {onEarlier && (
+              <button type="button" className="btn quiet grow" disabled={busy} onClick={onEarlier}>
+                Try earlier
+              </button>
+            )}
+            {onLater && (
+              <button type="button" className="btn quiet grow" disabled={busy} onClick={onLater}>
+                Try later
+              </button>
+            )}
+          </div>
         )}
         {onDelete && (
           <button type="button" className="btn danger block" style={{ marginTop: 8 }} disabled={busy} onClick={onDelete}>

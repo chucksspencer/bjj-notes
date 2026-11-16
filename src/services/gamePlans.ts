@@ -2,8 +2,8 @@
 // then a main line with branches for how the opponent reacts: what's called a "system"). Being on the focus list is
 // just a state of a game plan: it has a rank, or it doesn't.
 import { uid, type Queryable } from '../db.js';
-import { describeMiss, resolveGamePlan, resolvePosition, resolveTechnique, techniquesMentionedIn, type Resolution } from '../resolve.js';
-import type { GamePlanLinksInput, GamePlanPatch, GamePlanSpeech, GamePlanStep, GamePlanStepInput, Role } from '../shared/api.js';
+import { describeMiss, resolveGamePlan, resolvePosition, resolveStep, resolveTechnique, techniquesMentionedIn, type Resolution } from '../resolve.js';
+import type { GamePlanLinksInput, GamePlanPatch, GamePlanSpeech, GamePlanStep, GamePlanStepInput, Role, StepMove } from '../shared/api.js';
 import {
   logActivity,
   refreshInbox,
@@ -17,7 +17,7 @@ import {
 } from './activity.js';
 import { mediaTag } from './attachments.js';
 import { today, type Ctx } from './context.js';
-import { UserError } from './errors.js';
+import { NotFoundError, UserError } from './errors.js';
 import { gamePlansView, gamePlanView, focusView } from './views.js';
 import { daysAgo, type FocusAction } from './vocab.js';
 
@@ -548,6 +548,163 @@ export async function editGamePlan(ctx: Ctx, id: number, patch: GamePlanPatch): 
     await logActivity(q, 'edit_game_plan', `edit to "${r.before}"`, undo);
     return r.parts.length ? `${r.name}: ${r.parts.join('; ')}.` : `Nothing changed on ${r.name}.`;
   });
+}
+
+// ---------- moving a step ----------
+
+interface SiblingRow {
+  id: number;
+  ordinal: number;
+  alt: boolean;
+  trigger: string | null;
+  action: string;
+}
+
+/** Steps under one parent as choices: each step with the alternatives right after it. */
+function choicesOf(rows: SiblingRow[]): SiblingRow[][] {
+  const out: SiblingRow[][] = [];
+  for (const r of rows) {
+    if (r.alt && out.length) out.at(-1)!.push(r);
+    else out.push([r]);
+  }
+  return out;
+}
+
+const letter = (i: number) => String.fromCharCode(65 + i);
+
+/**
+ * Moves a step among its siblings (with its alternatives), or among its alternatives. Updates the steps in
+ * place, so their ids stay; one undo puts the order back. Returns what happened in words.
+ */
+async function moveIn(q: Queryable, gamePlanId: number, stepId: number, move: StepMove): Promise<{ message: string; changed: boolean }> {
+  const me = uid(q);
+  const self = (
+    await q.query<{ parent_id: number | null; action: string }>('select parent_id, action from game_plan_steps where id = $1 and game_plan_id = $2 and user_id = $3', [
+      stepId,
+      gamePlanId,
+      me,
+    ])
+  ).rows[0];
+  if (!self) throw new NotFoundError(`No step #${stepId} in that game plan.`);
+  const siblings = (
+    await q.query<SiblingRow>(
+      `select id, ordinal, alt, trigger, action from game_plan_steps
+       where game_plan_id = $1 and user_id = $2 and parent_id is not distinct from $3
+       order by ordinal, id for update`,
+      [gamePlanId, me, self.parent_id],
+    )
+  ).rows;
+  const groups = choicesOf(siblings);
+  const at = groups.findIndex(g => g.some(s => s.id === stepId));
+  const name = self.action;
+  const given = [move.to, move.before, move.after].filter(v => v !== undefined).length;
+  if (given !== 1) throw new UserError('Say where to move it: up, down, first, last, or before or after another step.');
+
+  let next: SiblingRow[][];
+  let said: string;
+  if (move.within === 'choice') {
+    if (move.to === undefined) throw new UserError('Among its alternatives, a step moves up, down, first or last.');
+    const choice = groups[at]!;
+    const from = choice.findIndex(s => s.id === stepId);
+    if (choice.length === 1) return { message: `${name} has no alternatives to move among.`, changed: false };
+    const to = { up: from - 1, down: from + 1, first: 0, last: choice.length - 1 }[move.to];
+    if (to < 0 || to >= choice.length || to === from) {
+      return { message: `${name} is already plan ${letter(from)}.`, changed: false };
+    }
+    const reordered = [...choice];
+    const [mine] = reordered.splice(from, 1);
+    reordered.splice(to, 0, mine!);
+    // The choice answers one reaction: its trigger stays with whichever step is first.
+    const trigger = choice[0]!.trigger;
+    next = groups.map((g, i) => (i === at ? reordered.map((s, k) => ({ ...s, alt: k > 0, trigger: k === 0 ? trigger : null })) : g));
+    said = `${name} is now plan ${letter(to)}`;
+  } else {
+    let to: number;
+    let where: string;
+    if (move.to !== undefined) {
+      to = { up: at - 1, down: at + 1, first: 0, last: groups.length - 1 }[move.to];
+      where = move.to === 'up' || move.to === 'down' ? move.to : `to ${move.to}`;
+      if (to < 0 || to >= groups.length || to === at) {
+        const end = at === 0 ? 'first' : 'last';
+        return { message: groups.length === 1 ? `${name} is the only step there.` : `${name} is already ${end}.`, changed: false };
+      }
+    } else {
+      const targetId = (move.before ?? move.after)!;
+      const target = groups.findIndex(g => g.some(s => s.id === targetId));
+      if (target < 0) throw new UserError('That step is somewhere else in the game plan: steps move among the steps next to them.');
+      if (target === at) return { message: `${name} and that step are alternatives to each other: move it among its alternatives instead.`, changed: false };
+      const targetName = groups[target]![0]!.action;
+      // Where it lands once it's out of the list: before the target, or just after it.
+      to = move.before !== undefined ? (target > at ? target - 1 : target) : target > at ? target : target + 1;
+      where = `${move.before !== undefined ? 'before' : 'after'} ${targetName}`;
+      if (to === at) return { message: `${name} is already ${where}.`, changed: false };
+    }
+    next = [...groups];
+    const [mine] = next.splice(at, 1);
+    next.splice(to, 0, mine!);
+    said = `Moved ${name} ${where}`;
+  }
+
+  const flat = next.flat();
+  for (const [i, s] of flat.entries()) {
+    const was = siblings.find(r => r.id === s.id)!;
+    if (was.ordinal === i + 1 && was.alt === s.alt && was.trigger === s.trigger) continue;
+    await q.query('update game_plan_steps set ordinal = $2, alt = $3, trigger = $4 where id = $1 and user_id = $5', [s.id, i + 1, s.alt, s.trigger, me]);
+  }
+  return { message: said, changed: true };
+}
+
+/** Moves a step (from the web app, by id). */
+export async function moveStep(ctx: Ctx, gamePlanId: number, stepId: number, move: StepMove): Promise<string> {
+  return ctx.db.tx(async q => {
+    const me = uid(q);
+    const before = (await q.query<GamePlanSnapshot>(GAME_PLAN_SNAPSHOT_SQL, [gamePlanId, me])).rows[0];
+    if (!before) throw new NotFoundError(`No game plan #${gamePlanId}.`);
+    const steps = (await q.query<StepSnapshot>(STEP_SNAPSHOT_SQL, [gamePlanId, me])).rows;
+    const r = await moveIn(q, gamePlanId, stepId, move);
+    if (!r.changed) return r.message;
+    await q.query('update game_plans set updated_at = now() where id = $1 and user_id = $2', [gamePlanId, me]);
+    await logActivity(q, 'move_step', `move in "${before.name}"`, { kind: 'restore_game_plan', before, steps });
+    return `${r.message}.`;
+  });
+}
+
+/** Moving a step by voice: the step, and where to, by what they say. */
+export interface NamedStepMove {
+  step: string;
+  to?: StepMove['to'];
+  before?: string;
+  after?: string;
+  /** Make it plan A: first among its alternatives. */
+  prefer?: boolean;
+}
+
+/** Moves a step of a game plan found by name (for Claude). */
+export async function moveStepByName(ctx: Ctx, gamePlanName: string, move: NamedStepMove): Promise<string> {
+  const q = ctx.db;
+  const plan = await resolveGamePlan(q, gamePlanName);
+  if (!plan.match) return describeMiss('game plan', gamePlanName, plan);
+  const id = plan.match.id;
+  const find = async (words: string): Promise<{ id: number; miss?: undefined } | { id?: undefined; miss: string }> => {
+    const r = await resolveStep(q, id, words);
+    if (r.match) return { id: r.match.id };
+    const names = new Set(r.candidates.map(c => c.name.toLowerCase()));
+    if (r.candidates.length > 1 && names.size === 1) {
+      return {
+        miss: `More than one step in ${plan.match!.name} says "${r.candidates[0]!.name}". Say it with the reaction that leads to it ("if they…"), or move it in the app.`,
+      };
+    }
+    return { miss: `${describeMiss('step', words, r).replace(/\.$/, '')} in ${plan.match!.name}.` };
+  };
+  const step = await find(move.step);
+  if (step.miss !== undefined) return step.miss;
+  if (move.prefer) return moveStep(ctx, id, step.id, { within: 'choice', to: 'first' });
+  if (move.before !== undefined || move.after !== undefined) {
+    const target = await find((move.before ?? move.after)!);
+    if (target.miss !== undefined) return target.miss;
+    return moveStep(ctx, id, step.id, move.before !== undefined ? { before: target.id } : { after: target.id });
+  }
+  return moveStep(ctx, id, step.id, { to: move.to });
 }
 
 export interface SaveGamePlanInput {
