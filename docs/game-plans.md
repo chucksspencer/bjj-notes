@@ -41,6 +41,11 @@ Nothing answers to the area names any more, apart from old web links (`/focus/:i
 - Steps under the same parent are ordered by `ordinal` (1 = first). An alternative (`alt`) is plan B to the
   step before it under the same parent: it answers the same reaction, so it has no trigger of its own, and the
   first step under a parent is never an alternative.
+- An alternative starts a branch of its own. What to do after it ("or Y, then Z", "if they… after Y") is its
+  children. The next step in the same list, after the alternatives, follows plan A: on the main line, step 2
+  comes after step 1's plan A, not "whichever was used". The outline, `get_game_plan` and Siri all show it
+  that way: "Or" hangs under the step it's an alternative to, like an "if they…" branch, with its own steps
+  inside it.
 - A step moves among the steps under the same parent, never to another parent. It moves as a *choice*: the
   step and its alternatives together, with everything under them. Within a choice, steps move to change which is
   plan A, B, C; whichever is first carries the choice's trigger (`moveStep` in `src/services/gamePlans.ts`).
@@ -67,6 +72,8 @@ Bottom half: winning the underhook. #1 on your focus list; last note 3 days ago.
 Starts in Half guard, bottom, when top has the underhook and crossface.
 Steps:
 1. John Wayne sweep (drilling): Force them to post the underhook hand.
+   Or: knee lever.
+      Come up on the single.
 2. Shuck (learning).
    If they post the far leg: go to deep half → Deep half guard (bottom). Continues in: Deep half sweeps.
    If they base back: octopus sweeps.
@@ -96,9 +103,10 @@ tool's schema handle that better than a nested one.
   description and techniques; Delete is separate and asks first.
 - **Steps, reading:** an outline with a status bar per step; deeper branches open on tap.
 - **Steps, editing:** a step at a time. Tap a step for its sheet; *Then* (the next main-line step, or what
-  follows inside a branch), *If they…* (a branch) and *Or* (an alternative) add one. The arrows at the end of a
-  step's row move it (and its alternatives) past the step above or below, as the outline draws them: inside a
-  branch, the "if they…" branches and the "then" steps move within their own run. In the sheet, *Make this plan
+  follows inside a branch), *If they…* (a branch) and *Or* (an alternative, drawn as a branch under the step
+  it's an alternative to; *Then* on it adds to that branch) add one. The arrows at the end of a step's row move
+  it (and its alternatives) past the step above or below, as the outline draws them: inside a branch, the "if
+  they…" branches and the "then" steps move within their own run. In the sheet, *Make this plan
   A*, *Try earlier* and *Try later* reorder alternatives. "Describe it" takes a paragraph and has Claude build the
   outline to check before saving.
 - **Note sheet:** one "File under" search across techniques and game plans. Technique matches come first, and

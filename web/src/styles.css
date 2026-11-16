@@ -2089,27 +2089,6 @@ button.clip:active {
   font-feature-settings: 'tnum';
 }
 
-/* Which alternative this is: A is the one you'd rather. */
-.step-letter {
-  flex: none;
-  width: 22px;
-  height: 22px;
-  margin-top: 1px;
-  border-radius: 50%;
-  background: var(--surface-2);
-  box-shadow: inset 0 0 0 1px var(--rule);
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 750;
-  line-height: 22px;
-  text-align: center;
-}
-
-.step-option:first-of-type > .step-line > .step-letter {
-  background: var(--belt-wash);
-  box-shadow: none;
-  color: var(--belt);
-}
 
 .step-body {
   flex: 1;
@@ -2139,33 +2118,16 @@ button.step-body {
   font-weight: 650;
 }
 
-.step-when + .step-option > .step-line,
-.step-or + .step-option > .step-line {
+.step-when + .step-option > .step-line {
   padding-top: 2px;
 }
 
-/* Between alternatives. */
-.step-or {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 var(--pad) 0 12px;
-  color: var(--muted);
+/* An alternative ("or") is a branch of its own: marked apart from the "if they…" ones. */
+.step.alternative > .step-when {
+  color: var(--belt);
   font-size: 13px;
-  font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-
-.step-or::after {
-  flex: 1;
-  height: 1px;
-  background: var(--rule);
-  content: '';
-}
-
-.step.numbered > .step-or {
-  padding-left: var(--pad);
 }
 
 .step-do {
@@ -2262,8 +2224,7 @@ button.step-body {
   background: var(--surface-2);
 }
 
-.steps.editing .step-when + .step-option > .step-line,
-.steps.editing .step-or + .step-option > .step-line {
+.steps.editing .step-when + .step-option > .step-line {
   padding-top: 10px;
 }
 

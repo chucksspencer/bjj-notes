@@ -422,7 +422,10 @@ async function resolveStepIds(q: Queryable, steps: GamePlanStepInput[]): Promise
 export interface NamedStepInput {
   /** 0 = main line; 1 = a branch off the nearest depth-0 step above it; and so on. */
   depth: number;
-  /** An alternative to the nearest step above it at the same depth: plan B (then C...), in order of preference. */
+  /**
+   * An alternative to the nearest step above it at the same depth: plan B (then C...), in order of preference.
+   * It starts a branch: what comes after it goes one level deeper; the next step at this depth follows plan A.
+   */
   or?: boolean;
   /** The reaction that leads here ("they post the far leg"). */
   when?: string;
@@ -875,27 +878,41 @@ export async function deleteGamePlan(ctx: Ctx, target: { id?: number; name?: str
 
 // ---------- reading, for Claude and Siri ----------
 
-/** Steps as indented if/then lines. Alternatives ("or") follow the step they're alternatives to: 1a, 1b on the main line. */
-export function stepLines(steps: GamePlanStep[], indent = ''): string[] {
+/** A step and its alternatives ("or": plan B, C…), which sit right after it in the same list. */
+interface Choice {
+  step: GamePlanStep;
+  alternatives: GamePlanStep[];
+}
+
+function choicesIn(steps: GamePlanStep[]): Choice[] {
+  const out: Choice[] = [];
+  for (const s of steps) {
+    if (s.or && out.length) out.at(-1)!.alternatives.push(s);
+    else out.push({ step: s, alternatives: [] });
+  }
+  return out;
+}
+
+/**
+ * Steps as indented if/then lines. Under each step: what comes after it, in order, then its alternatives ("Or:",
+ * each a branch with its own steps under it). The main line is numbered and follows plan A.
+ */
+export function stepLines(steps: GamePlanStep[]): string[] {
   const lines: string[] = [];
-  let n = 0;
-  let letter = 0;
-  steps.forEach((s, i) => {
-    if (s.or) letter++;
-    else {
-      n++;
-      letter = 0;
-    }
-    const choice = s.or || steps[i + 1]?.or === true;
-    const marker = indent ? '' : `${n}${choice ? String.fromCharCode(97 + letter) : ''}. `;
-    const head = s.or ? `Or: ${lowerFirst(s.action)}` : s.trigger ? `If ${s.trigger}: ${lowerFirst(s.action)}` : s.action;
+  const write = (s: GamePlanStep, indent: string, head: string, alternatives: GamePlanStep[] = []) => {
     const card = s.technique ? ` (${s.technique.status})` : '';
     const leads = s.to ? ` → ${s.to.name}${s.toRole ? ` (${s.toRole})` : ''}` : '';
     const why = s.note ? `: ${s.note}` : '';
     const next = s.continuesIn.length ? ` Continues in: ${s.continuesIn.map(a => a.name).join(', ')}.` : '';
-    lines.push(`${indent}${marker}${head}${card}${leads}${why}.${next}`.replace(/\.\./g, '.'));
-    lines.push(...stepLines(s.children, `${indent}   `));
-  });
+    lines.push(`${indent}${head}${card}${leads}${why}.${next}`.replace(/\.\./g, '.'));
+    const deeper = `${indent}   `;
+    const under = choicesIn(s.children);
+    for (const c of under) write(c.step, deeper, c.step.trigger ? `If ${c.step.trigger}: ${lowerFirst(c.step.action)}` : c.step.action, c.alternatives);
+    for (const a of alternatives) write(a, deeper, `Or: ${lowerFirst(a.action)}`);
+  };
+  choicesIn(steps).forEach((c, i) =>
+    write(c.step, '', `${i + 1}. ${c.step.trigger ? `If ${c.step.trigger}: ${lowerFirst(c.step.action)}` : c.step.action}`, c.alternatives),
+  );
   return lines;
 }
 
@@ -997,10 +1014,20 @@ export async function gamePlanSpeech(ctx: Ctx, query: string): Promise<GamePlanS
   const v = (await gamePlanView(q, id))!;
   if (!v.steps.length) return { gamePlanId: id, speech: `${v.name} doesn't have any steps yet.` };
   const step = (s: GamePlanStep) => `${lowerFirst(s.action)}${s.note ? `, to ${lowerFirst(s.note)}` : ''}`;
+  // An alternative is its own branch: said as one sentence, with what comes after it inside.
+  const instead = (a: GamePlanStep) =>
+    `Or instead, ${step(a)}${choicesIn(a.children)
+      .map(c => (c.step.trigger ? `; if ${c.step.trigger}, ${step(c.step)}` : `, then ${step(c.step)}`))
+      .join('')}.`;
   const parts: string[] = [];
-  v.steps.forEach((s, i) => {
-    parts.push(`${i === 0 ? capitalise(step(s)) : s.or ? `Or ${step(s)}` : `Then ${step(s)}`}.`);
-    for (const b of s.children) parts.push(`${b.or ? 'Or ' : b.trigger ? `If ${b.trigger}, ` : 'Then '}${step(b)}.`);
+  choicesIn(v.steps).forEach((c, i) => {
+    parts.push(`${i === 0 ? capitalise(step(c.step)) : `Then ${step(c.step)}`}.`);
+    const under = choicesIn(c.step.children);
+    for (const r of under.filter(r => r.step.trigger)) {
+      parts.push(`If ${r.step.trigger}, ${step(r.step)}.`, ...r.alternatives.map(a => `Or ${step(a)}.`));
+    }
+    parts.push(...c.alternatives.map(instead));
+    for (const t of under.filter(t => !t.step.trigger)) parts.push(`Then ${step(t.step)}.`, ...t.alternatives.map(a => `Or ${step(a)}.`));
   });
   const when = v.premise ? ` When ${lowerFirst(v.premise)}:` : '';
   return { gamePlanId: id, speech: `${v.name}.${when} ${parts.join(' ')}`.replace(/\.\./g, '.') };

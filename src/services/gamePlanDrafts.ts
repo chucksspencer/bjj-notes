@@ -38,12 +38,18 @@ const GAME_PLAN_TOOL = {
           'Every step in reading order. The main line is depth 0, in order. A branch (what to do if the opponent ' +
           'reacts a certain way) goes right after the step it follows, one level deeper, with "when" saying the reaction. ' +
           'An alternative ("do X, or Y"; "plan B is...") goes after the step it is an alternative to (and that step\'s own ' +
-          'branches), at the same depth, with "or": true; the preferred one comes first.',
+          'branches), at the same depth, with "or": true; the preferred one comes first. An alternative starts a branch of ' +
+          'its own: what to do after it ("or Y, then Z") goes right after it, one level deeper. The next step at the ' +
+          'same depth follows the preferred one.',
         items: {
           type: 'object',
           properties: {
             depth: { type: 'integer', minimum: 0, maximum: MAX_DEPTH },
-            or: { type: 'boolean', description: 'True when this is an alternative to the nearest step above it at the same depth. Leave out "when".' },
+            or: {
+              type: 'boolean',
+              description:
+                'True when this is an alternative to the nearest step above it at the same depth. Leave out "when". What follows it goes one level deeper.',
+            },
             when: { type: 'string', description: 'The reaction that leads to this step, e.g. "they post the far leg". Leave out for "then".' },
             do: { type: 'string', description: 'What to do, in their words, e.g. "shuck pass", "go to deep half", "octopus sweeps".' },
             technique: { type: 'string', description: 'The known technique this step is, spelled exactly as listed. Leave out if none clearly is.' },
