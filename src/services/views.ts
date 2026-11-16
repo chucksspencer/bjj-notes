@@ -1,15 +1,15 @@
 // Read side: structured views used by the web app's JSON API and by the MCP text formatters.
 import type {
-  AreaDetail,
-  AreaRef,
-  AreasView,
-  AreaView,
+  GamePlanDetail,
+  GamePlanRef,
+  GamePlansView,
+  GamePlanView,
   EdgeView,
   FocusView,
   LabView,
   LinkView,
   NoteView,
-  PlanStep,
+  GamePlanStep,
   PositionCategory,
   PositionListItem,
   PositionRef,
@@ -32,19 +32,19 @@ const json = <T>(v: unknown): T => (typeof v === 'string' ? (JSON.parse(v) as T)
 const TECH_REF_JSON = `json_build_object('id', t.id, 'name', t.name, 'type', t.type, 'role', t.role, 'status', t.status)`;
 
 /**
- * The date of the latest note on an area (aliased `a`): one linked to it, or one on any of its
- * techniques. Used by the focus list, an area's page and the weekly review's quiet items.
+ * The date of the latest note on a game plan (aliased `a`): one linked to it, or one on any of its
+ * techniques. Used by the focus list, a game plan's page and the weekly review's quiet items.
  */
-export const AREA_LAST_NOTE_SQL = `greatest(
-    (select max(n.observed_on) from area_notes an join notes n on n.id = an.note_id where an.area_id = a.id),
+export const GAME_PLAN_LAST_NOTE_SQL = `greatest(
+    (select max(n.observed_on) from game_plan_notes an join notes n on n.id = an.note_id where an.game_plan_id = a.id),
     (select max(n.observed_on) from notes n
        join note_techniques nt on nt.note_id = n.id
-       join area_techniques ax on ax.technique_id = nt.technique_id
-      where ax.area_id = a.id))::text`;
+       join game_plan_techniques ax on ax.technique_id = nt.technique_id
+      where ax.game_plan_id = a.id))::text`;
 
-/** An area (aliased `a`) as an AreaRef. */
-const AREA_REF_JSON = `json_build_object('id', a.id, 'name', a.name, 'rank', a.rank)`;
-const AREA_ORDER = 'a.rank nulls last, lower(a.name)';
+/** A game plan (aliased `a`) as a GamePlanRef. */
+const GAME_PLAN_REF_JSON = `json_build_object('id', a.id, 'name', a.name, 'rank', a.rank)`;
+const GAME_PLAN_ORDER = 'a.rank nulls last, lower(a.name)';
 
 // ---------- where notes came from ----------
 
@@ -91,7 +91,7 @@ interface NoteRow {
   ss_location: string | null;
   ss_gi: SessionView['gi'];
   techniques: unknown;
-  areas: unknown;
+  game_plans: unknown;
 }
 
 const NOTE_SELECT = `
@@ -104,9 +104,9 @@ const NOTE_SELECT = `
          coalesce((select json_agg(${TECH_REF_JSON} order by t.name)
                    from note_techniques nt join techniques t on t.id = nt.technique_id
                    where nt.note_id = n.id), '[]'::json) as techniques,
-         coalesce((select json_agg(${AREA_REF_JSON} order by ${AREA_ORDER})
-                   from area_notes an join areas a on a.id = an.area_id
-                   where an.note_id = n.id), '[]'::json) as areas
+         coalesce((select json_agg(${GAME_PLAN_REF_JSON} order by ${GAME_PLAN_ORDER})
+                   from game_plan_notes an join game_plans a on a.id = an.game_plan_id
+                   where an.note_id = n.id), '[]'::json) as game_plans
   from notes n
   left join sources s on s.id = n.source_id
   left join sessions ss on ss.id = n.session_id`;
@@ -129,7 +129,7 @@ function toNote(r: NoteRow): NoteView {
     starredAt: r.starred_at,
     answered: r.answered_at !== null,
     attachments: json<NoteView['attachments']>(r.attachments),
-    areas: json<AreaRef[]>(r.areas),
+    gamePlans: json<GamePlanRef[]>(r.game_plans),
     sessionId: r.session_id,
     session:
       r.session_id && r.ss_kind
@@ -164,10 +164,10 @@ export interface NoteQuery {
   beforeId?: number;
   /** Only notes about any of these techniques. */
   techniqueIds?: number[];
-  /** Only notes filed under this area. */
-  areaId?: number;
-  /** Only notes on this area's techniques that aren't filed under it. */
-  relatedToAreaId?: number;
+  /** Only notes filed under this game plan. */
+  gamePlanId?: number;
+  /** Only notes on this game plan's techniques that aren't filed under it. */
+  relatedToGamePlanId?: number;
   oldestFirst?: boolean;
 }
 
@@ -198,10 +198,10 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
   if (opts.techniqueIds !== undefined) {
     where.push(`exists (select 1 from note_techniques x where x.note_id = n.id and x.technique_id = any(${p(opts.techniqueIds)}::int[]))`);
   }
-  if (opts.areaId !== undefined) {
-    where.push(`exists (select 1 from area_notes x where x.note_id = n.id and x.area_id = ${p(opts.areaId)})`);
+  if (opts.gamePlanId !== undefined) {
+    where.push(`exists (select 1 from game_plan_notes x where x.note_id = n.id and x.game_plan_id = ${p(opts.gamePlanId)})`);
   }
-  if (opts.relatedToAreaId !== undefined) where.push(relatedToArea(p(opts.relatedToAreaId)));
+  if (opts.relatedToGamePlanId !== undefined) where.push(relatedToGamePlan(p(opts.relatedToGamePlanId)));
   const limit = p(Math.min(Math.max(opts.limit ?? 30, 1), 200));
   const { rows } = await q.query<NoteRow>(
     `${NOTE_SELECT} where ${where.join(' and ')} order by ${order} limit ${limit}`,
@@ -210,11 +210,11 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
   return rows.map(toNote);
 }
 
-/** Notes (aliased `n`) on an area's techniques that aren't filed under the area itself. */
-const relatedToArea = (area: string) =>
-  `(exists (select 1 from note_techniques x join area_techniques ax on ax.technique_id = x.technique_id
-            where x.note_id = n.id and ax.area_id = ${area})
-    and not exists (select 1 from area_notes y where y.note_id = n.id and y.area_id = ${area}))`;
+/** Notes (aliased `n`) on a game plan's techniques that aren't filed under the game plan itself. */
+const relatedToGamePlan = (gamePlan: string) =>
+  `(exists (select 1 from note_techniques x join game_plan_techniques ax on ax.technique_id = x.technique_id
+            where x.note_id = n.id and ax.game_plan_id = ${gamePlan})
+    and not exists (select 1 from game_plan_notes y where y.note_id = n.id and y.game_plan_id = ${gamePlan}))`;
 
 export async function noteView(q: Queryable, id: number): Promise<NoteView | null> {
   const { rows } = await q.query<NoteRow>(`${NOTE_SELECT} where n.id = $1 and n.user_id = $2`, [id, uid(q)]);
@@ -287,12 +287,12 @@ export async function techniqueView(q: Queryable, id: number, noteLimit = 20): P
       [id],
     )
   ).rows.map(r => ({ kind: r.kind, direction: r.dir, note: r.note, technique: json<TechniqueRef>(r.ref) }));
-  const areas = (
-    await q.query<AreaRef>(
-      `select a.id, a.name, a.rank from areas a
-       where a.user_id = $2 and (exists (select 1 from area_techniques ax where ax.area_id = a.id and ax.technique_id = $1)
-                                 or exists (select 1 from area_steps st where st.area_id = a.id and st.technique_id = $1))
-       order by ${AREA_ORDER}`,
+  const gamePlans = (
+    await q.query<GamePlanRef>(
+      `select a.id, a.name, a.rank from game_plans a
+       where a.user_id = $2 and (exists (select 1 from game_plan_techniques ax where ax.game_plan_id = a.id and ax.technique_id = $1)
+                                 or exists (select 1 from game_plan_steps st where st.game_plan_id = a.id and st.technique_id = $1))
+       order by ${GAME_PLAN_ORDER}`,
       [id, uid(q)],
     )
   ).rows;
@@ -319,7 +319,7 @@ export async function techniqueView(q: Queryable, id: number, noteLimit = 20): P
     updatedAt: new Date(t.updated_at).toISOString(),
     edges,
     links,
-    areas,
+    gamePlans,
     notes,
     noteCount: counts.c,
     lastNoteOn: counts.last,
@@ -443,16 +443,16 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
   }));
 }
 
-// ---------- areas ----------
+// ---------- game plans ----------
 
-interface AreaRow {
+interface GamePlanRow {
   id: number;
   name: string;
   aliases: string[];
   description: string | null;
   rank: number | null;
   premise: string | null;
-  start_role: AreaView['startRole'];
+  start_role: GamePlanView['startRole'];
   sp_id: number | null;
   sp_slug: string | null;
   sp_name: string | null;
@@ -463,19 +463,19 @@ interface AreaRow {
   created_at: string;
 }
 
-const AREA_SELECT = `
+const GAME_PLAN_SELECT = `
   select a.id, a.name, a.aliases, a.description, a.rank, a.premise, a.start_role, ${iso('a.created_at')} as created_at,
          sp.id as sp_id, sp.slug as sp_slug, sp.name as sp_name,
          coalesce((select json_agg(${TECH_REF_JSON} order by t.name)
-                   from area_techniques ax join techniques t on t.id = ax.technique_id
-                   where ax.area_id = a.id), '[]'::json) as techniques,
-         (select count(*)::int from area_steps st where st.area_id = a.id) as step_count,
-         (select count(*)::int from area_notes an where an.area_id = a.id) as note_count,
-         ${AREA_LAST_NOTE_SQL} as last_note
-  from areas a
+                   from game_plan_techniques ax join techniques t on t.id = ax.technique_id
+                   where ax.game_plan_id = a.id), '[]'::json) as techniques,
+         (select count(*)::int from game_plan_steps st where st.game_plan_id = a.id) as step_count,
+         (select count(*)::int from game_plan_notes an where an.game_plan_id = a.id) as note_count,
+         ${GAME_PLAN_LAST_NOTE_SQL} as last_note
+  from game_plans a
   left join positions sp on sp.id = a.start_position_id`;
 
-const toArea = (r: AreaRow): AreaView => ({
+const toGamePlan = (r: GamePlanRow): GamePlanView => ({
   id: r.id,
   name: r.name,
   aliases: r.aliases,
@@ -492,18 +492,18 @@ const toArea = (r: AreaRow): AreaView => ({
 
 /** The focus list, top first. */
 export async function focusView(ctx: Ctx, q: Queryable = ctx.db): Promise<FocusView> {
-  const { rows } = await q.query<AreaRow>(`${AREA_SELECT} where a.user_id = $1 and a.rank is not null order by a.rank, a.id`, [uid(q)]);
-  // label: the name under its old field, which app builds from before areas read.
-  return { today: today(ctx), active: rows.map(toArea).map(a => ({ ...a, label: a.name })) };
+  const { rows } = await q.query<GamePlanRow>(`${GAME_PLAN_SELECT} where a.user_id = $1 and a.rank is not null order by a.rank, a.id`, [uid(q)]);
+  // label: the name under its old field, which app builds from before focus items had names read.
+  return { today: today(ctx), active: rows.map(toGamePlan).map(a => ({ ...a, label: a.name })) };
 }
 
-/** Every area: on focus first, in order, then the rest by name. */
-export async function areasView(ctx: Ctx, q: Queryable = ctx.db): Promise<AreasView> {
-  const { rows } = await q.query<AreaRow>(`${AREA_SELECT} where a.user_id = $1 order by ${AREA_ORDER}, a.id`, [uid(q)]);
-  return { today: today(ctx), areas: rows.map(toArea) };
+/** Every game plan: on focus first, in order, then the rest by name. */
+export async function gamePlansView(ctx: Ctx, q: Queryable = ctx.db): Promise<GamePlansView> {
+  const { rows } = await q.query<GamePlanRow>(`${GAME_PLAN_SELECT} where a.user_id = $1 order by ${GAME_PLAN_ORDER}, a.id`, [uid(q)]);
+  return { today: today(ctx), gamePlans: rows.map(toGamePlan) };
 }
 
-/** How many related notes an area's page shows. */
+/** How many related notes a game plan's page shows. */
 export const RELATED_NOTES = 10;
 
 interface StepRow {
@@ -513,7 +513,7 @@ interface StepRow {
   trigger: string | null;
   action: string;
   note: string | null;
-  to_role: PlanStep['toRole'];
+  to_role: GamePlanStep['toRole'];
   technique: unknown;
   tp_id: number | null;
   tp_slug: string | null;
@@ -522,27 +522,27 @@ interface StepRow {
 }
 
 /**
- * An area's plan as a tree: the main line in order, each step with what follows it. A step that leaves
- * you where another area's plan starts says so ("continues in").
+ * A game plan's steps as a tree: the main line in order, each step with what follows it. A step that leaves
+ * you where another game plan starts says so ("continues in").
  */
-export async function planOf(q: Queryable, areaId: number): Promise<PlanStep[]> {
+export async function stepsOf(q: Queryable, gamePlanId: number): Promise<GamePlanStep[]> {
   const { rows } = await q.query<StepRow>(
     `select st.id, st.parent_id, st.alt, st.trigger, st.action, st.note, st.to_role,
             (select ${TECH_REF_JSON} from techniques t where t.id = st.technique_id) as technique,
             tp.id as tp_id, tp.slug as tp_slug, tp.name as tp_name,
-            coalesce((select json_agg(${AREA_REF_JSON} order by ${AREA_ORDER})
-                      from areas a
-                      where a.user_id = st.user_id and a.id <> st.area_id and st.to_position_id is not null
+            coalesce((select json_agg(${GAME_PLAN_REF_JSON} order by ${GAME_PLAN_ORDER})
+                      from game_plans a
+                      where a.user_id = st.user_id and a.id <> st.game_plan_id and st.to_position_id is not null
                         and a.start_position_id = st.to_position_id
                         and (st.to_role is null or a.start_role is null or a.start_role = st.to_role)), '[]'::json) as continues_in
-     from area_steps st
+     from game_plan_steps st
      left join positions tp on tp.id = st.to_position_id
-     where st.area_id = $1 and st.user_id = $2
+     where st.game_plan_id = $1 and st.user_id = $2
      order by st.parent_id nulls first, st.ordinal, st.id`,
-    [areaId, uid(q)],
+    [gamePlanId, uid(q)],
   );
-  const byId = new Map<number, PlanStep>();
-  const top: PlanStep[] = [];
+  const byId = new Map<number, GamePlanStep>();
+  const top: GamePlanStep[] = [];
   for (const r of rows) {
     byId.set(r.id, {
       id: r.id,
@@ -553,7 +553,7 @@ export async function planOf(q: Queryable, areaId: number): Promise<PlanStep[]> 
       to: r.tp_id ? ({ id: r.tp_id, slug: r.tp_slug!, name: r.tp_name! } satisfies PositionRef) : null,
       toRole: r.to_role,
       note: r.note,
-      continuesIn: json<AreaRef[]>(r.continues_in),
+      continuesIn: json<GamePlanRef[]>(r.continues_in),
       children: [],
     });
   }
@@ -566,25 +566,25 @@ export async function planOf(q: Queryable, areaId: number): Promise<PlanStep[]> 
   return top;
 }
 
-/** One area's page, on focus or not; null if it isn't the signed-in person's. */
-export async function areaView(q: Queryable, id: number): Promise<AreaDetail | null> {
-  const row = (await q.query<AreaRow>(`${AREA_SELECT} where a.id = $1 and a.user_id = $2`, [id, uid(q)])).rows[0];
+/** One game plan's page, on focus or not; null if it isn't the signed-in person's. */
+export async function gamePlanView(q: Queryable, id: number): Promise<GamePlanDetail | null> {
+  const row = (await q.query<GamePlanRow>(`${GAME_PLAN_SELECT} where a.id = $1 and a.user_id = $2`, [id, uid(q)])).rows[0];
   if (!row) return null;
-  const notes = await noteList(q, { areaId: id, limit: 200 });
-  const relatedNotes = await noteList(q, { relatedToAreaId: id, limit: RELATED_NOTES });
+  const notes = await noteList(q, { gamePlanId: id, limit: 200 });
+  const relatedNotes = await noteList(q, { relatedToGamePlanId: id, limit: RELATED_NOTES });
   const relatedCount = (
-    await q.query<{ c: number }>(`select count(*)::int as c from notes n where n.user_id = $2 and ${relatedToArea('$1')}`, [id, uid(q)])
+    await q.query<{ c: number }>(`select count(*)::int as c from notes n where n.user_id = $2 and ${relatedToGamePlan('$1')}`, [id, uid(q)])
   ).rows[0]!.c;
   const history = (
     await q.query<{ at: string; event: string; to_rank: number | null }>(
-      `select ${iso('e.at')} as at, e.event, e.to_rank from focus_events e where e.area_id = $1 order by e.id`,
+      `select ${iso('e.at')} as at, e.event, e.to_rank from focus_events e where e.game_plan_id = $1 order by e.id`,
       [id],
     )
   ).rows;
   return {
-    ...toArea(row),
+    ...toGamePlan(row),
     createdAt: row.created_at,
-    plan: await planOf(q, id),
+    steps: await stepsOf(q, id),
     notes,
     relatedNotes,
     relatedCount,
@@ -695,13 +695,13 @@ export async function positionView(q: Queryable, positionId: number, role?: Role
       if (!from.some(t => t.type === type && (t.edge.fromRole === rl || t.edge.fromRole === null))) gaps.push({ role: rl, type });
     }
   }
-  const plans = (
-    await q.query<AreaRef>(
-      `select a.id, a.name, a.rank from areas a
+  const gamePlans = (
+    await q.query<GamePlanRef>(
+      `select a.id, a.name, a.rank from game_plans a
        where a.user_id = $3 and a.start_position_id = $1 and ($2::text is null or a.start_role is null or a.start_role = $2)
-       order by ${AREA_ORDER}`,
+       order by ${GAME_PLAN_ORDER}`,
       [pos.id, role ?? null, uid(q)],
     )
   ).rows;
-  return { position: pos, role: role ?? null, from, into, gaps, plans };
+  return { position: pos, role: role ?? null, from, into, gaps, gamePlans };
 }

@@ -1,10 +1,11 @@
 import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from 'express';
 import { z } from 'zod';
 import type {
-  AreaDetail,
-  AreasView,
+  GamePlanDetail,
+  GamePlansView,
   AttachmentView,
-  PlanDraft,
+  GamePlanDraft,
+  GamePlanSpeech,
   FocusView,
   LabView,
   MessageResult,
@@ -21,8 +22,8 @@ import { ForbiddenError as Forbidden, NotFoundError as NotFound, UserError } fro
 import { userCtx, type Ctx } from '../services/context.js';
 import { uid } from '../db.js';
 import { userIdOf } from './auth.js';
-import { createArea, deleteArea, editArea, linkArea, MAX_DEPTH, MAX_STEPS, planSpeech, updateFocus } from '../services/areas.js';
-import { draftPlan } from '../services/plans.js';
+import { createGamePlan, deleteGamePlan, editGamePlan, gamePlanSpeech, linkGamePlan, MAX_DEPTH, MAX_STEPS, moveStep, updateFocus } from '../services/gamePlans.js';
+import { draftGamePlan } from '../services/gamePlanDrafts.js';
 import { attachmentThumb, linkAttachment } from '../services/attachments.js';
 import { clearStars, markAnswered } from '../services/marks.js';
 import { addNote, deleteNote, deleteNotes, fileNote, updateNote } from '../services/notes.js';
@@ -39,7 +40,7 @@ import {
 } from '../services/vocab.js';
 import { sessionList } from '../services/sessions.js';
 import { searchNotes, searchTechniques } from '../services/semantic.js';
-import { areasView, areaView, focusView, labView, noteList, noteView, positionList, positionView, techniqueList, techniqueView } from '../services/views.js';
+import { gamePlansView, gamePlanView, focusView, labView, noteList, noteView, positionList, positionView, techniqueList, techniqueView } from '../services/views.js';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const id = z.coerce.number().int().positive();
@@ -81,7 +82,7 @@ const noteCreate = z.object({
   session: sessionInput.optional(),
   toTry: z.boolean().optional(),
   starred: z.boolean().optional(),
-  areaIds: z.array(z.number().int()).max(20).optional(),
+  gamePlanIds: z.array(z.number().int()).max(20).optional(),
 });
 const notePatch = z.object({
   body: z.string().trim().min(1).max(10_000).optional(),
@@ -94,7 +95,7 @@ const notePatch = z.object({
   starred: z.boolean().optional(),
   answered: z.boolean().optional(),
   newTechniques: z.array(newTechnique).max(10).optional(),
-  areaIds: z.array(z.number().int()).max(20).optional(),
+  gamePlanIds: z.array(z.number().int()).max(20).optional(),
 });
 const techniqueCreate = z.object({
   name: z.string().trim().min(1).max(120),
@@ -126,11 +127,11 @@ const linkCreate = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   note: z.string().trim().max(500).optional(),
 });
-const areaDescription = z.string().trim().max(4000);
-const areaName = z.string().trim().min(1).max(200);
-const areaCreate = z.object({
-  name: areaName,
-  description: areaDescription.optional(),
+const gamePlanDescription = z.string().trim().max(4000);
+const gamePlanName = z.string().trim().min(1).max(200);
+const gamePlanCreate = z.object({
+  name: gamePlanName,
+  description: gamePlanDescription.optional(),
   techniqueIds: z.array(z.number().int()).max(10).optional(),
   noteIds: z.array(z.number().int()).max(50).optional(),
   focus: z.boolean().optional(),
@@ -142,7 +143,7 @@ const focusActionBody = z.object({
   position: z.number().int().min(1).optional(),
 });
 const optLine = (max: number) => z.string().trim().max(max).nullable().optional();
-const planStep = z.object({
+const gamePlanStep = z.object({
   depth: z.number().int().min(0).max(MAX_DEPTH),
   or: z.boolean().optional(),
   trigger: optLine(300),
@@ -152,20 +153,31 @@ const planStep = z.object({
   toRole: z.enum(ROLES).nullable().optional(),
   note: optLine(1000),
 });
-const areaPatch = z.object({
-  name: areaName.optional(),
-  description: areaDescription.nullable().optional(),
+const gamePlanPatch = z.object({
+  name: gamePlanName.optional(),
+  description: gamePlanDescription.nullable().optional(),
   aliases: strList.optional(),
   startPositionId: z.number().int().nullable().optional(),
   startRole: z.enum(ROLES).nullable().optional(),
   premise: optLine(1000),
-  plan: z.array(planStep).max(MAX_STEPS).optional(),
+  steps: z.array(gamePlanStep).max(MAX_STEPS).optional(),
 });
+const stepMove = z
+  .object({
+    to: z.enum(['up', 'down', 'first', 'last']).optional(),
+    before: z.number().int().optional(),
+    after: z.number().int().optional(),
+    within: z.literal('choice').optional(),
+  })
+  .refine(m => [m.to, m.before, m.after].filter(v => v !== undefined).length === 1, {
+    message: 'Say where to move it: to (up, down, first or last), before, or after.',
+  })
+  .refine(m => m.within === undefined || m.to !== undefined, { message: 'Among its alternatives, a step moves up, down, first or last.' });
 const linkIds = z.object({
   techniqueIds: z.array(z.number().int()).max(50).optional(),
   noteIds: z.array(z.number().int()).max(200).optional(),
 });
-const areaLinks = z.object({ add: linkIds.optional(), remove: linkIds.optional() });
+const gamePlanLinks = z.object({ add: linkIds.optional(), remove: linkIds.optional() });
 
 /**
  * Wraps an async handler: it gets the signed-in user's context (set up by requireAuth), its result is sent
@@ -194,76 +206,99 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
     return t;
   };
 
-  const loadArea = async (ctx: Ctx, areaId: number): Promise<AreaDetail> => {
-    const area = await areaView(ctx.db, areaId);
-    if (!area) throw new NotFound(`No area #${areaId}.`);
-    return area;
+  const loadGamePlan = async (ctx: Ctx, gamePlanId: number): Promise<GamePlanDetail> => {
+    const gamePlan = await gamePlanView(ctx.db, gamePlanId);
+    if (!gamePlan) throw new NotFound(`No game plan #${gamePlanId}.`);
+    return gamePlan;
   };
 
-  // The focus list: areas being worked on now, in order
+  // The focus list: game plans being worked on now, in order
   r.get('/api/v1/focus', h(async (ctx): Promise<FocusView> => focusView(ctx)));
   r.post(
     '/api/v1/focus/:id/actions',
     h(async (ctx, req): Promise<MessageResult & { focus: FocusView }> => {
       const b = focusActionBody.parse(req.body);
-      const areaId = id.parse(req.params.id);
-      await loadArea(ctx, areaId);
-      const message = await updateFocus(ctx, { action: b.action, item: '', item_id: areaId, position: b.position });
+      const gamePlanId = id.parse(req.params.id);
+      await loadGamePlan(ctx, gamePlanId);
+      const message = await updateFocus(ctx, { action: b.action, item: '', game_plan_id: gamePlanId, position: b.position });
       return { message, focus: await focusView(ctx) };
     }),
   );
 
-  // Areas: parts of the game, with their plans
-  r.get('/api/v1/areas', h(async (ctx): Promise<AreasView> => areasView(ctx)));
+  // Game plans: parts of the game, with their steps
+  r.get('/api/v1/game-plans', h(async (ctx): Promise<GamePlansView> => gamePlansView(ctx)));
+  // One read aloud, for Siri ("what's my game plan from bottom half"). Before /:id, which would take "speech" for an id.
+  const speechQuery = z.object({ q: z.string().trim().max(200) });
+  r.get(
+    '/api/v1/game-plans/speech',
+    h(async (ctx, req): Promise<GamePlanSpeech> => gamePlanSpeech(ctx, speechQuery.parse(req.query).q)),
+  );
   r.post(
-    '/api/v1/areas',
-    h(async (ctx, req, res): Promise<MessageResult & { area: AreaDetail }> => {
-      const b = areaCreate.parse(req.body);
-      const out = await createArea(ctx, b);
+    '/api/v1/game-plans',
+    h(async (ctx, req, res): Promise<MessageResult & { gamePlan: GamePlanDetail }> => {
+      const b = gamePlanCreate.parse(req.body);
+      const out = await createGamePlan(ctx, b);
       res.status(201);
-      return { message: out.message, area: await loadArea(ctx, out.id) };
+      return { message: out.message, gamePlan: await loadGamePlan(ctx, out.id) };
     }),
   );
-  r.get('/api/v1/areas/:id', h(async (ctx, req): Promise<AreaDetail> => loadArea(ctx, id.parse(req.params.id))));
+  r.get('/api/v1/game-plans/:id', h(async (ctx, req): Promise<GamePlanDetail> => loadGamePlan(ctx, id.parse(req.params.id))));
   r.patch(
-    '/api/v1/areas/:id',
-    h(async (ctx, req): Promise<MessageResult & { area: AreaDetail }> => {
-      const areaId = id.parse(req.params.id);
-      const b = areaPatch.parse(req.body);
-      await loadArea(ctx, areaId);
-      const message = await editArea(ctx, areaId, b);
-      return { message, area: await loadArea(ctx, areaId) };
+    '/api/v1/game-plans/:id',
+    h(async (ctx, req): Promise<MessageResult & { gamePlan: GamePlanDetail }> => {
+      const gamePlanId = id.parse(req.params.id);
+      const b = gamePlanPatch.parse(req.body);
+      await loadGamePlan(ctx, gamePlanId);
+      const message = await editGamePlan(ctx, gamePlanId, b);
+      return { message, gamePlan: await loadGamePlan(ctx, gamePlanId) };
     }),
   );
   r.delete(
-    '/api/v1/areas/:id',
+    '/api/v1/game-plans/:id',
     h(async (ctx, req): Promise<MessageResult> => {
-      const areaId = id.parse(req.params.id);
-      await loadArea(ctx, areaId);
-      return { message: await deleteArea(ctx, { id: areaId }) };
+      const gamePlanId = id.parse(req.params.id);
+      await loadGamePlan(ctx, gamePlanId);
+      return { message: await deleteGamePlan(ctx, { id: gamePlanId }) };
     }),
   );
   r.post(
-    '/api/v1/areas/:id/links',
-    h(async (ctx, req): Promise<MessageResult & { area: AreaDetail }> => {
-      const areaId = id.parse(req.params.id);
-      const b = areaLinks.parse(req.body);
-      await loadArea(ctx, areaId);
-      const message = await linkArea(ctx, areaId, b);
-      return { message, area: await loadArea(ctx, areaId) };
+    '/api/v1/game-plans/:id/links',
+    h(async (ctx, req): Promise<MessageResult & { gamePlan: GamePlanDetail }> => {
+      const gamePlanId = id.parse(req.params.id);
+      const b = gamePlanLinks.parse(req.body);
+      await loadGamePlan(ctx, gamePlanId);
+      const message = await linkGamePlan(ctx, gamePlanId, b);
+      return { message, gamePlan: await loadGamePlan(ctx, gamePlanId) };
     }),
   );
 
-  // A plan read aloud, for Siri ("what's my plan from bottom half").
+  r.post(
+    '/api/v1/game-plans/:id/steps/:stepId/move',
+    h(async (ctx, req): Promise<MessageResult & { gamePlan: GamePlanDetail }> => {
+      const gamePlanId = id.parse(req.params.id);
+      const stepId = id.parse(req.params.stepId);
+      const b = stepMove.parse(req.body);
+      await loadGamePlan(ctx, gamePlanId);
+      const message = await moveStep(ctx, gamePlanId, stepId, b);
+      return { message, gamePlan: await loadGamePlan(ctx, gamePlanId) };
+    }),
+  );
+
+  // "Describe it": Claude outlines a game plan from plain words; nothing is saved until the outline is.
+  r.post(
+    '/api/v1/game-plans/draft',
+    h(async (ctx, req): Promise<GamePlanDraft> => draftGamePlan(ctx, z.object({ text: z.string().trim().min(1).max(5000) }).parse(req.body).text)),
+  );
+
+  // ---------- legacy routes ----------
+  // For iPhone app builds from before game plans had that name (1.1 and older). Remove once everyone's on a
+  // newer TestFlight build (docs/operations.md, "Legacy routes").
   r.get(
     '/api/v1/plan',
-    h(async (ctx, req) => planSpeech(ctx, z.object({ q: z.string().trim().max(200) }).parse(req.query).q)),
-  );
-
-  // "Describe it": Claude outlines a plan from plain words; nothing is saved until the outline is.
-  r.post(
-    '/api/v1/plans/draft',
-    h(async (ctx, req): Promise<PlanDraft> => draftPlan(ctx, z.object({ text: z.string().trim().min(1).max(5000) }).parse(req.body).text)),
+    h(async (ctx, req) => {
+      const out = await gamePlanSpeech(ctx, speechQuery.parse(req.query).q);
+      return { ...out, areaId: out.gamePlanId };
+    }),
   );
 
   // Photos and videos: the still image, and recording where the original is in Photos
@@ -473,7 +508,7 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
         session: b.session,
         to_try: b.toTry,
         starred: b.starred,
-        area_ids: b.areaIds,
+        game_plan_ids: b.gamePlanIds,
         via: 'web',
       });
       res.status(201);
@@ -496,7 +531,7 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
         starred: b.starred,
         answered: b.answered,
         new_techniques: b.newTechniques,
-        area_ids: b.areaIds,
+        game_plan_ids: b.gamePlanIds,
       });
       const note = await noteView(ctx.db, noteId);
       if (!note) throw new NotFound(`No note #${noteId}.`);

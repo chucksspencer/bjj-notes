@@ -4,7 +4,18 @@ import { z } from 'zod';
 import { undoLast } from '../services/activity.js';
 import type { Ctx } from '../services/context.js';
 import { getLab, getPosition, review, search } from '../services/explore.js';
-import { deleteArea, focusHistory, getArea, getFocus, listAreas, MAX_DEPTH, MAX_STEPS, saveArea, updateFocus } from '../services/areas.js';
+import {
+  deleteGamePlan,
+  focusHistory,
+  getFocus,
+  getGamePlan,
+  listGamePlans,
+  MAX_DEPTH,
+  MAX_STEPS,
+  moveStepByName,
+  saveGamePlan,
+  updateFocus,
+} from '../services/gamePlans.js';
 import { clearStars } from '../services/marks.js';
 import { addNote, fileNote, getInbox, updateNote } from '../services/notes.js';
 import { logSession } from '../services/sessions.js';
@@ -26,7 +37,7 @@ import {
 export function instructions(name: string | null, belt?: string): string {
   const who = name?.trim() || 'the user';
   const rank = belt ? ` ${name?.trim() ? who : 'They'} ${name?.trim() ? 'is' : 'are'} a ${belt} belt.` : '';
-  return `${name?.trim() ? `${who}'s` : 'A'} personal Brazilian jiu-jitsu notebook: technique cards organised as a position graph, dated notes from classes, videos and rolling, training sessions, areas of the game (some with a plan), and a ranked focus list.${rank}
+  return `${name?.trim() ? `${who}'s` : 'A'} personal Brazilian jiu-jitsu notebook: technique cards organised as a position graph, dated notes from classes, videos and rolling, training sessions, game plans (parts of the game, some with steps that branch on how the opponent reacts), and a ranked focus list.${rank}
 
 How to use it well:
 - Names often arrive through voice transcription and may be misspelled. Tools resolve names fuzzily; check the names they report back and correct with another call if a match looks wrong.
@@ -36,9 +47,9 @@ How to use it well:
 - Say where a note came from with add_note's session (a class, a seminar with its name and instructor, an open mat): "notes from today's class" is {kind: "class"}; "Zen camp seminar by Josh Jones on 2024-02-03" is {kind: "seminar", name: "Zen camp", instructor: "Josh Jones", date: "2024-02-03"}. The same session is reused, not duplicated.
 - Videos and ideas not tried yet go on the To try list (add_note with to_try: true), not on a technique. It's also called "silly Instagram bullshit"; "add this to my SIB" or "something to try" means the same. Reels shared from Instagram land there automatically. Once one has been tried and is worth keeping, file_note keeps it under the technique; get_inbox with to_try: true lists what's waiting.
 - Lab is the short-term working set (get_lab): starred techniques and notes, videos to try, techniques new in the notes, questions for the coach. "Star that" or "flag that" stars whatever "that" is: a note (update_note with starred: true, or add_note with starred: true for a new one) or a technique (save_technique with starred: true). Stars are for what's pertinent now: after 4 weeks they fold away as older stars, and clear_stars unstars old ones (or all). When the coach answers a question, update_note with answered: true and add the answer to the text. The focus list is the long-term guide, over weeks or months.
-- An area is a part of ${who}'s game: a name, a description (the strategy, cues, what success looks like), techniques and notes. It can have a plan: where it starts, then a main line of steps with branches for how the opponent reacts ("if they post the far leg, go to deep half") and alternatives at any step ("shuck pass, or knee cut": plan A, plan B, preferred first; "Or:" when read back, or: true on the step when saved). "System" and "game plan" mean an area with a plan. When ${who} describes one, call save_area with the steps as an outline; get_area reads one back (or lists them all).
-- The focus list is the areas being worked on now, in order; #1 is worked on most. "Add X to my focus" is update_focus add, which puts it at the top unless told otherwise, and makes the area if there isn't one. "I'm done with X for now" or "take X off my focus" is update_focus remove: the area and its plan stay.
-- "Add a note to my X focus" or "file that under X" is add_note with area: X (and the techniques it's about).
+- A game plan is a part of ${who}'s game: a name, a description (the strategy, cues, what success looks like), techniques and notes. It can have steps: where it starts, then a main line with branches for how the opponent reacts ("if they post the far leg, go to deep half") and alternatives at any step ("shuck pass, or knee cut": plan A, plan B, preferred first; "Or:" when read back, or: true on the step when saved). "System", "plan" and "area" (its old name) mean a game plan. When ${who} describes one, call save_game_plan with the steps as an outline; get_game_plan reads one back (or lists them all).
+- The focus list is the game plans being worked on now, in order; #1 is worked on most. "Add X to my focus" is update_focus add, which puts it at the top unless told otherwise, and makes the game plan if there isn't one. "I'm done with X for now" or "take X off my focus" is update_focus remove: the game plan and its steps stay.
+- "Add a note to my X focus" or "file that under X" is add_note with game_plan: X (and the techniques it's about).
 - Replies are often read aloud, so keep confirmations short. "Undo that" means undo_last.`;
 }
 
@@ -117,7 +128,7 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
     'get_technique',
     {
       title: 'Get a technique card',
-      description: 'Full card for one technique: positions, details, mistakes, related techniques, the areas it is part of and recent notes.',
+      description: 'Full card for one technique: positions, details, mistakes, related techniques, the game plans it is part of and recent notes.',
       inputSchema: { name: z.string(), note_limit: z.number().int().min(0).max(50).optional() },
       annotations: readOnly,
     },
@@ -179,8 +190,9 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
           .optional()
           .describe('Not tried yet ("silly Instagram bullshit"): goes on the To try list instead of being filed'),
         starred: flag.optional().describe('Star it: a recent, pertinent note to keep in front of him (shows in Lab)'),
-        area: z.string().optional().describe('An area (or focus item) to file the note under, by its name or a linked technique'),
-        focus: z.string().optional().describe('Older name for area'),
+        game_plan: z.string().optional().describe('A game plan (or focus item) to file the note under, by its name or a linked technique'),
+        area: z.string().optional().describe('Older name for game_plan'),
+        focus: z.string().optional().describe('Older name for game_plan'),
         source: z
           .object({
             kind: z.enum(SOURCE_KINDS).optional(),
@@ -195,8 +207,8 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
     },
     args =>
       run(async () => {
-        const { focus, area, ...rest } = args;
-        return (await addNote(ctx, { ...rest, area: area ?? focus, session: parseSession(args.session), via: 'mcp' })).message;
+        const { focus, area, game_plan, ...rest } = args;
+        return (await addNote(ctx, { ...rest, game_plan: game_plan ?? area ?? focus, session: parseSession(args.session), via: 'mcp' })).message;
       }),
   );
 
@@ -311,11 +323,11 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
     {
       title: 'Get the focus list',
       description:
-        'The ranked focus list: the areas being worked on now, with how recently each got a note. With history=true, the log of what went on and off the list and when (optionally for one item). To read one area, use get_area.',
-      inputSchema: { history: flag.optional(), item: z.string().optional().describe('With history: one area') },
+        'The ranked focus list: the game plans being worked on now, with how recently each got a note. With history=true, the log of what went on and off the list and when (optionally for one item). To read one game plan, use get_game_plan.',
+      inputSchema: { history: flag.optional(), item: z.string().optional().describe('With history: one game plan') },
       annotations: readOnly,
     },
-    args => run(() => (args.history ? focusHistory(ctx, args.item) : args.item ? getArea(ctx, args.item) : getFocus(ctx))),
+    args => run(() => (args.history ? focusHistory(ctx, args.item) : args.item ? getGamePlan(ctx, args.item) : getFocus(ctx))),
   );
 
   server.registerTool(
@@ -323,14 +335,14 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
     {
       title: 'Change the focus list',
       description:
-        'add puts an area on the focus list (default position 1 = top), making the area if none matches; move re-ranks one; remove takes one off (the area, its plan and notes stay). item is the area name or a linked technique name. resume, pause, backlog, complete and drop are older names: resume = add, the rest = remove.',
+        'add puts a game plan on the focus list (default position 1 = top), making the game plan if none matches; move re-ranks one; remove takes one off (the game plan, its steps and notes stay). item is the game plan name or a linked technique name. resume, pause, backlog, complete and drop are older names: resume = add, the rest = remove.',
       inputSchema: {
         action: z.enum([...FOCUS_ACTIONS, ...OLD_FOCUS_ACTIONS]),
         item: z.string(),
         position: z.number().int().min(1).optional(),
-        techniques: z.array(z.string()).optional().describe('Techniques to link to the area'),
-        description: z.string().optional().describe('When add makes a new area: what it is about'),
-        notes: z.array(z.number().int()).optional().describe('Note ids to file under the area'),
+        techniques: z.array(z.string()).optional().describe('Techniques to link to the game plan'),
+        description: z.string().optional().describe('When add makes a new game plan: what it is about'),
+        notes: z.array(z.number().int()).optional().describe('Note ids to file under the game plan'),
       },
       annotations: write,
     },
@@ -338,15 +350,15 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
   );
 
   server.registerTool(
-    'get_area',
+    'get_game_plan',
     {
-      title: 'Get an area',
+      title: 'Get a game plan',
       description:
-        'With name: one area, on focus or not: where its plan starts, each step and branch read as if/then with its technique status and what it hands off to, its techniques and notes. Without name: every area, grouped by where its plan starts.',
-      inputSchema: { name: z.string().optional().describe('Area name, alias or a linked technique') },
+        'With name: one game plan, on focus or not: where it starts, each step and branch read as if/then with its technique status and what it hands off to, its techniques and notes. Without name: every game plan, grouped by where it starts.',
+      inputSchema: { name: z.string().optional().describe('Game plan name, alias or a linked technique') },
       annotations: readOnly,
     },
-    args => run(() => (args.name?.trim() ? getArea(ctx, args.name) : listAreas(ctx))),
+    args => run(() => (args.name?.trim() ? getGamePlan(ctx, args.name) : listGamePlans(ctx))),
   );
 
   // Flat, with a depth on each step: clients holding a simplified copy of a tool's schema handle that
@@ -365,31 +377,43 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
   });
 
   server.registerTool(
-    'save_area',
+    'save_game_plan',
     {
-      title: 'Create or change an area',
+      title: 'Create or change a game plan',
       description:
-        'An area is a part of the game; with a plan it is a system. Changes the area that matches name (or a linked technique), or makes one. steps, when given, replaces the whole plan, in reading order: to change one branch, get_area first and send the full outline back. focus: true puts it on the focus list (at position, default the top); false takes it off. delete: true removes the area for good (its notes and techniques stay). Leave out what should not change.',
+        'A game plan is a part of the game; with steps it is a system. Changes the game plan that matches name (or a linked technique), or makes one. steps, when given, replaces all the steps, in reading order: to change one branch, get_game_plan first and send the full outline back. To reorder ("move the kimura before the guillotine", "put the hip bump first", "make the knee cut plan A"), use move on its own instead of resending steps: a step moves with its alternatives among the steps under the same one. focus: true puts it on the focus list (at position, default the top); false takes it off. delete: true removes the game plan for good (its notes and techniques stay). Leave out what should not change.',
       inputSchema: {
         name: z.string(),
         rename_to: z.string().optional(),
         aliases: z.array(z.string()).optional().describe('Other names it goes by (replaces the list)'),
         description: z.string().optional().describe('Replaces the description; an empty string clears it'),
         techniques: z.array(z.string()).optional().describe('Techniques to link'),
-        start: z.string().optional().describe('Where the plan starts, e.g. "half guard"; an empty string clears it'),
+        start: z.string().optional().describe('Where it starts, e.g. "half guard"; an empty string clears it'),
         start_role: z.enum(ROLES).optional(),
         premise: z.string().optional().describe('The situation it is for, e.g. "top has the underhook and crossface"'),
         steps: z.array(step).max(MAX_STEPS).optional(),
         focus: flag.optional(),
         position: z.number().int().min(1).optional(),
         delete: flag.optional(),
+        move: z
+          .object({
+            step: z.string().describe('The step to move, by what it says to do (or the reaction that leads to it)'),
+            to: z.enum(['up', 'down', 'first', 'last']).optional(),
+            before: z.string().optional().describe('Another step under the same one: put it just before that'),
+            after: z.string().optional().describe('Another step under the same one: put it just after that'),
+            prefer: flag.optional().describe('Make it plan A: first among its alternatives'),
+          })
+          .optional()
+          .describe('Reorder one step; nothing else changes. Give one of to, before, after or prefer.'),
       },
       annotations: write,
     },
     args =>
       run(() => {
-        const { delete: del, ...rest } = args;
-        return del ? deleteArea(ctx, { name: args.name }) : saveArea(ctx, rest);
+        const { delete: del, move, ...rest } = args;
+        if (del) return deleteGamePlan(ctx, { name: args.name });
+        if (move) return moveStepByName(ctx, args.name, move);
+        return saveGamePlan(ctx, rest);
       }),
   );
 
@@ -408,7 +432,7 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
     'review',
     {
       title: 'Training review',
-      description: 'Sessions and notes over the last N days (default 7), most-noted techniques, focus areas with no recent notes, inbox size.',
+      description: 'Sessions and notes over the last N days (default 7), most-noted techniques, game plans on focus with no recent notes, inbox size.',
       inputSchema: { days: z.number().int().min(1).max(365).optional() },
       annotations: readOnly,
     },
@@ -419,7 +443,7 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
     'undo_last',
     {
       title: 'Undo the last change',
-      description: 'Reverses the most recent write (note, technique edit, area or focus change, session or filing).',
+      description: 'Reverses the most recent write (note, technique edit, game plan or focus change, session or filing).',
       inputSchema: {},
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },

@@ -1,8 +1,8 @@
-// "Describe it": Claude outlines a plan from plain words. Claude is a stand-in here, answering with a fixed outline.
+// "Describe it": Claude outlines a game plan from plain words. Claude is a stand-in here, answering with a fixed outline.
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { PlanDraft, TechniqueView } from '../src/shared/api.js';
+import type { GamePlanDraft, TechniqueView } from '../src/shared/api.js';
 import { OWNER_PASSWORD, startServer, type TestServer } from './helpers.js';
 
 const DESCRIBED =
@@ -90,33 +90,33 @@ afterAll(async () => {
   await claude.close();
 });
 
-describe('describing a plan', () => {
+describe('describing a game plan', () => {
   it('outlines it with cards and positions matched, and saves nothing', async () => {
     const api = await signIn(s);
     const jw = (await api<TechniqueView>('POST', '/api/v1/techniques', { name: 'John Wayne sweep', type: 'sweep', role: 'bottom' })).body;
     const shuck = (await api<TechniqueView>('POST', '/api/v1/techniques', { name: 'Shuck', type: 'transition', role: 'bottom' })).body;
-    const areasBefore = (await api('GET', '/api/v1/areas')).body.areas.length;
-    const draft = await api<PlanDraft>('POST', '/api/v1/plans/draft', { text: DESCRIBED });
+    const gamePlansBefore = (await api('GET', '/api/v1/game-plans')).body.gamePlans.length;
+    const draft = await api<GamePlanDraft>('POST', '/api/v1/game-plans/draft', { text: DESCRIBED });
     expect(draft.status).toBe(200);
     // Claude is told this person's cards, so it can use their names.
     expect(claude.systems.at(-1)).toMatch(/Known techniques: .*John Wayne sweep; .*Shuck/);
     const d = draft.body;
     expect(d.start).toMatchObject({ name: 'Side control' });
     expect([d.startRole, d.premise]).toEqual(['bottom', 'Top has the underhook and crossface']);
-    expect(d.plan.map(p => [p.depth, p.or, p.trigger, p.action, p.techniqueId, p.toName])).toEqual([
+    expect(d.steps.map(p => [p.depth, p.or, p.trigger, p.action, p.techniqueId, p.toName])).toEqual([
       [0, false, null, 'John Wayne sweep', jw.id, null], // nothing before it to be an alternative to
       [0, false, null, 'Shuck pass', shuck.id, null],
       [0, true, null, 'Knee lever', null, null], // an alternative has no trigger of its own
       [1, false, 'they post the far leg', 'Go to deep half', null, 'Deep half guard'],
       [2, false, 'they base back', 'Octopus sweeps', null, null], // pulled up from 3 to one below the step before; the blank step left out
     ]);
-    expect(d.plan[0]!.note).toBe('force them to post the underhook hand, win the underhook');
-    expect((await api('GET', '/api/v1/areas')).body.areas).toHaveLength(areasBefore);
+    expect(d.steps[0]!.note).toBe('force them to post the underhook hand, win the underhook');
+    expect((await api('GET', '/api/v1/game-plans')).body.gamePlans).toHaveLength(gamePlansBefore);
   });
 
   it('says so when the server has no Claude', async () => {
     const api = await signIn(plain);
-    const r = await api('POST', '/api/v1/plans/draft', { text: DESCRIBED });
-    expect([r.status, r.body.message]).toEqual([400, "Describing a plan needs Claude, and this server isn't set up with an Anthropic key."]);
+    const r = await api('POST', '/api/v1/game-plans/draft', { text: DESCRIBED });
+    expect([r.status, r.body.message]).toEqual([400, "Describing a game plan needs Claude, and this server isn't set up with an Anthropic key."]);
   });
 });

@@ -19,7 +19,7 @@ export type NoteKind = 'instruction' | 'rolling' | 'drilling' | 'question' | 'id
 export type SourceKind = 'class' | 'youtube' | 'instagram' | 'instructional' | 'book' | 'article' | 'other';
 export type SessionKind = 'class' | 'open_mat' | 'private' | 'seminar' | 'competition' | 'drilling' | 'other';
 export type LinkKind = 'chain' | 'counter' | 'variation' | 'setup' | 'related';
-/** add puts an area on the focus list (at a position, default the top), move re-ranks it, remove takes it off. */
+/** add puts a game plan on the focus list (at a position, default the top), move re-ranks it, remove takes it off. */
 export type FocusAction = 'add' | 'move' | 'remove';
 export type PositionCategory = 'standing' | 'guard' | 'pin' | 'back' | 'leg' | 'transitional';
 
@@ -119,8 +119,8 @@ export interface NoteView {
   answered: boolean;
   /** Photos and videos, kept in Apple Photos; the still is at /api/v1/attachments/:id/thumb. */
   attachments: AttachmentView[];
-  /** Areas the note is filed under. */
-  areas: AreaRef[];
+  /** Game plans the note is filed under. */
+  gamePlans: GamePlanRef[];
   sessionId: number | null;
   /** Where the note came from. */
   session: SessionView | null;
@@ -136,8 +136,8 @@ export interface TechniqueView extends TechniqueRef {
   updatedAt: string;
   edges: EdgeView[];
   links: LinkView[];
-  /** Areas it's part of: linked to the area, or a step in its plan. */
-  areas: AreaRef[];
+  /** Game plans it's part of: linked to the game plan, or one of its steps. */
+  gamePlans: GamePlanRef[];
   notes: NoteView[];
   noteCount: number;
   lastNoteOn: string | null;
@@ -158,8 +158,8 @@ export interface TechniqueListItem extends TechniqueRef {
   edges: { from: string | null; fromRole: Role | null; to: string | null; toRole: Role | null }[];
 }
 
-/** An area, briefly. */
-export interface AreaRef {
+/** A game plan, briefly. */
+export interface GamePlanRef {
   id: number;
   name: string;
   /** Its place on the focus list (1 = top), or null when it's off focus. */
@@ -167,21 +167,22 @@ export interface AreaRef {
 }
 
 /**
- * An area: a part of your game, with a description, techniques and notes, and optionally a plan (where it
- * starts, then steps that branch on how the opponent reacts). An area with a plan is what's called a system.
+ * A game plan: a part of your game, with a description, techniques and notes, and optionally steps (where it
+ * starts, then a main line that branches on how the opponent reacts). A game plan with steps is what's called a
+ * system.
  */
-export interface AreaView extends AreaRef {
+export interface GamePlanView extends GamePlanRef {
   aliases: string[];
   /** What this is about: the strategy, cues, what success looks like. */
   description: string | null;
-  /** Where the plan starts. */
+  /** Where it starts. */
   start: PositionRef | null;
   startRole: Role | null;
-  /** The situation the plan is for, e.g. "top has the underhook and crossface". */
+  /** The situation it's for, e.g. "top has the underhook and crossface". */
   premise: string | null;
-  /** Linked techniques, including every technique a step of the plan is. */
+  /** Linked techniques, including every technique one of its steps is. */
   techniques: TechniqueRef[];
-  /** How many steps the plan has (0 = no plan). */
+  /** How many steps it has (0 = none yet). */
   stepCount: number;
   /** How many notes are linked to it directly. */
   noteCount: number;
@@ -189,8 +190,8 @@ export interface AreaView extends AreaRef {
   lastNoteOn: string | null;
 }
 
-/** One step of a plan, with what follows it. */
-export interface PlanStep {
+/** One step of a game plan, with what follows it. */
+export interface GamePlanStep {
   id: number;
   /**
    * True when this is an alternative to the step before it in the same list ("or": plan B, plan C, in order
@@ -209,17 +210,17 @@ export interface PlanStep {
   toRole: Role | null;
   /** Why, or the cue. */
   note: string | null;
-  /** Other areas whose plan starts where this step leaves you. */
-  continuesIn: AreaRef[];
-  children: PlanStep[];
+  /** Other game plans that start where this step leaves you. */
+  continuesIn: GamePlanRef[];
+  children: GamePlanStep[];
 }
 
-/** One area's page. */
-export interface AreaDetail extends AreaView {
+/** One game plan's page. */
+export interface GamePlanDetail extends GamePlanView {
   /** ISO 8601 */
   createdAt: string;
   /** The main line, in order. */
-  plan: PlanStep[];
+  steps: GamePlanStep[];
   /** Linked notes, newest first. */
   notes: NoteView[];
   /** The newest notes on its techniques that aren't linked to it yet. */
@@ -230,8 +231,8 @@ export interface AreaDetail extends AreaView {
   history: { at: string; event: string; toRank: number | null }[];
 }
 
-/** One line of a plan to save. Steps are flat, in reading order; depth says where each one hangs. */
-export interface PlanStepInput {
+/** One step to save. Steps are flat, in reading order; depth says where each one hangs. */
+export interface GamePlanStepInput {
   /** 0 = main line; 1 = a branch off the nearest step above it at depth 0; and so on. */
   depth: number;
   /** An alternative to the nearest step above it at the same depth (under the same step): plan B. */
@@ -244,15 +245,15 @@ export interface PlanStepInput {
   note?: string | null;
 }
 
-/** A plan Claude outlined from a description, matched to cards and positions, to check before saving. */
-export interface PlanDraft {
+/** A game plan Claude outlined from a description, matched to cards and positions, to check before saving. */
+export interface GamePlanDraft {
   start: { id: number; name: string } | null;
   startRole: Role | null;
   premise: string | null;
-  plan: (PlanStepInput & { techniqueName: string | null; toName: string | null })[];
+  steps: (GamePlanStepInput & { techniqueName: string | null; toName: string | null })[];
 }
 
-export interface AreaCreateInput {
+export interface GamePlanCreateInput {
   name: string;
   description?: string;
   techniqueIds?: number[];
@@ -262,27 +263,42 @@ export interface AreaCreateInput {
   position?: number;
 }
 
-/** Changes to an area; leave out what shouldn't change. */
-export interface AreaPatch {
+/** Changes to a game plan; leave out what shouldn't change. */
+export interface GamePlanPatch {
   name?: string;
   description?: string | null;
   aliases?: string[];
   startPositionId?: number | null;
   startRole?: Role | null;
   premise?: string | null;
-  /** Replaces the whole plan. */
-  plan?: PlanStepInput[];
+  /** Replaces all the steps. */
+  steps?: GamePlanStepInput[];
 }
 
-/** Links to add to or remove from an area. */
-export interface AreaLinksInput {
+/**
+ * Moves a step among the steps under the same parent. A step and its alternatives ("or": plan A, B, C) are a
+ * choice, and move together; with `within: 'choice'`, the step moves among its alternatives instead, changing
+ * which is plan A. Give one of `to`, `before` or `after`.
+ */
+export interface StepMove {
+  /** up and down: one place; first and last: to the end. */
+  to?: 'up' | 'down' | 'first' | 'last';
+  /** Just before this step's choice (a step under the same parent). */
+  before?: number;
+  /** Just after this step's choice. */
+  after?: number;
+  within?: 'choice';
+}
+
+/** Links to add to or remove from a game plan. */
+export interface GamePlanLinksInput {
   add?: { techniqueIds?: number[]; noteIds?: number[] };
   remove?: { techniqueIds?: number[]; noteIds?: number[] };
 }
 
 /** An item on the focus list. */
-export interface FocusItem extends AreaView {
-  /** The same as name, for app builds from before areas. */
+export interface FocusItem extends GamePlanView {
+  /** The same as name, for app builds from before focus items had names (they read label). */
   label: string;
 }
 
@@ -293,10 +309,17 @@ export interface FocusView {
   active: FocusItem[];
 }
 
-/** Every area: the ones on focus first (in order), then the rest by name. */
-export interface AreasView {
+/** A game plan read aloud, for Siri. */
+export interface GamePlanSpeech {
+  /** The game plan it found, if it found one. */
+  gamePlanId: number | null;
+  speech: string;
+}
+
+/** Every game plan: the ones on focus first (in order), then the rest by name. */
+export interface GamePlansView {
   today: string;
-  areas: AreaView[];
+  gamePlans: GamePlanView[];
 }
 
 export interface Starred {
@@ -344,8 +367,8 @@ export interface PositionView {
   from: PositionTechnique[];
   into: PositionTechnique[];
   gaps: { role: Role; type: TechniqueType }[];
-  /** Areas whose plan starts here (in the role shown, if one is). */
-  plans: AreaRef[];
+  /** Game plans that start here (in the role shown, if one is). */
+  gamePlans: GamePlanRef[];
 }
 
 export interface MessageResult {
@@ -366,8 +389,8 @@ export interface NoteCreateInput {
   /** Put it on the To try list instead of filing it. */
   toTry?: boolean;
   starred?: boolean;
-  /** Areas to file the new note under. */
-  areaIds?: number[];
+  /** Game plans to file the new note under. */
+  gamePlanIds?: number[];
 }
 
 export interface NotePatch {
@@ -382,8 +405,8 @@ export interface NotePatch {
   /** Mark a question answered (true) or open again (false). */
   answered?: boolean;
   newTechniques?: { name: string; type: TechniqueType; role?: Role }[];
-  /** The areas the note is filed under (replaces the set). */
-  areaIds?: number[];
+  /** The game plans the note is filed under (replaces the set). */
+  gamePlanIds?: number[];
 }
 
 export interface NoteCreateResult extends MessageResult {

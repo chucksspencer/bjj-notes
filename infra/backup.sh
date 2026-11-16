@@ -58,7 +58,7 @@ trap 'rm -rf "$WORK"' EXIT
 NAME="bjj-notes-$(date -u +%Y-%m-%dT%H%MZ)-pg$MAJOR.dump"
 "$BIN/pg_dump" --format=custom --compress=9 --no-owner --no-privileges --file="$WORK/$NAME" "$DATABASE_URL"
 LIST="$("$BIN/pg_restore" --list "$WORK/$NAME")"
-for table in schema_migrations users notes techniques areas sessions; do
+for table in schema_migrations users notes techniques game_plans sessions; do
   grep -qE "TABLE DATA public $table( |$)" <<<"$LIST" || fail "The backup has no data section for the $table table; not uploading it."
 done
 read -r PEOPLE NOTES TECHNIQUES < <(psql "$DATABASE_URL" -XAt -F ' ' -c \

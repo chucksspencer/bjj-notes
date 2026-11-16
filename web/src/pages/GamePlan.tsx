@@ -1,12 +1,12 @@
 import { useDeferredValue, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import type { AreaDetail, TechniqueRef } from '../../../src/shared/api';
-import { useArea, useDeleteArea, useFocus, useLinkArea, useNotes } from '../api';
-import { AreaEditSheet, FocusControls } from '../components/AreaControls';
+import type { GamePlanDetail, TechniqueRef } from '../../../src/shared/api';
+import { useGamePlan, useDeleteGamePlan, useFocus, useLinkGamePlan, useNotes } from '../api';
+import { GamePlanEditSheet, FocusControls } from '../components/GamePlanControls';
 import { useCapture } from '../components/Capture';
 import { Icon } from '../components/Icon';
 import { NoteItem } from '../components/NoteItem';
-import { PlanSection } from '../components/Plan';
+import { StepsSection } from '../components/Steps';
 import { Sheet } from '../components/Sheet';
 import { TechniquePicker } from '../components/TechniquePicker';
 import { useToast } from '../components/Toast';
@@ -15,12 +15,12 @@ import { friendlyDate, lastNoteText, localToday } from '../lib/format';
 type Editing = null | 'details' | 'techniques' | 'notes' | 'delete';
 
 /**
- * One area: whether it's on focus, what it's about, its plan (if it's a system), its techniques, the notes
+ * One game plan: whether it's on focus, what it's about, its steps (if it's a system), its techniques, the notes
  * filed under it, and its focus history.
  */
-export function Area() {
+export function GamePlan() {
   const id = Number(useParams().id);
-  const item = useArea(id);
+  const item = useGamePlan(id);
   const focus = useFocus();
   const navigate = useNavigate();
   const [editing, setEditing] = useState<Editing>(null);
@@ -58,9 +58,9 @@ export function Area() {
         {v.rank ? `Number ${v.rank} on your focus list` : 'Off focus'}. {lastNoteText(v.lastNoteOn, today)}.
         {v.aliases.length > 0 && <span className="block">Also called {v.aliases.join(', ')}</span>}
       </p>
-      <FocusControls area={v} count={activeCount} />
+      <FocusControls gamePlan={v} count={activeCount} />
 
-      <PlanSection area={v} />
+      <StepsSection gamePlan={v} />
 
       <SectionHead title="Description">
         <button type="button" className="btn ghost small" onClick={() => setEditing('details')}>
@@ -89,7 +89,7 @@ export function Area() {
           ))}
         </div>
       ) : (
-        <p className="section-hint">The technique cards this is about. Their notes show up here, and so do the cards in its plan.</p>
+        <p className="section-hint">The technique cards this is about. Their notes show up here, and so do the cards in its steps.</p>
       )}
 
       <LinkedNotes v={v} today={today} onLink={() => setEditing('notes')} />
@@ -97,10 +97,10 @@ export function Area() {
       <History v={v} today={today} />
 
       <button type="button" className="btn danger delete-link" onClick={() => setEditing('delete')}>
-        Delete area
+        Delete gamePlan
       </button>
 
-      {editing === 'details' && <AreaEditSheet area={v} onClose={close} />}
+      {editing === 'details' && <GamePlanEditSheet gamePlan={v} onClose={close} />}
       {editing === 'techniques' && <TechniquesSheet v={v} onClose={close} />}
       {editing === 'notes' && <LinkNoteSheet v={v} today={today} onClose={close} />}
       {editing === 'delete' && <DeleteSheet v={v} onClose={close} onDeleted={() => navigate('/game', { replace: true })} />}
@@ -119,9 +119,9 @@ function SectionHead({ title, children }: { title: string; children?: ReactNode 
   );
 }
 
-function LinkedNotes({ v, today, onLink }: { v: AreaDetail; today: string; onLink: () => void }) {
+function LinkedNotes({ v, today, onLink }: { v: GamePlanDetail; today: string; onLink: () => void }) {
   const capture = useCapture();
-  const link = useLinkArea();
+  const link = useLinkGamePlan();
   const toast = useToast();
   const ref = { id: v.id, name: v.name, rank: v.rank };
   return (
@@ -134,7 +134,7 @@ function LinkedNotes({ v, today, onLink }: { v: AreaDetail; today: string; onLin
           type="button"
           className="btn ghost small"
           // A note with one technique is filed under it too; with several, the note says which.
-          onClick={() => capture.open({ areas: [ref], techniques: v.techniques.length === 1 ? v.techniques : [] })}
+          onClick={() => capture.open({ gamePlans: [ref], techniques: v.techniques.length === 1 ? v.techniques : [] })}
         >
           Add note
         </button>
@@ -146,7 +146,7 @@ function LinkedNotes({ v, today, onLink }: { v: AreaDetail; today: string; onLin
             key={n.id}
             note={n}
             today={today}
-            hideArea={v.id}
+            hideGamePlan={v.id}
             actions={
               <button
                 type="button"
@@ -166,8 +166,8 @@ function LinkedNotes({ v, today, onLink }: { v: AreaDetail; today: string; onLin
   );
 }
 
-function RelatedNotes({ v, today }: { v: AreaDetail; today: string }) {
-  const link = useLinkArea();
+function RelatedNotes({ v, today }: { v: GamePlanDetail; today: string }) {
+  const link = useLinkGamePlan();
   const toast = useToast();
   if (!v.relatedNotes.length) return null;
   return (
@@ -179,7 +179,7 @@ function RelatedNotes({ v, today }: { v: AreaDetail; today: string }) {
             key={n.id}
             note={n}
             today={today}
-            hideArea={v.id}
+            hideGamePlan={v.id}
             actions={
               <button
                 type="button"
@@ -199,7 +199,7 @@ function RelatedNotes({ v, today }: { v: AreaDetail; today: string }) {
   );
 }
 
-// Paused, backlogged, completed and dropped are from before areas, when the list had statuses.
+// Paused, backlogged, completed and dropped are from before focus items became game plans, when the list had statuses.
 const EVENT_TEXT: Record<string, string> = {
   added: 'On focus',
   moved: 'Moved',
@@ -217,7 +217,7 @@ const localDate = (iso: string) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-function History({ v, today }: { v: AreaDetail; today: string }) {
+function History({ v, today }: { v: GamePlanDetail; today: string }) {
   if (!v.history.length) return null;
   return (
     <>
@@ -236,9 +236,9 @@ function History({ v, today }: { v: AreaDetail; today: string }) {
   );
 }
 
-function TechniquesSheet({ v, onClose }: { v: AreaDetail; onClose: () => void }) {
+function TechniquesSheet({ v, onClose }: { v: GamePlanDetail; onClose: () => void }) {
   const [techniques, setTechniques] = useState<TechniqueRef[]>(v.techniques);
-  const link = useLinkArea();
+  const link = useLinkGamePlan();
   const toast = useToast();
   const before = new Set(v.techniques.map(t => t.id));
   const after = new Set(techniques.map(t => t.id));
@@ -271,13 +271,13 @@ function TechniquesSheet({ v, onClose }: { v: AreaDetail; onClose: () => void })
   );
 }
 
-/** Find a note by its words (or pick a recent one) and file it under the area. */
-function LinkNoteSheet({ v, today, onClose }: { v: AreaDetail; today: string; onClose: () => void }) {
+/** Find a note by its words (or pick a recent one) and file it under the game plan. */
+function LinkNoteSheet({ v, today, onClose }: { v: GamePlanDetail; today: string; onClose: () => void }) {
   const [text, setText] = useState('');
   const q = useDeferredValue(text.trim());
   const searching = q.length >= 2;
   const found = useNotes({ q: searching ? q : undefined, limit: 20 });
-  const link = useLinkArea();
+  const link = useLinkGamePlan();
   const toast = useToast();
   const linked = new Set(v.notes.map(n => n.id));
   const notes = (found.data ?? []).filter(n => !linked.has(n.id));
@@ -317,14 +317,14 @@ function LinkNoteSheet({ v, today, onClose }: { v: AreaDetail; today: string; on
   );
 }
 
-/** Deleting is for good (with Undo): the area, its plan and its focus history. Its notes and cards stay. */
-function DeleteSheet({ v, onClose, onDeleted }: { v: AreaDetail; onClose: () => void; onDeleted: () => void }) {
-  const del = useDeleteArea();
+/** Deleting is for good (with Undo): the game plan, its steps and its focus history. Its notes and cards stay. */
+function DeleteSheet({ v, onClose, onDeleted }: { v: GamePlanDetail; onClose: () => void; onDeleted: () => void }) {
+  const del = useDeleteGamePlan();
   const toast = useToast();
   return (
     <Sheet title={`Delete ${v.name}?`} onClose={onClose}>
       <p>
-        {v.stepCount ? `Its plan (${v.stepCount} step${v.stepCount === 1 ? '' : 's'}) goes with it. ` : ''}
+        {v.stepCount ? `Its ${v.stepCount} step${v.stepCount === 1 ? '' : 's'} go${v.stepCount === 1 ? 'es' : ''} with it. ` : ''}
         Its notes and technique cards stay.
         {v.rank ? ' To stop working on it for now, take it off focus instead.' : ''}
       </p>
@@ -342,7 +342,7 @@ function DeleteSheet({ v, onClose, onDeleted }: { v: AreaDetail; onClose: () => 
           })
         }
       >
-        Delete area
+        Delete gamePlan
       </button>
       <button type="button" className="btn quiet block" style={{ marginTop: 8 }} onClick={onClose}>
         Keep it

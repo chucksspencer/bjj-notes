@@ -110,6 +110,11 @@ Console → Cloud Run → bjj-notes → Logs.
 **Turn things off without a code change.** Set a repository variable, then deploy: `SEARCH_MODEL=off` (search by
 words only; Siri captures stay tidied), `BACKUP_DISABLED=true`, `DEPLOY_DISABLED=true`.
 
+**Legacy routes.** `GET /api/v1/plan` (Siri reading a game plan aloud) is still answered for iPhone builds 1.1
+and older, which ask for it under that name. Once everyone's TestFlight build is 1.2 or newer (TestFlight → the
+app → Builds shows who has what; old builds expire 90 days after upload anyway), delete the "legacy routes"
+block in `src/http/api.ts` and its test in `test/web-api.test.ts`.
+
 **Make voice mode snappier.** The first request after a quiet spell waits a couple of seconds for the server to
 start. `gcloud run services update bjj-notes --region us-central1 --min-instances 1` keeps one running for about
 $10 a month; the next deploy puts it back to 0 unless `infra/gcp-deploy.sh` is changed too.
@@ -144,10 +149,17 @@ $10 a month; the next deploy puts it back to 0 unless `infra/gcp-deploy.sh` is c
   faster: Google's Gemini embedding model through Vertex AI in the same Google Cloud project (no new sign-up,
   pennies) with pgvector in Neon. A Voyage AI version with pgvector is commit `54a76b3` for reference. Avoid
   anything billed by the hour while idle (a Vertex AI endpoint, a GPU).
-- **Focus items.** A title, a description, and links to technique cards and to notes. The old one-line goal was
-  folded into the description (migration 015); the `goal` column stays, unused, only so undo entries from before
-  can still put goals back. A later migration can drop it. Pinning a note to a focus item doesn't file it: a note
-  with no technique still waits in the inbox.
+- **Game plans.** What were focus items (until migration 016) and then areas (until 018): a part of the game with
+  a description, technique cards, notes filed under it, and optionally steps (a system). Being on focus is just a
+  rank. The tree inside is called its *steps*, never its "plan", so nothing reads "the game plan's plan"; "plan A",
+  "plan B" are the alternatives at a step. See [game-plans.md](game-plans.md). The old one-line goal was folded
+  into the description (migration 015); the `goal` column stays, unused, only so undo entries from before can
+  still put goals back. A later migration can drop it.
+- **Old names stay out of the code.** Renames go all the way down (tables, columns, constraints, routes, MCP
+  tools). What must keep working is kept in one place each: old undo entries in `normalizeUndoOp`
+  (`src/services/activity.ts`), old iPhone builds in the "legacy routes" block of `src/http/api.ts`, old MCP
+  argument names next to the new ones (`add_note` still takes `area` and `focus`), old web links as redirects in
+  `web/src/App.tsx`.
 - **Supply chain.** Lockfile, no npm install scripts, signature checks, third-party Actions pinned to commits,
   Dependabot's one-week wait, keyless deploys from `main` only.
 
@@ -159,7 +171,8 @@ before merging. Things to keep true:
 - Every notebook query is scoped to the signed-in person (`forUser`, `uid`); new notebook tables get a `user_id`
   and composite foreign keys.
 - Migrations are new numbered files in `db/migrations`, never edits to old ones.
-- Changes people make can be undone (`activity_log`, the Undo button, "undo that").
+- Changes people make can be undone (`activity_log`, the Undo button, "undo that"). Entries are stored as
+  written; when an undo op's shape changes, teach `normalizeUndoOp` the old one rather than rewriting the log.
 - Names are matched fuzzily, for voice: see `src/resolve.ts`.
 - What the app says is short and plain, in the app's own voice.
 - New behaviour comes with tests: over HTTP for the server, in Chromium for the web app.

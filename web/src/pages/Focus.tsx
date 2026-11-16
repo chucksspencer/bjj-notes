@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import type { AreaView, TechniqueRef } from '../../../src/shared/api';
-import { useAreas, useCreateArea, useFocus, useFocusAction } from '../api';
-import { DescriptionField, FocusControls } from '../components/AreaControls';
+import type { GamePlanView, TechniqueRef } from '../../../src/shared/api';
+import { useGamePlans, useCreateGamePlan, useFocus, useFocusAction } from '../api';
+import { DescriptionField, FocusControls } from '../components/GamePlanControls';
 import { Icon } from '../components/Icon';
 import { Sheet } from '../components/Sheet';
 import { TechniquePicker } from '../components/TechniquePicker';
@@ -10,7 +10,7 @@ import { useToast } from '../components/Toast';
 import { firstLine, isQuiet, lastNoteText } from '../lib/format';
 import { FocusHeader } from './Lab';
 
-/** The focus list: the areas you're working on now, most important first. */
+/** The focus list: the game plans you're working on now, most important first. */
 export function Focus() {
   const focus = useFocus();
   const [open, setOpen] = useState<number | null>(null);
@@ -49,7 +49,7 @@ export function Focus() {
             ))}
           </section>
           <p className="section-hint list-foot">
-            Areas you've moved on from stay in <Link to="/game">Game</Link>, plans and notes included.
+            Game plans you've moved on from stay in <Link to="/game">Game</Link>, steps and notes included.
           </p>
         </>
       )}
@@ -66,7 +66,7 @@ function FocusRow({
   expanded,
   onToggle,
 }: {
-  item: AreaView;
+  item: GamePlanView;
   count: number;
   today: string;
   expanded: boolean;
@@ -74,7 +74,7 @@ function FocusRow({
 }) {
   const quiet = isQuiet(item.lastNoteOn, today);
   const gist = firstLine(item.premise ? `When ${item.premise.charAt(0).toLowerCase()}${item.premise.slice(1)}` : item.description);
-  const meta = [lastNoteText(item.lastNoteOn, today), item.stepCount ? `plan of ${item.stepCount} step${item.stepCount === 1 ? '' : 's'}` : null]
+  const meta = [lastNoteText(item.lastNoteOn, today), item.stepCount ? `${item.stepCount} step${item.stepCount === 1 ? '' : 's'}` : null]
     .filter(Boolean)
     .join(' · ');
 
@@ -84,7 +84,7 @@ function FocusRow({
         {item.rank}
       </span>
       <div>
-        <Link className="row-title" to={`/areas/${item.id}`}>
+        <Link className="row-title" to={`/game-plans/${item.id}`}>
           {item.name}
         </Link>
         <span className="row-meta">{meta}</span>
@@ -93,24 +93,24 @@ function FocusRow({
       <button type="button" className="btn ghost focus-more" aria-expanded={expanded} aria-label={`Change ${item.name}`} onClick={onToggle}>
         <Icon name="more" />
       </button>
-      {expanded && <FocusControls area={item} count={count} compact />}
+      {expanded && <FocusControls gamePlan={item} count={count} compact />}
     </div>
   );
 }
 
-/** Put an area you have back on focus, or start a new one. */
+/** Put a game plan you have back on focus, or start a new one. */
 function AddToFocus({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [techniques, setTechniques] = useState<TechniqueRef[]>([]);
   const [top, setTop] = useState(true);
-  const areas = useAreas();
-  const create = useCreateArea();
+  const gamePlans = useGamePlans();
+  const create = useCreateGamePlan();
   const act = useFocusAction();
   const toast = useToast();
   const navigate = useNavigate();
   const words = name.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const off = (areas.data?.areas ?? []).filter(a => a.rank === null);
+  const off = (gamePlans.data?.gamePlans ?? []).filter(a => a.rank === null);
   const matching = words.length ? off.filter(a => words.every(w => [a.name, ...a.aliases].some(n => n.toLowerCase().includes(w)))) : off;
   const position = top ? 1 : 999;
 
@@ -127,8 +127,8 @@ function AddToFocus({ onClose }: { onClose: () => void }) {
               onSuccess: r => {
                 toast.show(`Added ${label}`, { undoable: true });
                 onClose();
-                // A new area with nothing in it yet: open it, to describe it or give it a plan.
-                if (!r.area.techniques.length && !r.area.description) navigate(`/areas/${r.area.id}`);
+                // A new game plan with nothing in it yet: open it, to describe it or give it steps.
+                if (!r.gamePlan.techniques.length && !r.gamePlan.description) navigate(`/game-plans/${r.gamePlan.id}`);
               },
               onError: toast.error,
             },
@@ -147,13 +147,13 @@ function AddToFocus({ onClose }: { onClose: () => void }) {
         </label>
         {matching.length > 0 && (
           <div className="field">
-            <span className="label">{words.length ? 'Areas you have' : 'Back on focus'}</span>
+            <span className="label">{words.length ? 'Game plans you have' : 'Back on focus'}</span>
             <div className="panel">
               {matching.slice(0, 5).map(a => (
                 <div key={a.id} className="row row-split">
                   <span className="grow">
                     <span className="row-title">{a.name}</span>
-                    {a.stepCount > 0 && <span className="row-meta">Plan of {a.stepCount} steps</span>}
+                    {a.stepCount > 0 && <span className="row-meta">{a.stepCount} step{a.stepCount === 1 ? '' : 's'}</span>}
                   </span>
                   <button
                     type="button"
@@ -193,7 +193,7 @@ function AddToFocus({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <button className="btn block" type="submit" disabled={create.isPending || !(name.trim() || techniques.length)}>
-          Add as a new area
+          Add as a new gamePlan
         </button>
       </form>
     </Sheet>

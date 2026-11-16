@@ -15,24 +15,24 @@ export interface TechniqueSnapshot {
   starred_at?: string | null;
 }
 
-/** An area's place on the focus list. */
+/** A game plan's place on the focus list. */
 export interface FocusSnapshot {
   id: number;
   rank: number | null;
-  /** Only in undo entries written before areas, when the focus list had statuses (only 'active' was ranked). */
+  /** Only in undo entries written before focus items became game plans, when the focus list had statuses (only 'active' was ranked). */
   status?: string;
   /** Only in undo entries written before goals were folded into descriptions. */
   goal?: string | null;
 }
 
-/** Links between an area and techniques or notes. */
-export interface AreaLinkIds {
+/** Links between a game plan and techniques or notes. */
+export interface GamePlanLinkIds {
   techniques: number[];
   notes: number[];
 }
 
-/** An area's own fields, to put back after an edit. */
-export interface AreaSnapshot {
+/** A game plan's own fields, to put back after an edit. */
+export interface GamePlanSnapshot {
   id: number;
   name: string;
   aliases: string[];
@@ -42,7 +42,7 @@ export interface AreaSnapshot {
   premise: string | null;
 }
 
-/** One step of a plan as stored. */
+/** One step of a game plan as stored. */
 export interface StepSnapshot {
   id: number;
   parent_id: number | null;
@@ -58,7 +58,7 @@ export interface StepSnapshot {
 }
 
 export const STEP_SNAPSHOT_SQL = `select id, parent_id, ordinal, alt, trigger, action, technique_id, to_position_id, to_role, note
-  from area_steps where area_id = $1 and user_id = $2 order by id`;
+  from game_plan_steps where game_plan_id = $1 and user_id = $2 order by id`;
 
 /** A session's details, to put back after they were filled in. */
 export interface SessionSnapshot {
@@ -87,14 +87,15 @@ export type UndoOp =
       addedLinks: { from: number; to: number; kind: string }[];
       createdTechniqueIds: number[];
     }
-  /** Puts the focus list back: ranks as they were, minus the events and links the change added (and the area it made). */
+  /** Puts the focus list back: ranks as they were, minus the events the change added (and the game plan it made). */
   | {
       kind: 'restore_focus';
       items: FocusSnapshot[];
-      /** An area the change created. */
-      deleteItemId: number | null;
+      /** A game plan the change created. */
+      deleteGamePlanId: number | null;
       eventIds: number[];
-      addedLinks: { item: number; technique: number }[];
+      /** Technique links the change added (only in entries written before focus items became game plans). */
+      addedLinks?: { gamePlanId: number; techniqueId: number }[];
     }
   /** Undoes log_session: detaches the notes it attached, then deletes the session (if it made it) or restores its details. */
   | { kind: 'delete_session'; sessionId: number; attachedNoteIds: number[]; created?: boolean; before?: SessionSnapshot | null }
@@ -108,8 +109,8 @@ export type UndoOp =
       createdTechniqueIds?: number[];
       /** Photos and videos to link to the note again. */
       attachmentIds?: number[];
-      /** The areas it was filed under (absent in older entries, and when an edit left them alone). Area ids. */
-      focusItemIds?: number[];
+      /** The game plans it was filed under (absent in older entries, and when an edit left them alone). */
+      gamePlanIds?: number[];
     }
   | { kind: 'restore_edge'; edge: EdgeSnapshot }
   | { kind: 'restore_link'; link: LinkSnapshot }
@@ -120,23 +121,26 @@ export type UndoOp =
       edges: EdgeSnapshot[];
       links: LinkSnapshot[];
       noteIds: number[];
-      /** Areas it was linked to (area ids). */
-      focusItemIds: number[];
-      /** Plan steps that were this technique (absent in older entries). */
+      /** Game plans it was linked to. */
+      gamePlanIds: number[];
+      /** Game plan steps that were this technique (absent in older entries). */
       stepIds?: number[];
       /** Notes that went to the inbox because this was their only technique. */
       inboxedNoteIds?: number[];
     }
-  /** Puts an area's title and description back (older entries carry a goal instead). */
-  | { kind: 'restore_focus_label'; itemId: number; label: string; description?: string | null; goal?: string | null }
-  /** Takes back links added to an area and puts back ones removed. */
-  | { kind: 'restore_focus_links'; itemId: number; added: AreaLinkIds; removed: AreaLinkIds }
-  /** Puts an area's fields back, and its plan when `steps` is given. */
-  | { kind: 'restore_area'; before: AreaSnapshot; steps?: StepSnapshot[] }
-  /** Recreates a deleted area with its links, plan and focus history, back at its place on the focus list. */
+  /**
+   * Puts a game plan's title and description back. Only in entries written before focus items became game plans
+   * (the oldest carry a goal instead of a description); newer edits use restore_game_plan.
+   */
+  | { kind: 'restore_game_plan_label'; gamePlanId: number; label: string; description?: string | null; goal?: string | null }
+  /** Takes back links added to a game plan and puts back ones removed. */
+  | { kind: 'restore_game_plan_links'; gamePlanId: number; added: GamePlanLinkIds; removed: GamePlanLinkIds }
+  /** Puts a game plan's fields back, and its steps when `steps` is given. */
+  | { kind: 'restore_game_plan'; before: GamePlanSnapshot; steps?: StepSnapshot[] }
+  /** Recreates a deleted game plan with its links, steps and focus history, back at its place on the focus list. */
   | {
-      kind: 'restore_deleted_area';
-      row: AreaSnapshot & { rank: number | null; goal: string | null; created_at: string; updated_at: string };
+      kind: 'restore_deleted_game_plan';
+      row: GamePlanSnapshot & { rank: number | null; goal: string | null; created_at: string; updated_at: string };
       techniqueIds: number[];
       noteIds: number[];
       steps: StepSnapshot[];
@@ -276,21 +280,21 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
     }
     case 'restore_focus':
       if (op.eventIds.length) {
-        await q.query('delete from focus_events where id = any($1::int[]) and area_id in (select id from areas where user_id = $2)', [
+        await q.query('delete from focus_events where id = any($1::int[]) and game_plan_id in (select id from game_plans where user_id = $2)', [
           op.eventIds,
           me,
         ]);
       }
-      for (const l of op.addedLinks) {
-        await q.query('delete from area_techniques where area_id = $1 and technique_id = $2 and user_id = $3', [l.item, l.technique, me]);
+      for (const l of op.addedLinks ?? []) {
+        await q.query('delete from game_plan_techniques where game_plan_id = $1 and technique_id = $2 and user_id = $3', [l.gamePlanId, l.techniqueId, me]);
       }
-      if (op.deleteItemId !== null) await q.query('delete from areas where id = $1 and user_id = $2', [op.deleteItemId, me]);
+      if (op.deleteGamePlanId !== null) await q.query('delete from game_plans where id = $1 and user_id = $2', [op.deleteGamePlanId, me]);
       // Everything comes off first, so putting ranks back never collides.
-      await q.query('update areas set rank = null where user_id = $1 and rank is not null', [me]);
+      await q.query('update game_plans set rank = null where user_id = $1 and rank is not null', [me]);
       for (const s of op.items) {
         const rank = s.status === undefined || s.status === 'active' ? s.rank : null;
-        await q.query('update areas set rank = $2, updated_at = now() where id = $1 and user_id = $3', [s.id, rank, me]);
-        if (s.goal !== undefined) await q.query('update areas set goal = $2 where id = $1 and user_id = $3', [s.id, s.goal, me]);
+        await q.query('update game_plans set rank = $2, updated_at = now() where id = $1 and user_id = $3', [s.id, rank, me]);
+        if (s.goal !== undefined) await q.query('update game_plans set goal = $2 where id = $1 and user_id = $3', [s.id, s.goal, me]);
       }
       return;
     case 'delete_session':
@@ -338,9 +342,9 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       if (op.attachmentIds?.length) {
         await q.query('update attachments set note_id = $1 where id = any($2::int[]) and user_id = $3', [r.id, op.attachmentIds, me]);
       }
-      if (op.focusItemIds) {
-        await q.query('delete from area_notes where note_id = $1 and user_id = $2', [r.id, me]);
-        for (const f of op.focusItemIds) await insertAreaNote(q, f, r.id);
+      if (op.gamePlanIds) {
+        await q.query('delete from game_plan_notes where note_id = $1 and user_id = $2', [r.id, me]);
+        for (const g of op.gamePlanIds) await insertGamePlanNote(q, g, r.id);
       }
       return;
     }
@@ -376,16 +380,10 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       for (const e of op.edges) await insertEdge(q, e);
       for (const l of op.links) await insertLink(q, l);
       for (const n of op.noteIds) await insertNoteTechnique(q, n, r.id);
-      for (const f of op.focusItemIds) {
-        // Only areas that are still there: one may have been deleted since.
-        await q.query(
-          `insert into area_techniques (area_id, technique_id, user_id)
-           select $1, $2, $3 where exists (select 1 from areas where id = $1 and user_id = $3) on conflict do nothing`,
-          [f, r.id, me],
-        );
-      }
+      // Only game plans that are still there: one may have been deleted since.
+      for (const g of op.gamePlanIds) await insertGamePlanTechnique(q, g, r.id);
       if (op.stepIds?.length) {
-        await q.query('update area_steps set technique_id = $2 where id = any($1::int[]) and user_id = $3', [op.stepIds, r.id, me]);
+        await q.query('update game_plan_steps set technique_id = $2 where id = any($1::int[]) and user_id = $3', [op.stepIds, r.id, me]);
       }
       if (op.inboxedNoteIds?.length) {
         await q.query('update notes set inbox = false where id = any($1::int[]) and user_id = $2', [op.inboxedNoteIds, me]);
@@ -405,58 +403,62 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       }
       return;
     }
-    case 'restore_focus_label':
-      await q.query('update areas set name = $2, updated_at = now() where id = $1 and user_id = $3', [op.itemId, op.label, me]);
+    case 'restore_game_plan_label':
+      await q.query('update game_plans set name = $2, updated_at = now() where id = $1 and user_id = $3', [op.gamePlanId, op.label, me]);
       if (op.description !== undefined) {
-        await q.query('update areas set description = $2 where id = $1 and user_id = $3', [op.itemId, op.description, me]);
+        await q.query('update game_plans set description = $2 where id = $1 and user_id = $3', [op.gamePlanId, op.description, me]);
       }
-      if (op.goal !== undefined) await q.query('update areas set goal = $2 where id = $1 and user_id = $3', [op.itemId, op.goal, me]);
+      if (op.goal !== undefined) await q.query('update game_plans set goal = $2 where id = $1 and user_id = $3', [op.gamePlanId, op.goal, me]);
       return;
-    case 'restore_focus_links':
+    case 'restore_game_plan_links':
       if (op.added.techniques.length) {
-        await q.query('delete from area_techniques where area_id = $1 and technique_id = any($2::int[]) and user_id = $3', [
-          op.itemId,
+        await q.query('delete from game_plan_techniques where game_plan_id = $1 and technique_id = any($2::int[]) and user_id = $3', [
+          op.gamePlanId,
           op.added.techniques,
           me,
         ]);
       }
       if (op.added.notes.length) {
-        await q.query('delete from area_notes where area_id = $1 and note_id = any($2::int[]) and user_id = $3', [op.itemId, op.added.notes, me]);
+        await q.query('delete from game_plan_notes where game_plan_id = $1 and note_id = any($2::int[]) and user_id = $3', [
+          op.gamePlanId,
+          op.added.notes,
+          me,
+        ]);
         await refreshInbox(q, op.added.notes);
       }
-      for (const t of op.removed.techniques) await insertAreaTechnique(q, op.itemId, t);
-      for (const n of op.removed.notes) await insertAreaNote(q, op.itemId, n);
+      for (const t of op.removed.techniques) await insertGamePlanTechnique(q, op.gamePlanId, t);
+      for (const n of op.removed.notes) await insertGamePlanNote(q, op.gamePlanId, n);
       if (op.removed.notes.length) await refreshInbox(q, op.removed.notes);
       return;
-    case 'restore_area': {
+    case 'restore_game_plan': {
       const b = op.before;
       await q.query(
-        `update areas set name = $2, aliases = $3, description = $4, start_position_id = $5, start_role = $6, premise = $7, updated_at = now()
+        `update game_plans set name = $2, aliases = $3, description = $4, start_position_id = $5, start_role = $6, premise = $7, updated_at = now()
          where id = $1 and user_id = $8`,
         [b.id, b.name, b.aliases, b.description, b.start_position_id, b.start_role, b.premise, me],
       );
       if (op.steps) {
-        await q.query('delete from area_steps where area_id = $1 and user_id = $2', [b.id, me]);
+        await q.query('delete from game_plan_steps where game_plan_id = $1 and user_id = $2', [b.id, me]);
         await insertSteps(q, b.id, op.steps);
       }
       return;
     }
-    case 'restore_deleted_area': {
+    case 'restore_deleted_game_plan': {
       const r = op.row;
       // Back at its old place on the focus list: what's there now moves down one.
-      if (r.rank !== null) await q.query('update areas set rank = rank + 1 where user_id = $1 and rank >= $2', [me, r.rank]);
+      if (r.rank !== null) await q.query('update game_plans set rank = rank + 1 where user_id = $1 and rank >= $2', [me, r.rank]);
       await q.query(
-        `insert into areas (id, name, aliases, description, start_position_id, start_role, premise, rank, goal, created_at, updated_at, user_id)
+        `insert into game_plans (id, name, aliases, description, start_position_id, start_role, premise, rank, goal, created_at, updated_at, user_id)
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [r.id, r.name, r.aliases, r.description, r.start_position_id, r.start_role, r.premise, r.rank, r.goal, r.created_at, r.updated_at, me],
       );
-      for (const t of op.techniqueIds) await insertAreaTechnique(q, r.id, t);
-      for (const n of op.noteIds) await insertAreaNote(q, r.id, n);
+      for (const t of op.techniqueIds) await insertGamePlanTechnique(q, r.id, t);
+      for (const n of op.noteIds) await insertGamePlanNote(q, r.id, n);
       await refreshInbox(q, op.noteIds);
       await insertSteps(q, r.id, op.steps);
       for (const e of op.events) {
         await q.query(
-          `insert into focus_events (id, area_id, event, from_status, to_status, from_rank, to_rank, at)
+          `insert into focus_events (id, game_plan_id, event, from_status, to_status, from_rank, to_rank, at)
            values ($1, $2, $3, $4, $5, $6, $7, $8)`,
           [e.id, r.id, e.event, e.from_status, e.to_status, e.from_rank, e.to_rank, e.at],
         );
@@ -473,53 +475,53 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
   }
 }
 
-/** Files a note under an area again, if both are still there. */
-async function insertAreaNote(q: Queryable, areaId: number, noteId: number) {
+/** Files a note under a game plan again, if both are still there. */
+async function insertGamePlanNote(q: Queryable, gamePlanId: number, noteId: number) {
   await q.query(
-    `insert into area_notes (area_id, note_id, user_id)
+    `insert into game_plan_notes (game_plan_id, note_id, user_id)
      select $1, $2, $3
-     where exists (select 1 from areas where id = $1 and user_id = $3) and exists (select 1 from notes where id = $2 and user_id = $3)
+     where exists (select 1 from game_plans where id = $1 and user_id = $3) and exists (select 1 from notes where id = $2 and user_id = $3)
      on conflict do nothing`,
-    [areaId, noteId, uid(q)],
+    [gamePlanId, noteId, uid(q)],
   );
 }
 
-/** Links a technique to an area again, if both are still there. */
-async function insertAreaTechnique(q: Queryable, areaId: number, techniqueId: number) {
+/** Links a technique to a game plan again, if both are still there. */
+async function insertGamePlanTechnique(q: Queryable, gamePlanId: number, techniqueId: number) {
   await q.query(
-    `insert into area_techniques (area_id, technique_id, user_id)
+    `insert into game_plan_techniques (game_plan_id, technique_id, user_id)
      select $1, $2, $3
-     where exists (select 1 from areas where id = $1 and user_id = $3) and exists (select 1 from techniques where id = $2 and user_id = $3)
+     where exists (select 1 from game_plans where id = $1 and user_id = $3) and exists (select 1 from techniques where id = $2 and user_id = $3)
      on conflict do nothing`,
-    [areaId, techniqueId, uid(q)],
+    [gamePlanId, techniqueId, uid(q)],
   );
 }
 
-/** Puts plan steps back with their ids. A step whose technique card has since been deleted keeps its words. */
-export async function insertSteps(q: Queryable, areaId: number, steps: StepSnapshot[]): Promise<void> {
+/** Puts a game plan's steps back with their ids. A step whose technique card has since been deleted keeps its words. */
+export async function insertSteps(q: Queryable, gamePlanId: number, steps: StepSnapshot[]): Promise<void> {
   const me = uid(q);
   for (const st of steps) {
     await q.query(
-      `insert into area_steps (id, area_id, user_id, parent_id, ordinal, trigger, action, technique_id, to_position_id, to_role, note, alt)
+      `insert into game_plan_steps (id, game_plan_id, user_id, parent_id, ordinal, trigger, action, technique_id, to_position_id, to_role, note, alt)
        values ($1, $2, $3, null, $4, $5, $6, (select id from techniques where id = $7 and user_id = $3), $8, $9, $10, $11)`,
-      [st.id, areaId, me, st.ordinal, st.trigger, st.action, st.technique_id, st.to_position_id, st.to_role, st.note, st.alt ?? false],
+      [st.id, gamePlanId, me, st.ordinal, st.trigger, st.action, st.technique_id, st.to_position_id, st.to_role, st.note, st.alt ?? false],
     );
   }
   for (const st of steps) {
-    if (st.parent_id !== null) await q.query('update area_steps set parent_id = $2 where id = $1 and user_id = $3', [st.id, st.parent_id, me]);
+    if (st.parent_id !== null) await q.query('update game_plan_steps set parent_id = $2 where id = $1 and user_id = $3', [st.id, st.parent_id, me]);
   }
 }
 
 /**
- * Notes are in the inbox when nothing files them: no technique and no area. Rechecks the given notes after
- * their areas changed (To try notes stay out of the inbox).
+ * Notes are in the inbox when nothing files them: no technique and no game plan. Rechecks the given notes after
+ * their game plans changed (To try notes stay out of the inbox).
  */
 export async function refreshInbox(q: Queryable, noteIds: number[]): Promise<void> {
   if (!noteIds.length) return;
   await q.query(
     `update notes n set inbox = not n.to_try
        and not exists (select 1 from note_techniques x where x.note_id = n.id)
-       and not exists (select 1 from area_notes y where y.note_id = n.id)
+       and not exists (select 1 from game_plan_notes y where y.note_id = n.id)
      where n.id = any($1::int[]) and n.user_id = $2`,
     [noteIds, uid(q)],
   );
@@ -528,8 +530,8 @@ export async function refreshInbox(q: Queryable, noteIds: number[]): Promise<voi
 /** Closes gaps in the focus list so it runs 1, 2, 3... */
 export async function renumberFocus(q: Queryable): Promise<void> {
   await q.query(
-    `update areas a set rank = r.pos
-     from (select id, row_number() over (order by rank, id)::int as pos from areas where user_id = $1 and rank is not null) r
+    `update game_plans a set rank = r.pos
+     from (select id, row_number() over (order by rank, id)::int as pos from game_plans where user_id = $1 and rank is not null) r
      where a.id = r.id and a.rank is distinct from r.pos`,
     [uid(q)],
   );
@@ -555,9 +557,62 @@ export async function undoLast(db: Db): Promise<string> {
     );
     const row = rows[0];
     if (!row) return 'Nothing to undo.';
-    const op = typeof row.undo === 'string' ? (JSON.parse(row.undo) as UndoOp) : row.undo;
-    await apply(q, op);
+    const stored: unknown = typeof row.undo === 'string' ? JSON.parse(row.undo) : row.undo;
+    await apply(q, normalizeUndoOp(stored));
     await q.query('update activity_log set undone = true where id = $1', [row.id]);
     return `Undid: ${row.summary}`;
   });
+}
+
+type Stored = Record<string, unknown>;
+
+/**
+ * Undo entries are kept as written, so the log holds older shapes too. This is the one place that knows them:
+ * it turns any stored entry into the current shape before it's applied.
+ * - Game plans were "areas" until 018, and "focus items" before 016: restore_area, restore_deleted_area,
+ *   restore_focus_links and restore_focus_label, and the keys itemId, deleteItemId and focusItemIds.
+ * - restore_focus's addedLinks (from before 016) named their ends item and technique.
+ */
+export function normalizeUndoOp(stored: unknown): UndoOp {
+  const op = { ...(stored as Stored) };
+  const rename = (from: string, to: string) => {
+    if (from in op) {
+      if (!(to in op)) op[to] = op[from];
+      delete op[from];
+    }
+  };
+  switch (op.kind) {
+    case 'batch':
+      op.ops = (op.ops as unknown[]).map(normalizeUndoOp);
+      break;
+    case 'restore_area':
+      op.kind = 'restore_game_plan';
+      break;
+    case 'restore_deleted_area':
+      op.kind = 'restore_deleted_game_plan';
+      break;
+    case 'restore_focus_links':
+      op.kind = 'restore_game_plan_links';
+      rename('itemId', 'gamePlanId');
+      break;
+    case 'restore_focus_label':
+      op.kind = 'restore_game_plan_label';
+      rename('itemId', 'gamePlanId');
+      break;
+    case 'restore_focus':
+      rename('deleteItemId', 'deleteGamePlanId');
+      op.deleteGamePlanId ??= null;
+      if (Array.isArray(op.addedLinks)) {
+        op.addedLinks = (op.addedLinks as Stored[]).map(l =>
+          'item' in l ? { gamePlanId: l.item, techniqueId: l.technique } : l,
+        );
+      }
+      break;
+    case 'restore_note':
+    case 'restore_deleted_technique':
+      rename('focusItemIds', 'gamePlanIds');
+      break;
+  }
+  if (op.kind === 'restore_deleted_technique') op.gamePlanIds ??= [];
+  return op as UndoOp;
 }

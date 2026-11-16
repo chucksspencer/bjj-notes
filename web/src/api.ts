@@ -2,11 +2,11 @@ import { QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/re
 import type {
   AccountView,
   ApiTokenView,
-  AreaCreateInput,
-  AreaDetail,
-  AreaLinksInput,
-  AreaPatch,
-  AreasView,
+  GamePlanCreateInput,
+  GamePlanDetail,
+  GamePlanLinksInput,
+  GamePlanPatch,
+  GamePlansView,
   BeltRank,
   FocusAction,
   InviteCheck,
@@ -20,13 +20,14 @@ import type {
   NoteKind,
   NotePatch,
   NoteView,
-  PlanDraft,
+  GamePlanDraft,
   PositionListItem,
   PositionView,
   Role,
   SessionInfo,
   SessionView,
   Status,
+  StepMove,
   TechniqueListItem,
   TechniquePatch,
   TechniqueType,
@@ -82,8 +83,8 @@ export const keys = {
   session: ['session'] as const,
   account: ['account'] as const,
   focus: ['focus'] as const,
-  areas: ['areas'] as const,
-  area: (id: number) => ['area', id] as const,
+  gamePlans: ['game-plans'] as const,
+  gamePlan: (id: number) => ['game-plan', id] as const,
   lab: ['lab'] as const,
   techniques: (f: TechniqueFilters = {}) => ['techniques', f] as const,
   technique: (id: number) => ['technique', id] as const,
@@ -95,7 +96,7 @@ export const keys = {
 
 /** Everything that may show changed data after a write. */
 function invalidateAll(qc: ReturnType<typeof useQueryClient>) {
-  for (const k of ['focus', 'areas', 'area', 'lab', 'techniques', 'technique', 'notes', 'positions', 'position', 'sessions']) {
+  for (const k of ['focus', 'game-plans', 'game-plan', 'lab', 'techniques', 'technique', 'notes', 'positions', 'position', 'sessions']) {
     void qc.invalidateQueries({ queryKey: [k] });
   }
 }
@@ -136,24 +137,24 @@ export function useSignOut() {
   });
 }
 
-// ---------- focus and areas ----------
+// ---------- focus and game plans ----------
 
-/** The focus list: the areas being worked on now, top first. */
+/** The focus list: the game plans being worked on now, top first. */
 export const useFocus = () => useQuery({ queryKey: keys.focus, queryFn: () => request<FocusView>('GET', '/api/v1/focus') });
 
-/** Every area, on focus first. */
-export const useAreas = (enabled = true) => useQuery({ queryKey: keys.areas, queryFn: () => request<AreasView>('GET', '/api/v1/areas'), enabled });
+/** Every game plan, on focus first. */
+export const useGamePlans = (enabled = true) => useQuery({ queryKey: keys.gamePlans, queryFn: () => request<GamePlansView>('GET', '/api/v1/game-plans'), enabled });
 
-/** One area's page. */
-export const useArea = (id: number) => useQuery({ queryKey: keys.area(id), queryFn: () => request<AreaDetail>('GET', `/api/v1/areas/${id}`) });
+/** One game plan's page. */
+export const useGamePlan = (id: number) => useQuery({ queryKey: keys.gamePlan(id), queryFn: () => request<GamePlanDetail>('GET', `/api/v1/game-plans/${id}`) });
 
-/** After a change to an area or the focus list: everything that shows areas may have changed. */
-function afterAreaWrite(qc: ReturnType<typeof useQueryClient>, area?: AreaDetail) {
-  if (area) qc.setQueryData(keys.area(area.id), area);
-  for (const k of ['focus', 'areas', 'area', 'technique', 'notes', 'lab', 'position']) void qc.invalidateQueries({ queryKey: [k] });
+/** After a change to a game plan or the focus list: everything that shows game plans may have changed. */
+function afterGamePlanWrite(qc: ReturnType<typeof useQueryClient>, gamePlan?: GamePlanDetail) {
+  if (gamePlan) qc.setQueryData(keys.gamePlan(gamePlan.id), gamePlan);
+  for (const k of ['focus', 'game-plans', 'game-plan', 'technique', 'notes', 'lab', 'position']) void qc.invalidateQueries({ queryKey: [k] });
 }
 
-/** Put an area on the focus list (add), move it, or take it off (remove). */
+/** Put a game plan on the focus list (add), move it, or take it off (remove). */
 export function useFocusAction() {
   const qc = useQueryClient();
   return useMutation({
@@ -161,52 +162,62 @@ export function useFocusAction() {
       request<MessageResult & { focus: FocusView }>('POST', `/api/v1/focus/${v.id}/actions`, { action: v.action, position: v.position }),
     onSuccess: r => {
       qc.setQueryData(keys.focus, r.focus);
-      afterAreaWrite(qc);
+      afterGamePlanWrite(qc);
     },
   });
 }
 
-export function useCreateArea() {
+export function useCreateGamePlan() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v: AreaCreateInput) => request<MessageResult & { area: AreaDetail }>('POST', '/api/v1/areas', v),
-    onSuccess: r => afterAreaWrite(qc, r.area),
+    mutationFn: (v: GamePlanCreateInput) => request<MessageResult & { gamePlan: GamePlanDetail }>('POST', '/api/v1/game-plans', v),
+    onSuccess: r => afterGamePlanWrite(qc, r.gamePlan),
   });
 }
 
-/** Change an area's fields, or (with plan) its whole plan. */
-export function useEditArea() {
+/** Change a game plan's fields, or (with steps) all its steps. */
+export function useEditGamePlan() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...patch }: AreaPatch & { id: number }) => request<MessageResult & { area: AreaDetail }>('PATCH', `/api/v1/areas/${id}`, patch),
-    onSuccess: r => afterAreaWrite(qc, r.area),
+    mutationFn: ({ id, ...patch }: GamePlanPatch & { id: number }) => request<MessageResult & { gamePlan: GamePlanDetail }>('PATCH', `/api/v1/game-plans/${id}`, patch),
+    onSuccess: r => afterGamePlanWrite(qc, r.gamePlan),
   });
 }
 
-export function useDeleteArea() {
+export function useDeleteGamePlan() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => request<MessageResult>('DELETE', `/api/v1/areas/${id}`),
+    mutationFn: (id: number) => request<MessageResult>('DELETE', `/api/v1/game-plans/${id}`),
     onSuccess: (_r, id) => {
-      qc.removeQueries({ queryKey: keys.area(id) });
-      afterAreaWrite(qc);
+      qc.removeQueries({ queryKey: keys.gamePlan(id) });
+      afterGamePlanWrite(qc);
     },
   });
 }
 
-/** Links techniques or notes to an area, or unlinks them. */
-export function useLinkArea() {
+/** Links techniques or notes to a game plan, or unlinks them. */
+export function useLinkGamePlan() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...links }: AreaLinksInput & { id: number }) =>
-      request<MessageResult & { area: AreaDetail }>('POST', `/api/v1/areas/${id}/links`, links),
-    onSuccess: r => afterAreaWrite(qc, r.area),
+    mutationFn: ({ id, ...links }: GamePlanLinksInput & { id: number }) =>
+      request<MessageResult & { gamePlan: GamePlanDetail }>('POST', `/api/v1/game-plans/${id}/links`, links),
+    onSuccess: r => afterGamePlanWrite(qc, r.gamePlan),
   });
 }
 
-/** Has Claude outline a plan described in plain words. Nothing is saved. */
-export function useDraftPlan() {
-  return useMutation({ mutationFn: (text: string) => request<PlanDraft>('POST', '/api/v1/plans/draft', { text }) });
+/** Moves one step among the steps next to it, or among its alternatives. */
+export function useMoveStep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ gamePlanId, stepId, ...move }: StepMove & { gamePlanId: number; stepId: number }) =>
+      request<MessageResult & { gamePlan: GamePlanDetail }>('POST', `/api/v1/game-plans/${gamePlanId}/steps/${stepId}/move`, move),
+    onSuccess: r => afterGamePlanWrite(qc, r.gamePlan),
+  });
+}
+
+/** Has Claude outline a game plan described in plain words. Nothing is saved. */
+export function useDraftGamePlan() {
+  return useMutation({ mutationFn: (text: string) => request<GamePlanDraft>('POST', '/api/v1/game-plans/draft', { text }) });
 }
 
 // ---------- lab ----------

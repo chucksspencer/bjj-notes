@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type {
-  AreaDetail,
-  AreasView,
+  GamePlanDetail,
+  GamePlansView,
   FocusView,
   LabView,
   NoteCreateResult,
@@ -255,7 +255,7 @@ describe('JSON API', () => {
     let focus = (await api<FocusView>('GET', '/api/v1/focus')).body;
     expect(focus.active.map(f => f.rank)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     const ghostItem = focus.active.find(f => f.name === 'Ghost escape')!;
-    // label is the name again, for app builds from before areas.
+    // label is the name again, for app builds from before focus items had names.
     expect(ghostItem.label).toBe('Ghost escape');
     expect(ghostItem.techniques.map(t => t.name)).toEqual(['Ghost escape']);
     expect(ghostItem.lastNoteOn).toBe('2026-10-12');
@@ -265,29 +265,29 @@ describe('JSON API', () => {
     const off = await api('POST', `/api/v1/focus/${ghostItem.id}/actions`, { action: 'remove' });
     expect(off.body.message).toBe('Taken off focus: Ghost escape.');
     expect(off.body.focus.active.map((f: { rank: number }) => f.rank)).toEqual([1, 2, 3, 4, 5, 6]);
-    // Off focus, the area is still there.
-    const areas = (await api<AreasView>('GET', '/api/v1/areas')).body.areas;
-    expect(areas.find(a => a.id === ghostItem.id)).toMatchObject({ name: 'Ghost escape', rank: null });
-    expect(areas.slice(0, 6).map(a => a.rank)).toEqual([1, 2, 3, 4, 5, 6]);
+    // Off focus, the game plan is still there.
+    const gamePlans = (await api<GamePlansView>('GET', '/api/v1/game-plans')).body.gamePlans;
+    expect(gamePlans.find(a => a.id === ghostItem.id)).toMatchObject({ name: 'Ghost escape', rank: null });
+    expect(gamePlans.slice(0, 6).map(a => a.rank)).toEqual([1, 2, 3, 4, 5, 6]);
     // The older action names still work: resume puts it back.
     const back = await api('POST', `/api/v1/focus/${ghostItem.id}/actions`, { action: 'resume', position: 3 });
     expect(back.body.message).toBe('On focus at #3: Ghost escape.');
     await api('POST', `/api/v1/focus/${ghostItem.id}/actions`, { action: 'pause' });
 
-    const added = await api<{ message: string; area: AreaDetail }>('POST', '/api/v1/areas', { name: 'Kimura from guard', techniqueIds: [], position: 2 });
+    const added = await api<{ message: string; gamePlan: GamePlanDetail }>('POST', '/api/v1/game-plans', { name: 'Kimura from guard', techniqueIds: [], position: 2 });
     expect(added.status).toBe(201);
-    expect(added.body.message).toBe('New area, on focus at #2: Kimura from guard (linked to Kimura lock).');
-    const item = added.body.area;
+    expect(added.body.message).toBe('New game plan, on focus at #2: Kimura from guard (linked to Kimura lock).');
+    const item = added.body.gamePlan;
     expect(item.rank).toBe(2);
-    const renamed = await api('PATCH', `/api/v1/areas/${item.id}`, { name: 'Kimura from closed guard', description: 'Hit it live' });
-    expect(renamed.body.area).toMatchObject({ name: 'Kimura from closed guard', description: 'Hit it live' });
-    expect(renamed.body.area).not.toHaveProperty('goal');
+    const renamed = await api('PATCH', `/api/v1/game-plans/${item.id}`, { name: 'Kimura from closed guard', description: 'Hit it live' });
+    expect(renamed.body.gamePlan).toMatchObject({ name: 'Kimura from closed guard', description: 'Hit it live' });
+    expect(renamed.body.gamePlan).not.toHaveProperty('goal');
     expect((await api('POST', '/api/v1/undo')).body.message).toBe('Undid: edit to "Kimura from guard"');
-    // An area made off focus stays off it.
-    const quiet = await api<{ area: AreaDetail }>('POST', '/api/v1/areas', { name: 'Wrist locks', focus: false });
-    expect(quiet.body.area.rank).toBeNull();
-    expect((await api('POST', '/api/v1/undo')).body.message).toBe('Undid: new area "Wrist locks"');
-    expect((await api('GET', `/api/v1/areas/${quiet.body.area.id}`)).status).toBe(404);
+    // A game plan made off focus stays off it.
+    const quiet = await api<{ gamePlan: GamePlanDetail }>('POST', '/api/v1/game-plans', { name: 'Wrist locks', focus: false });
+    expect(quiet.body.gamePlan.rank).toBeNull();
+    expect((await api('POST', '/api/v1/undo')).body.message).toBe('Undid: new game plan "Wrist locks"');
+    expect((await api('GET', `/api/v1/game-plans/${quiet.body.gamePlan.id}`)).status).toBe(404);
     expect((await api('POST', `/api/v1/focus/99999/actions`, { action: 'remove' })).status).toBe(404);
   });
 
@@ -510,21 +510,21 @@ describe('JSON API', () => {
     await api('POST', '/api/v1/notes/delete', { ids: [n1.id, n2.id, both.id, ac.id] });
   });
 
-  it('gives each area its own page, with a description and linked notes', async () => {
-    const item = async (id: number) => (await api<AreaDetail>('GET', `/api/v1/areas/${id}`)).body;
+  it('gives each game plan its own page, with a description and linked notes', async () => {
+    const item = async (id: number) => (await api<GamePlanDetail>('GET', `/api/v1/game-plans/${id}`)).body;
     const undo = async () => (await api('POST', '/api/v1/undo')).body.message as string;
 
-    // A note with no technique, filed under a new area from the start (an id that isn't a note is skipped).
+    // A note with no technique, filed under a new game plan from the start (an id that isn't a note is skipped).
     const calm = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Long exhale when pinned.', date: '2026-10-20' })).body.note;
     expect(calm.inbox).toBe(true);
-    const created = await api<{ message: string; area: AreaDetail }>('POST', '/api/v1/areas', {
+    const created = await api<{ message: string; gamePlan: GamePlanDetail }>('POST', '/api/v1/game-plans', {
       name: 'Breathe and stay calm',
       description: 'Slow down under pressure.\nGoal: no panic taps.',
       noteIds: [calm.id, 999_999],
       position: 1,
     });
-    expect(created.body.message).toBe('New area, on focus at #1: Breathe and stay calm (linked 1 note; not linked to a technique card yet).');
-    expect(created.body.area).toMatchObject({
+    expect(created.body.message).toBe('New game plan, on focus at #1: Breathe and stay calm (linked 1 note; not linked to a technique card yet).');
+    expect(created.body.gamePlan).toMatchObject({
       name: 'Breathe and stay calm',
       rank: 1,
       description: 'Slow down under pressure.\nGoal: no panic taps.',
@@ -533,36 +533,36 @@ describe('JSON API', () => {
       noteCount: 1,
       lastNoteOn: '2026-10-20', // a linked note counts, with no technique in common
     });
-    const id = created.body.area.id;
+    const id = created.body.gamePlan.id;
 
     let page = await item(id);
-    expect(page).toMatchObject({ rank: 1, plan: [], relatedNotes: [], relatedCount: 0 });
+    expect(page).toMatchObject({ rank: 1, steps: [], relatedNotes: [], relatedCount: 0 });
     expect(page.notes.map(n => n.id)).toEqual([calm.id]);
-    expect(page.notes[0]!.areas).toEqual([{ id, name: 'Breathe and stay calm', rank: 1 }]);
+    expect(page.notes[0]!.gamePlans).toEqual([{ id, name: 'Breathe and stay calm', rank: 1 }]);
     expect(page.history.map(h => [h.event, h.toRank])).toEqual([['added', 1]]);
     expect(Date.parse(page.createdAt)).not.toBeNaN();
-    expect((await api('GET', '/api/v1/areas/999999')).status).toBe(404);
-    // Filed under an area, the note is filed: it's out of the inbox.
+    expect((await api('GET', '/api/v1/game-plans/999999')).status).toBe(404);
+    // Filed under a game plan, the note is filed: it's out of the inbox.
     expect((await api<NoteView[]>('GET', '/api/v1/notes?inbox=1&limit=200')).body.map(n => n.id)).not.toContain(calm.id);
 
     // Link a technique: its notes show as related until they're linked too.
     const ghostNotes = (await api<TechniqueView>('GET', `/api/v1/techniques/${ghost.id}`)).body.noteCount;
-    let linked = await api('POST', `/api/v1/areas/${id}/links`, { add: { techniqueIds: [ghost.id] } });
+    let linked = await api('POST', `/api/v1/game-plans/${id}/links`, { add: { techniqueIds: [ghost.id] } });
     expect(linked.body.message).toBe('Linked Ghost escape on Breathe and stay calm.');
-    page = linked.body.area;
+    page = linked.body.gamePlan;
     expect(page.techniques.map(t => t.name)).toEqual(['Ghost escape']);
     expect(page.relatedCount).toBe(ghostNotes);
     const pin = page.relatedNotes[0]!;
-    linked = await api('POST', `/api/v1/areas/${id}/links`, { add: { noteIds: [pin.id] } });
+    linked = await api('POST', `/api/v1/game-plans/${id}/links`, { add: { noteIds: [pin.id] } });
     expect(linked.body.message).toBe('Linked 1 note on Breathe and stay calm.');
-    expect(linked.body.area.notes.map((n: NoteView) => n.id).sort()).toEqual([calm.id, pin.id].sort());
-    expect(linked.body.area.relatedCount).toBe(ghostNotes - 1);
-    expect(linked.body.area.noteCount).toBe(2);
-    expect((await api('POST', `/api/v1/areas/${id}/links`, { add: { noteIds: [pin.id] } })).body.message).toBe('Nothing changed on Breathe and stay calm.');
-    expect((await api<TechniqueView>('GET', `/api/v1/techniques/${ghost.id}`)).body.areas.map(a => a.name)).toContain('Breathe and stay calm');
+    expect(linked.body.gamePlan.notes.map((n: NoteView) => n.id).sort()).toEqual([calm.id, pin.id].sort());
+    expect(linked.body.gamePlan.relatedCount).toBe(ghostNotes - 1);
+    expect(linked.body.gamePlan.noteCount).toBe(2);
+    expect((await api('POST', `/api/v1/game-plans/${id}/links`, { add: { noteIds: [pin.id] } })).body.message).toBe('Nothing changed on Breathe and stay calm.');
+    expect((await api<TechniqueView>('GET', `/api/v1/techniques/${ghost.id}`)).body.gamePlans.map(a => a.name)).toContain('Breathe and stay calm');
 
     // Unlinking, and undoing each step.
-    linked = await api('POST', `/api/v1/areas/${id}/links`, { remove: { noteIds: [pin.id], techniqueIds: [ghost.id] } });
+    linked = await api('POST', `/api/v1/game-plans/${id}/links`, { remove: { noteIds: [pin.id], techniqueIds: [ghost.id] } });
     expect(linked.body.message).toBe('Unlinked Ghost escape, 1 note on Breathe and stay calm.');
     expect(await undo()).toBe('Undid: links on "Breathe and stay calm"');
     expect((await item(id)).notes).toHaveLength(2);
@@ -572,24 +572,24 @@ describe('JSON API', () => {
     expect([page.techniques, page.notes.map(n => n.id)]).toEqual([[], [calm.id]]);
 
     // The name, aliases and description, undoably; an empty description clears it.
-    let edited = await api('PATCH', `/api/v1/areas/${id}`, { description: 'Exhale.', aliases: ['calm', ' calm ', 'breathing'] });
-    expect(edited.body.area).toMatchObject({ description: 'Exhale.', aliases: ['calm', 'breathing'] });
+    let edited = await api('PATCH', `/api/v1/game-plans/${id}`, { description: 'Exhale.', aliases: ['calm', ' calm ', 'breathing'] });
+    expect(edited.body.gamePlan).toMatchObject({ description: 'Exhale.', aliases: ['calm', 'breathing'] });
     expect(edited.body.message).toBe('Breathe and stay calm: aliases updated; description updated.');
     expect(await undo()).toBe('Undid: edit to "Breathe and stay calm"');
     expect(await item(id)).toMatchObject({ description: 'Slow down under pressure.\nGoal: no panic taps.', aliases: [] });
-    edited = await api('PATCH', `/api/v1/areas/${id}`, { name: 'Stay calm', description: '' });
-    expect(edited.body.area).toMatchObject({ name: 'Stay calm', description: null });
+    edited = await api('PATCH', `/api/v1/game-plans/${id}`, { name: 'Stay calm', description: '' });
+    expect(edited.body.gamePlan).toMatchObject({ name: 'Stay calm', description: null });
     await undo();
 
-    // From the note's side: its areas are replaced, undoably. With none left, it's back in the inbox.
-    let note = (await api<NoteView>('PATCH', `/api/v1/notes/${calm.id}`, { areaIds: [] })).body;
-    expect([note.areas, note.inbox]).toEqual([[], true]);
+    // From the note's side: its game plans are replaced, undoably. With none left, it's back in the inbox.
+    let note = (await api<NoteView>('PATCH', `/api/v1/notes/${calm.id}`, { gamePlanIds: [] })).body;
+    expect([note.gamePlans, note.inbox]).toEqual([[], true]);
     expect((await item(id)).noteCount).toBe(0);
     await undo();
     expect((await item(id)).notes.map(n => n.id)).toEqual([calm.id]);
-    note = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Breathe through the nose.', techniqueIds: [ghost.id], areaIds: [id, 999_999] }))
+    note = (await api<NoteCreateResult>('POST', '/api/v1/notes', { text: 'Breathe through the nose.', techniqueIds: [ghost.id], gamePlanIds: [id, 999_999] }))
       .body.note;
-    expect(note.areas.map(f => f.id)).toEqual([id]);
+    expect(note.gamePlans.map(f => f.id)).toEqual([id]);
 
     // Deleting a note takes its link with it; undoing the delete brings both back.
     await api('DELETE', `/api/v1/notes/${calm.id}`);
@@ -597,30 +597,41 @@ describe('JSON API', () => {
     expect(await undo()).toBe(`Undid: deleting note #${calm.id}`);
     expect((await item(id)).notes.map(n => n.id).sort()).toEqual([calm.id, note.id].sort());
 
-    // Undo entries written before areas (and before goals were folded into descriptions) still work.
+    // Undo entries written before focus items became game plans (and before goals were folded into descriptions) still work.
     const undoOld = async (op: object) => {
       await s.db.query("insert into activity_log (action, summary, undo, user_id) values ('edit_focus', 'old entry', $1, 1)", [JSON.stringify(op)]);
       return undo();
     };
     expect(await undoOld({ kind: 'restore_focus_label', itemId: id, label: 'Old title', goal: 'Old goal' })).toBe('Undid: old entry');
-    let row = (await s.db.query<{ name: string; goal: string | null; description: string | null }>('select name, goal, description from areas where id = $1', [id]))
+    let row = (await s.db.query<{ name: string; goal: string | null; description: string | null }>('select name, goal, description from game_plans where id = $1', [id]))
       .rows[0]!;
     expect(row).toEqual({ name: 'Old title', goal: 'Old goal', description: 'Slow down under pressure.\nGoal: no panic taps.' });
     // An old snapshot had every item on the list with its status: only active ones were ranked.
     const listed = (await api<FocusView>('GET', '/api/v1/focus')).body.active;
     const old = listed.map(f => (f.id === id ? { id, status: 'paused', rank: null, goal: null } : { id: f.id, status: 'active', rank: f.rank }));
     expect(await undoOld({ kind: 'restore_focus', items: old, deleteItemId: null, eventIds: [], addedLinks: [] })).toBe('Undid: old entry');
-    row = (await s.db.query<{ name: string; goal: string | null; description: string | null }>('select name, goal, description from areas where id = $1', [id])).rows[0]!;
+    row = (await s.db.query<{ name: string; goal: string | null; description: string | null }>('select name, goal, description from game_plans where id = $1', [id])).rows[0]!;
     expect(row.goal).toBeNull();
     expect((await item(id)).rank).toBeNull();
     expect((await api<FocusView>('GET', '/api/v1/focus')).body.active.map(f => f.id)).toEqual(listed.filter(f => f.id !== id).map(f => f.id));
+    // And entries written while game plans were called areas (restore_area, restore_focus_links with itemId).
+    await api('POST', `/api/v1/game-plans/${id}/links`, { add: { techniqueIds: [ghost.id] } });
+    const areaEra = {
+      kind: 'batch',
+      ops: [
+        { kind: 'restore_area', before: { id, name: 'Area-era name', aliases: [], description: null, start_position_id: null, start_role: null, premise: null } },
+        { kind: 'restore_focus_links', itemId: id, added: { techniques: [ghost.id], notes: [] }, removed: { techniques: [], notes: [] } },
+      ],
+    };
+    expect(await undoOld(areaEra)).toBe('Undid: old entry');
+    expect(await item(id)).toMatchObject({ name: 'Area-era name', techniques: [] });
 
     // Tidy up for later tests.
     await api('POST', '/api/v1/notes/delete', { ids: [calm.id, note.id] });
-    await api('DELETE', `/api/v1/areas/${id}`);
+    await api('DELETE', `/api/v1/game-plans/${id}`);
   });
 
-  it('keeps a plan on an area: steps that branch, linked to cards, handing off to other plans', async () => {
+  it('keeps steps on a game plan: a main line that branches, linked to cards, handing off to other game plans', async () => {
     const undo = async () => (await api('POST', '/api/v1/undo')).body.message as string;
     const pos = async (slug: string) => (await api<PositionView>('GET', `/api/v1/positions/${slug}`)).body.position.id;
     const card = async (name: string, type: string) =>
@@ -630,70 +641,74 @@ describe('JSON API', () => {
     const half = await pos('half-guard');
     const deep = await pos('deep-half');
 
-    const deepPlan = (await api<{ area: AreaDetail }>('POST', '/api/v1/areas', { name: 'Deep half sweeps', focus: false })).body.area;
-    await api('PATCH', `/api/v1/areas/${deepPlan.id}`, { startPositionId: deep, startRole: 'bottom' });
-    const area = (await api<{ area: AreaDetail }>('POST', '/api/v1/areas', { name: 'Bottom half: winning the underhook' })).body.area;
-    const plan = [
+    const deepHalf = (await api<{ gamePlan: GamePlanDetail }>('POST', '/api/v1/game-plans', { name: 'Deep half sweeps', focus: false })).body.gamePlan;
+    await api('PATCH', `/api/v1/game-plans/${deepHalf.id}`, { startPositionId: deep, startRole: 'bottom' });
+    const gamePlan = (await api<{ gamePlan: GamePlanDetail }>('POST', '/api/v1/game-plans', { name: 'Bottom half: winning the underhook' })).body.gamePlan;
+    const steps = [
       { depth: 0, action: 'John Wayne sweep', techniqueId: jw.id, note: 'Force them to post the underhook hand' },
       { depth: 0, action: 'Shuck', techniqueId: shuck.id },
       { depth: 1, trigger: 'they post the far leg', action: 'Go to deep half', toPositionId: deep, toRole: 'bottom' },
       { depth: 1, trigger: 'they base back', action: 'Octopus sweeps' },
     ];
-    const saved = await api<{ message: string; area: AreaDetail }>('PATCH', `/api/v1/areas/${area.id}`, {
+    const saved = await api<{ message: string; gamePlan: GamePlanDetail }>('PATCH', `/api/v1/game-plans/${gamePlan.id}`, {
       startPositionId: half,
       startRole: 'bottom',
       premise: 'Top has the underhook and crossface',
-      plan,
+      steps,
     });
-    expect(saved.body.message).toBe('Bottom half: winning the underhook: start updated; premise updated; plan saved (4 steps).');
-    const v = saved.body.area;
+    expect(saved.body.message).toBe('Bottom half: winning the underhook: start updated; premise updated; steps saved (4 steps).');
+    const v = saved.body.gamePlan;
     expect(v).toMatchObject({ start: { slug: 'half-guard' }, startRole: 'bottom', premise: 'Top has the underhook and crossface', stepCount: 4 });
-    expect(v.plan.map(st => [st.action, st.technique?.name ?? null, st.children.length])).toEqual([
+    expect(v.steps.map(st => [st.action, st.technique?.name ?? null, st.children.length])).toEqual([
       ['John Wayne sweep', 'John Wayne sweep', 0],
       ['Shuck', 'Shuck', 2],
     ]);
-    expect(v.plan[1]!.children.map(c => [c.trigger, c.action, c.to?.slug ?? null])).toEqual([
+    expect(v.steps[1]!.children.map(c => [c.trigger, c.action, c.to?.slug ?? null])).toEqual([
       ['they post the far leg', 'Go to deep half', 'deep-half'],
       ['they base back', 'Octopus sweeps', null],
     ]);
-    // The step into deep half hands off to the plan that starts there.
-    expect(v.plan[1]!.children[0]!.continuesIn).toEqual([{ id: deepPlan.id, name: 'Deep half sweeps', rank: null }]);
-    // Step cards are linked to the area, so their notes show up on it.
+    // The step into deep half hands off to the game plan that starts there.
+    expect(v.steps[1]!.children[0]!.continuesIn).toEqual([{ id: deepHalf.id, name: 'Deep half sweeps', rank: null }]);
+    // Step cards are linked to the game plan, so their notes show up on it.
     expect(v.techniques.map(t => t.name)).toEqual(['John Wayne sweep', 'Shuck']);
-    expect((await api<TechniqueView>('GET', `/api/v1/techniques/${shuck.id}`)).body.areas.map(a => a.name)).toEqual(['Bottom half: winning the underhook']);
-    expect((await api<PositionView>('GET', '/api/v1/positions/half-guard?role=bottom')).body.plans.map(a => a.name)).toEqual([
+    expect((await api<TechniqueView>('GET', `/api/v1/techniques/${shuck.id}`)).body.gamePlans.map(a => a.name)).toEqual(['Bottom half: winning the underhook']);
+    expect((await api<PositionView>('GET', '/api/v1/positions/half-guard?role=bottom')).body.gamePlans.map(a => a.name)).toEqual([
       'Bottom half: winning the underhook',
     ]);
-    expect((await api<PositionView>('GET', '/api/v1/positions/half-guard?role=top')).body.plans).toEqual([]);
+    expect((await api<PositionView>('GET', '/api/v1/positions/half-guard?role=top')).body.gamePlans).toEqual([]);
 
-    // Siri reads a plan aloud, found by name or by where it starts.
-    const said = (q: string) => api('GET', `/api/v1/plan?q=${encodeURIComponent(q)}`).then(r => r.body.speech as string);
+    // Siri reads a game plan aloud, found by name or by where it starts.
+    const said = (q: string) => api('GET', `/api/v1/game-plans/speech?q=${encodeURIComponent(q)}`).then(r => r.body.speech as string);
     expect(await said('winning the underhook')).toBe(
       'Bottom half: winning the underhook. When top has the underhook and crossface: John Wayne sweep, to force them to post the underhook hand. Then shuck. If they post the far leg, go to deep half. If they base back, octopus sweeps.',
     );
     expect(await said('bottom half guard')).toMatch(/^Bottom half: winning the underhook\./);
-    expect(await said('half guard top')).toBe("You don't have a plan from Half guard on top yet.");
-    expect(await said('qwxz zzyq')).toBe("I couldn't find a plan called qwxz zzyq.");
+    expect(await said('half guard top')).toBe("You don't have a game plan from Half guard on top yet.");
+    expect(await said('qwxz zzyq')).toBe("I couldn't find a game plan called qwxz zzyq.");
+    // Installed iPhone builds (1.1 and older) still ask the old address, and read areaId.
+    const legacy = (await api('GET', `/api/v1/plan?q=${encodeURIComponent('winning the underhook')}`)).body;
+    expect(legacy).toMatchObject({ gamePlanId: gamePlan.id, areaId: gamePlan.id });
+    expect(legacy.speech).toMatch(/^Bottom half: winning the underhook\./);
 
     // Alternatives ("or"): plan B for a step, after it and its branches, at the same depth. Undone with the rest.
-    const withOr = await api<{ message: string; area: AreaDetail }>('PATCH', `/api/v1/areas/${area.id}`, {
-      plan: [
-        plan[0],
+    const withOr = await api<{ message: string; gamePlan: GamePlanDetail }>('PATCH', `/api/v1/game-plans/${gamePlan.id}`, {
+      steps: [
+        steps[0],
         { depth: 0, or: true, trigger: 'ignored', action: 'Knee lever' },
         { depth: 1, action: 'Come up on the single' },
-        plan[1],
-        plan[2],
+        steps[1],
+        steps[2],
         { depth: 1, or: true, action: 'Underhook to dogfight' },
-        plan[3],
+        steps[3],
       ],
     });
-    expect(withOr.body.message).toBe('Bottom half: winning the underhook: plan saved (7 steps).');
-    expect(withOr.body.area.plan.map(st => [st.or, st.trigger, st.action, st.children.length])).toEqual([
+    expect(withOr.body.message).toBe('Bottom half: winning the underhook: steps saved (7 steps).');
+    expect(withOr.body.gamePlan.steps.map(st => [st.or, st.trigger, st.action, st.children.length])).toEqual([
       [false, null, 'John Wayne sweep', 0],
       [true, null, 'Knee lever', 1],
       [false, null, 'Shuck', 3],
     ]);
-    expect(withOr.body.area.plan[2]!.children.map(c => [c.or, c.trigger, c.action])).toEqual([
+    expect(withOr.body.gamePlan.steps[2]!.children.map(c => [c.or, c.trigger, c.action])).toEqual([
       [false, 'they post the far leg', 'Go to deep half'],
       [true, null, 'Underhook to dogfight'],
       [false, 'they base back', 'Octopus sweeps'],
@@ -702,50 +717,139 @@ describe('JSON API', () => {
       'Bottom half: winning the underhook. When top has the underhook and crossface: John Wayne sweep, to force them to post the underhook hand. Or knee lever. Then come up on the single. Then shuck. If they post the far leg, go to deep half. Or underhook to dogfight. If they base back, octopus sweeps.',
     );
     for (const orphan of [[{ depth: 0, or: true, action: 'A' }], [{ depth: 0, action: 'A' }, { depth: 1, or: true, action: 'B' }]]) {
-      const r = await api('PATCH', `/api/v1/areas/${area.id}`, { plan: orphan });
+      const r = await api('PATCH', `/api/v1/game-plans/${gamePlan.id}`, { steps: orphan });
       expect([r.status, r.body.message]).toEqual([400, `Step ${orphan.length}: "or" needs a step before it at the same level to be an alternative to.`]);
     }
     expect(await undo()).toBe('Undid: edit to "Bottom half: winning the underhook"');
-    expect((await api<AreaDetail>('GET', `/api/v1/areas/${area.id}`)).body.plan.map(st => [st.or, st.action])).toEqual([
+    expect((await api<GamePlanDetail>('GET', `/api/v1/game-plans/${gamePlan.id}`)).body.steps.map(st => [st.or, st.action])).toEqual([
       [false, 'John Wayne sweep'],
       [false, 'Shuck'],
     ]);
 
     // A bad outline is refused whole.
-    const bad = await api('PATCH', `/api/v1/areas/${area.id}`, { plan: [{ depth: 1, action: 'Orphan' }] });
+    const bad = await api('PATCH', `/api/v1/game-plans/${gamePlan.id}`, { steps: [{ depth: 1, action: 'Orphan' }] });
     expect([bad.status, bad.body.message]).toEqual([400, 'The first step must be on the main line (depth 0).']);
-    const jump = await api('PATCH', `/api/v1/areas/${area.id}`, { plan: [{ depth: 0, action: 'A' }, { depth: 2, action: 'B' }] });
+    const jump = await api('PATCH', `/api/v1/game-plans/${gamePlan.id}`, { steps: [{ depth: 0, action: 'A' }, { depth: 2, action: 'B' }] });
     expect(jump.body.message).toBe('Step 2 is 2 levels deeper than the step before it.');
 
-    // Undo puts the plan back as it was (empty), and takes back the card links the plan made.
+    // Undo puts the steps back as they were (none), and takes back the card links the steps made.
     expect(await undo()).toBe('Undid: edit to "Bottom half: winning the underhook"');
-    const before = (await api<AreaDetail>('GET', `/api/v1/areas/${area.id}`)).body;
-    expect(before).toMatchObject({ plan: [], start: null, premise: null, techniques: [] });
-    await api('PATCH', `/api/v1/areas/${area.id}`, { startPositionId: half, startRole: 'bottom', plan });
+    const before = (await api<GamePlanDetail>('GET', `/api/v1/game-plans/${gamePlan.id}`)).body;
+    expect(before).toMatchObject({ steps: [], start: null, premise: null, techniques: [] });
+    await api('PATCH', `/api/v1/game-plans/${gamePlan.id}`, { startPositionId: half, startRole: 'bottom', steps });
 
     // Deleting a card keeps its step's words; undoing the delete links it again.
     await api('DELETE', `/api/v1/techniques/${shuck.id}`);
-    let now = (await api<AreaDetail>('GET', `/api/v1/areas/${area.id}`)).body;
-    expect([now.plan[1]!.action, now.plan[1]!.technique]).toEqual(['Shuck', null]);
+    let now = (await api<GamePlanDetail>('GET', `/api/v1/game-plans/${gamePlan.id}`)).body;
+    expect([now.steps[1]!.action, now.steps[1]!.technique]).toEqual(['Shuck', null]);
     await undo();
-    now = (await api<AreaDetail>('GET', `/api/v1/areas/${area.id}`)).body;
-    expect(now.plan[1]!.technique?.id).toBe(shuck.id);
+    now = (await api<GamePlanDetail>('GET', `/api/v1/game-plans/${gamePlan.id}`)).body;
+    expect(now.steps[1]!.technique?.id).toBe(shuck.id);
 
-    // Deleting the area takes it off focus; undo brings back its plan, links and place on the list.
+    // Deleting the game plan takes it off focus; undo brings back its steps, links and place on the list.
     const rank = now.rank;
-    expect((await api('DELETE', `/api/v1/areas/${area.id}`)).body.message).toBe('Deleted Bottom half: winning the underhook.');
-    expect((await api<FocusView>('GET', '/api/v1/focus')).body.active.map(f => f.id)).not.toContain(area.id);
+    expect((await api('DELETE', `/api/v1/game-plans/${gamePlan.id}`)).body.message).toBe('Deleted Bottom half: winning the underhook.');
+    expect((await api<FocusView>('GET', '/api/v1/focus')).body.active.map(f => f.id)).not.toContain(gamePlan.id);
     expect(await undo()).toBe('Undid: delete "Bottom half: winning the underhook"');
-    now = (await api<AreaDetail>('GET', `/api/v1/areas/${area.id}`)).body;
+    now = (await api<GamePlanDetail>('GET', `/api/v1/game-plans/${gamePlan.id}`)).body;
     expect([now.rank, now.stepCount, now.techniques.length, now.history.length]).toEqual([rank, 4, 2, 1]);
-    expect(now.plan[1]!.children.map(c => c.trigger)).toEqual(['they post the far leg', 'they base back']);
+    expect(now.steps[1]!.children.map(c => c.trigger)).toEqual(['they post the far leg', 'they base back']);
     const ranks = (await api<FocusView>('GET', '/api/v1/focus')).body.active.map(f => f.rank);
     expect(ranks).toEqual(ranks.map((_, i) => i + 1));
 
     // Tidy up for later tests.
-    await api('DELETE', `/api/v1/areas/${area.id}`);
-    await api('DELETE', `/api/v1/areas/${deepPlan.id}`);
+    await api('DELETE', `/api/v1/game-plans/${gamePlan.id}`);
+    await api('DELETE', `/api/v1/game-plans/${deepHalf.id}`);
     await api('POST', '/api/v1/techniques/delete', { ids: [jw.id, shuck.id] });
+  });
+
+  it('moves a step among the steps next to it, with its alternatives, or among its alternatives', async () => {
+    const undo = async () => (await api('POST', '/api/v1/undo')).body.message as string;
+    const gamePlan = (await api<{ gamePlan: GamePlanDetail }>('POST', '/api/v1/game-plans', { name: 'Closed guard attacks', focus: false })).body.gamePlan;
+    await api('PATCH', `/api/v1/game-plans/${gamePlan.id}`, {
+      steps: [
+        { depth: 0, action: 'Hip bump' },
+        { depth: 0, or: true, action: 'Kimura' },
+        { depth: 0, action: 'Guillotine' },
+        { depth: 1, trigger: 'they posture up', action: 'Sit up' },
+        { depth: 1, trigger: 'they post a hand', action: 'Kimura grip' },
+        { depth: 1, or: true, action: 'Hip bump again' },
+        { depth: 0, action: 'Armbar' },
+      ],
+    });
+    const read = async () => (await api<GamePlanDetail>('GET', `/api/v1/game-plans/${gamePlan.id}`)).body;
+    const mainLine = (v: GamePlanDetail) => v.steps.map(s => `${s.or ? 'or ' : ''}${s.action}`);
+    const branches = (v: GamePlanDetail) => v.steps.find(s => s.action === 'Guillotine')!.children.map(c => [c.or, c.trigger, c.action]);
+    const idOf = (v: GamePlanDetail, action: string) => {
+      const all = (list: GamePlanDetail['steps']): GamePlanDetail['steps'] => list.flatMap(s => [s, ...all(s.children)]);
+      return all(v.steps).find(s => s.action === action)!.id;
+    };
+    const start = await read();
+    const ids = Object.fromEntries(['Hip bump', 'Kimura', 'Guillotine', 'Sit up', 'Kimura grip', 'Hip bump again', 'Armbar'].map(a => [a, idOf(start, a)]));
+    const move = (step: string, body: object) => api<{ message: string; gamePlan: GamePlanDetail }>('POST', `/api/v1/game-plans/${gamePlan.id}/steps/${ids[step]}/move`, body);
+
+    // A step moves with its alternatives; the steps under it go with it.
+    let r = await move('Armbar', { to: 'up' });
+    expect(r.body.message).toBe('Moved Armbar up.');
+    expect(mainLine(r.body.gamePlan)).toEqual(['Hip bump', 'or Kimura', 'Armbar', 'Guillotine']);
+    r = await move('Guillotine', { to: 'first' });
+    expect(r.body.message).toBe('Moved Guillotine to first.');
+    expect(mainLine(r.body.gamePlan)).toEqual(['Guillotine', 'Hip bump', 'or Kimura', 'Armbar']);
+    expect(branches(r.body.gamePlan)).toEqual([
+      [false, 'they posture up', 'Sit up'],
+      [false, 'they post a hand', 'Kimura grip'],
+      [true, null, 'Hip bump again'],
+    ]);
+    r = await move('Hip bump', { after: ids['Armbar'] });
+    expect(r.body.message).toBe('Moved Hip bump after Armbar.');
+    expect(mainLine(r.body.gamePlan)).toEqual(['Guillotine', 'Armbar', 'Hip bump', 'or Kimura']);
+    r = await move('Hip bump', { before: ids['Guillotine'] });
+    expect(mainLine(r.body.gamePlan)).toEqual(['Hip bump', 'or Kimura', 'Guillotine', 'Armbar']);
+    // Moving the first step of a choice by one of its alternatives' ids moves the same choice.
+    r = await move('Kimura', { to: 'last' });
+    expect(mainLine(r.body.gamePlan)).toEqual(['Guillotine', 'Armbar', 'Hip bump', 'or Kimura']);
+
+    // Among its alternatives: plan B becomes plan A, and takes over the reaction it answers.
+    r = await move('Hip bump again', { within: 'choice', to: 'up' });
+    expect(r.body.message).toBe('Hip bump again is now plan A.');
+    expect(branches(r.body.gamePlan)).toEqual([
+      [false, 'they posture up', 'Sit up'],
+      [false, 'they post a hand', 'Hip bump again'],
+      [true, null, 'Kimura grip'],
+    ]);
+    // Read back and said aloud in the new order.
+    const said = (await api('GET', `/api/v1/game-plans/speech?q=${encodeURIComponent('closed guard attacks')}`)).body.speech as string;
+    expect(said).toBe(
+      'Closed guard attacks. Guillotine. If they posture up, sit up. If they post a hand, hip bump again. Or kimura grip. Then armbar. Then hip bump. Or kimura.',
+    );
+
+    // Things that don't move anything are said, not logged.
+    expect((await move('Guillotine', { to: 'up' })).body.message).toBe('Guillotine is already first.');
+    expect((await move('Hip bump again', { within: 'choice', to: 'first' })).body.message).toBe('Hip bump again is already plan A.');
+    expect((await move('Armbar', { within: 'choice', to: 'up' })).body.message).toBe('Armbar has no alternatives to move among.');
+    expect((await move('Hip bump', { before: ids['Kimura'] })).body.message).toMatch(/alternatives to each other/);
+    // Steps move among the steps next to them, not across the tree.
+    let bad = await move('Sit up', { before: ids['Armbar'] });
+    expect([bad.status, bad.body.message]).toEqual([400, 'That step is somewhere else in the game plan: steps move among the steps next to them.']);
+    bad = await move('Armbar', { to: 'up', before: ids['Guillotine'] });
+    expect(bad.status).toBe(400);
+    bad = await move('Armbar', { within: 'choice', before: ids['Guillotine'] });
+    expect(bad.status).toBe(400);
+    expect((await api('POST', `/api/v1/game-plans/${gamePlan.id}/steps/999999/move`, { to: 'up' })).status).toBe(404);
+
+    // Each move is one undo; ids stay the same throughout.
+    expect(await undo()).toBe('Undid: move in "Closed guard attacks"');
+    expect(branches(await read())).toEqual([
+      [false, 'they posture up', 'Sit up'],
+      [false, 'they post a hand', 'Kimura grip'],
+      [true, null, 'Hip bump again'],
+    ]);
+    for (let i = 0; i < 5; i++) await undo();
+    const back = await read();
+    expect(mainLine(back)).toEqual(mainLine(start));
+    expect(back.steps).toEqual(start.steps);
+
+    await api('DELETE', `/api/v1/game-plans/${gamePlan.id}`);
   });
 
   it('explores positions', async () => {

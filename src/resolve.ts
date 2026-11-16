@@ -82,16 +82,16 @@ export async function techniquesMentionedIn(q: Queryable, text: string, limit = 
   return rows;
 }
 
-/** Areas match on their name, an alias, or the name of a linked technique. */
-export async function resolveArea(q: Queryable, name: string, onFocusOnly = false): Promise<Resolution> {
+/** Game plans match on their name, an alias, or the name of a linked technique. */
+export async function resolveGamePlan(q: Queryable, name: string, onFocusOnly = false): Promise<Resolution> {
   return decide(
     await rank(
       q,
       `select a.id, a.name,
               max(bjj_name_score(c, $1)) as score,
               bool_or(bjj_norm(c) = bjj_norm($1)) as exact
-       from areas a
-       left join area_techniques ax on ax.area_id = a.id
+       from game_plans a
+       left join game_plan_techniques ax on ax.game_plan_id = a.id
        left join techniques t on t.id = ax.technique_id
        cross join lateral unnest(array_remove(array_cat(array[a.name, t.name], a.aliases), null)) as c
        where a.user_id = $2 and ${onFocusOnly ? 'a.rank is not null' : 'true'}
@@ -101,6 +101,27 @@ export async function resolveArea(q: Queryable, name: string, onFocusOnly = fals
       [name, uid(q)],
     ),
   );
+}
+
+/**
+ * One step of a game plan, by what it says to do (or the reaction that leads to it): "the shuck", "if they post
+ * the far leg". Two steps that both match exactly ("Shuck" in two branches) are reported, not guessed.
+ */
+export async function resolveStep(q: Queryable, gamePlanId: number, words: string): Promise<Resolution> {
+  const rows = await rank(
+    q,
+    `select st.id, st.action as name,
+            greatest(bjj_name_score(st.action, $1), coalesce(bjj_name_score(st.trigger, $1), 0),
+                     coalesce(bjj_name_score(st.trigger || ' ' || st.action, $1), 0)) as score,
+            bjj_norm(st.action) = bjj_norm($1) or coalesce(bjj_norm(st.trigger) = bjj_norm($1), false) as exact
+     from game_plan_steps st
+     where st.game_plan_id = $2 and st.user_id = $3
+     order by exact desc, score desc, st.id
+     limit 5`,
+    [words.replace(/^\s*(the|my|if)\s+/i, ''), gamePlanId, uid(q)],
+  );
+  if (rows[0]?.exact && rows[1]?.exact) return { match: null, candidates: rows.filter(r => r.exact) };
+  return decide(rows);
 }
 
 export function describeMiss(kind: string, name: string, r: Resolution): string {

@@ -87,12 +87,12 @@ final class API {
         try await send(request("GET", "/api/v1/focus", timeout: timeout), as: FocusView.self)
     }
 
-    /// A plan read aloud, found by area name or by where it starts ("bottom half").
-    func plan(_ query: String, timeout: TimeInterval = 15) async throws -> PlanSpeech {
+    /// A game plan read aloud, found by name or by where it starts ("bottom half").
+    func gamePlan(_ query: String, timeout: TimeInterval = 15) async throws -> GamePlanSpeech {
         var parts = URLComponents()
-        parts.path = "/api/v1/plan"
+        parts.path = "/api/v1/game-plans/speech"
         parts.queryItems = [URLQueryItem(name: "q", value: query)]
-        return try await send(request("GET", parts.string ?? "/api/v1/plan", timeout: timeout), as: PlanSpeech.self)
+        return try await send(request("GET", parts.string ?? "/api/v1/game-plans/speech", timeout: timeout), as: GamePlanSpeech.self)
     }
 
     func lab(timeout: TimeInterval = 15) async throws -> LabView {

@@ -106,12 +106,12 @@ function TechniqueBody({ v, today, onEdit }: { v: TechniqueView; today: string; 
         onChange={status => patch.mutate({ status }, { onError: toast.error })}
       />
 
-      {v.areas.length > 0 && (
-        <div className="tech-areas">
+      {v.gamePlans.length > 0 && (
+        <div className="tech-game-plans">
           <span className="muted small">In</span>
           <div className="chips">
-            {v.areas.map(a => (
-              <Link key={a.id} className="chip chip-focus" to={`/areas/${a.id}`}>
+            {v.gamePlans.map(a => (
+              <Link key={a.id} className="chip chip-focus" to={`/game-plans/${a.id}`}>
                 <Icon name="focus" size={16} />
                 {a.rank ? `#${a.rank} ` : ''}
                 {a.name}

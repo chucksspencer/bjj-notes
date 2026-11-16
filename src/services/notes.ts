@@ -1,6 +1,6 @@
 import { uid, type Queryable } from '../db.js';
 import { cleanUrl, instagramPost } from '../shared/links.js';
-import { describeMiss, resolveArea, resolveTechnique, type Candidate } from '../resolve.js';
+import { describeMiss, resolveGamePlan, resolveTechnique, type Candidate } from '../resolve.js';
 import type { SessionView } from '../shared/api.js';
 import { sessionPhrase } from '../shared/sessions.js';
 import { insertAttachments, mediaTag, type AttachmentInput } from './attachments.js';
@@ -52,26 +52,26 @@ export interface AddNoteInput {
   client_id?: string;
   /** Photos and videos (references to Apple Photos, with a still image each). */
   attachments?: AttachmentInput[];
-  /** Exact area ids to file the note under (from the web app). */
-  area_ids?: number[];
-  /** An area to file the note under, by name or linked technique name (for voice). */
-  area?: string;
+  /** Exact game plan ids to file the note under (from the web app). */
+  game_plan_ids?: number[];
+  /** A game plan to file the note under, by name or linked technique name (for voice). */
+  game_plan?: string;
 }
 
-/** The given area ids that belong to the signed-in person, with their names. */
-async function ownAreas(q: Queryable, ids: number[]): Promise<{ id: number; name: string }[]> {
+/** The given game plan ids that belong to the signed-in person, with their names. */
+async function ownGamePlans(q: Queryable, ids: number[]): Promise<{ id: number; name: string }[]> {
   if (!ids.length) return [];
   return (
-    await q.query<{ id: number; name: string }>('select id, name from areas where id = any($1::int[]) and user_id = $2 order by id', [
+    await q.query<{ id: number; name: string }>('select id, name from game_plans where id = any($1::int[]) and user_id = $2 order by id', [
       [...new Set(ids)],
       uid(q),
     ])
   ).rows;
 }
 
-async function fileUnderAreas(q: Queryable, noteId: number, areaIds: number[]) {
-  for (const a of areaIds) {
-    await q.query('insert into area_notes (area_id, note_id, user_id) values ($1, $2, $3) on conflict do nothing', [a, noteId, uid(q)]);
+async function fileUnderGamePlans(q: Queryable, noteId: number, gamePlanIds: number[]) {
+  for (const a of gamePlanIds) {
+    await q.query('insert into game_plan_notes (game_plan_id, note_id, user_id) values ($1, $2, $3) on conflict do nothing', [a, noteId, uid(q)]);
   }
 }
 
@@ -228,15 +228,15 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
       sessionId = sessions.length === 1 ? sessions[0]!.id : null;
     }
     const toTry = input.to_try === true;
-    // Areas first: a note filed under an area is filed, even with no technique.
-    const areas = await ownAreas(q, input.area_ids ?? []);
-    let areaMiss: string | null = null;
-    if (input.area?.trim()) {
-      const r = await resolveArea(q, input.area);
-      if (r.match) areas.push({ id: r.match.id, name: r.match.name });
-      else areaMiss = describeMiss('area', input.area, r).replace(/\.$/, '');
+    // Game plans first: a note filed under a game plan is filed, even with no technique.
+    const gamePlans = await ownGamePlans(q, input.game_plan_ids ?? []);
+    let gamePlanMiss: string | null = null;
+    if (input.game_plan?.trim()) {
+      const r = await resolveGamePlan(q, input.game_plan);
+      if (r.match) gamePlans.push({ id: r.match.id, name: r.match.name });
+      else gamePlanMiss = describeMiss('game plan', input.game_plan, r).replace(/\.$/, '');
     }
-    const inbox = !toTry && ((ids.size === 0 && areas.length === 0) || unresolved.length > 0);
+    const inbox = !toTry && ((ids.size === 0 && gamePlans.length === 0) || unresolved.length > 0);
 
     const { rows } = await q.query<{ id: number }>(
       `insert into notes (body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via, starred_at,
@@ -264,7 +264,7 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
     }
     const attachments = input.attachments?.length ? await insertAttachments(q, noteId, input.attachments) : undefined;
 
-    await fileUnderAreas(q, noteId, [...new Set(areas.map(a => a.id))]);
+    await fileUnderGamePlans(q, noteId, [...new Set(gamePlans.map(a => a.id))]);
 
     const linked = [...ids.values()];
     const from = origin?.view ? ` (from ${sessionPhrase(origin.view)})` : '';
@@ -273,9 +273,9 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
       : linked.length
         ? `Saved note #${noteId} to ${linked.join(', ')}`
         : `Saved note #${noteId}`;
-    const under = areas.length ? `, under ${[...new Set(areas.map(a => a.name))].join(', ')}` : '';
+    const under = gamePlans.length ? `, under ${[...new Set(gamePlans.map(a => a.name))].join(', ')}` : '';
     const parts = [saved + from + under + (input.starred ? ', starred' : '')];
-    if (areaMiss) parts.push(areaMiss);
+    if (gamePlanMiss) parts.push(gamePlanMiss);
     if (created.length) parts.push(`new card${created.length > 1 ? 's' : ''}: ${created.map(c => c.name).join(', ')}`);
     for (const u of unresolved) {
       parts.push(
@@ -386,15 +386,15 @@ export interface UpdateNoteInput {
   starred?: boolean;
   /** Mark a question answered (true) or open again (false). */
   answered?: boolean;
-  /** Replaces the areas the note is filed under. */
-  area_ids?: number[];
+  /** Replaces the game plans the note is filed under. */
+  game_plan_ids?: number[];
 }
 
-/** The areas a note is filed under. */
-async function noteAreaIds(q: Queryable, noteId: number): Promise<number[]> {
+/** The game plans a note is filed under. */
+async function noteGamePlanIds(q: Queryable, noteId: number): Promise<number[]> {
   return (
-    await q.query<{ area_id: number }>('select area_id from area_notes where note_id = $1 and user_id = $2 order by area_id', [noteId, uid(q)])
-  ).rows.map(r => r.area_id);
+    await q.query<{ game_plan_id: number }>('select game_plan_id from game_plan_notes where note_id = $1 and user_id = $2 order by game_plan_id', [noteId, uid(q)])
+  ).rows.map(r => r.game_plan_id);
 }
 
 export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): Promise<string> {
@@ -428,18 +428,18 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
         await q.query('insert into note_techniques (note_id, technique_id, user_id) values ($1, $2, $3)', [id, t.id, uid(q)]);
       }
     }
-    const areasBefore = input.area_ids ? await noteAreaIds(q, id) : undefined;
-    if (input.area_ids) {
-      await q.query('delete from area_notes where note_id = $1 and user_id = $2', [id, uid(q)]);
-      await fileUnderAreas(q, id, (await ownAreas(q, input.area_ids)).map(a => a.id));
+    const gamePlansBefore = input.game_plan_ids ? await noteGamePlanIds(q, id) : undefined;
+    if (input.game_plan_ids) {
+      await q.query('delete from game_plan_notes where note_id = $1 and user_id = $2', [id, uid(q)]);
+      await fileUnderGamePlans(q, id, (await ownGamePlans(q, input.game_plan_ids)).map(a => a.id));
     }
-    // A to-try note waits out of the inbox; otherwise a note with no technique and no area needs filing.
+    // A to-try note waits out of the inbox; otherwise a note with no technique and no game plan needs filing.
     const wasToTry = row.to_try ?? false;
     const toTry = input.to_try ?? wasToTry;
-    if (input.technique_ids || fresh || input.area_ids || toTry !== wasToTry) {
+    if (input.technique_ids || fresh || input.game_plan_ids || toTry !== wasToTry) {
       const count = (
         await q.query<{ c: number }>(
-          `select (select count(*) from note_techniques where note_id = $1) + (select count(*) from area_notes where note_id = $1) as c`,
+          `select (select count(*) from note_techniques where note_id = $1) + (select count(*) from game_plan_notes where note_id = $1) as c`,
           [id],
         )
       ).rows[0]!.c;
@@ -473,7 +473,7 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
       techniqueIds: before,
       session: origin?.change,
       createdTechniqueIds: fresh?.created.map(c => c.id),
-      ...(areasBefore ? { focusItemIds: areasBefore } : {}),
+      ...(gamePlansBefore ? { gamePlanIds: gamePlansBefore } : {}),
     });
     const moved =
       (toTry === wasToTry ? '' : toTry ? ', now on the To try list' : ', off the To try list') +
@@ -492,14 +492,14 @@ async function removeNote(q: Queryable, id: number): Promise<UndoOp | null> {
     await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [id])
   ).rows.map(r => r.technique_id);
   const attachmentIds = (await q.query<{ id: number }>('select id from attachments where note_id = $1', [id])).rows.map(r => r.id);
-  const areaIds = await noteAreaIds(q, id);
+  const gamePlanIds = await noteGamePlanIds(q, id);
   await q.query('delete from notes where id = $1 and user_id = $2', [id, uid(q)]);
   return {
     kind: 'restore_note',
     row,
     techniqueIds,
     ...(attachmentIds.length ? { attachmentIds } : {}),
-    ...(areaIds.length ? { focusItemIds: areaIds } : {}),
+    ...(gamePlanIds.length ? { gamePlanIds: gamePlanIds } : {}),
   };
 }
 
