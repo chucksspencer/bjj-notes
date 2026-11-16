@@ -138,16 +138,27 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Bridge and shrimp');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
-    const letters = page.getByRole('list', { name: 'Steps' }).locator('.step.numbered').first().locator('> .step-option');
-    expect(await letters.locator('> .step-line .step-do').allTextContents()).toEqual(['Frame on the hip', 'Bridge and shrimp']);
-    expect(await letters.locator('> .step-line .step-letter').allTextContents()).toEqual(['A', 'B']);
+    // Plan A on the step's own line; plan B as an "Or" branch of its own under it.
+    const first = page.getByRole('list', { name: 'Steps' }).locator('> .step.numbered').first();
+    const planAB = async () => [
+      ...(await first.locator('> .step-option > .step-line .step-do').allTextContents()),
+      ...(await first.locator('> .step-option > .step-branches > .step.alternative > .step-option > .step-line .step-do').allTextContents()),
+    ];
+    expect(await planAB()).toEqual(['Frame on the hip', 'Bridge and shrimp']);
+    expect(await first.locator('.step.alternative > .step-when').allTextContents()).toEqual(['Or']);
+    // What comes after plan B goes inside its branch.
+    await first.locator('.step.alternative').getByRole('button', { name: 'Then', exact: true }).click();
+    await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Take the back');
+    await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
+    await page.getByText('Step added').waitFor();
+    await first.locator('.step.alternative').getByText('Take the back').waitFor();
     await page.getByRole('button', { name: 'Edit step: Bridge and shrimp' }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Make this plan A' }).click();
     await page.getByText('Bridge and shrimp is now plan A.').waitFor();
-    expect(await letters.locator('> .step-line .step-do').allTextContents()).toEqual(['Bridge and shrimp', 'Frame on the hip']);
+    expect(await planAB()).toEqual(['Bridge and shrimp', 'Frame on the hip']);
     await page.getByRole('button', { name: 'Undo' }).click();
     await page.getByText(/^Undid: move in/).waitFor();
-    expect(await letters.locator('> .step-line .step-do').allTextContents()).toEqual(['Frame on the hip', 'Bridge and shrimp']);
+    expect(await planAB()).toEqual(['Frame on the hip', 'Bridge and shrimp']);
 
     // Reordering: in a step's sheet, Try earlier and Try later change which alternative it is; on its row, the
     // arrows move it (with its alternatives) past the step next to it.
@@ -155,7 +166,7 @@ describe.runIf(run)('web app (end to end)', () => {
     expect(await page.getByRole('dialog').getByRole('button', { name: 'Try earlier' }).count()).toBe(0);
     await page.getByRole('dialog').getByRole('button', { name: 'Try later' }).click();
     await page.getByText('Frame on the hip is now plan B.').waitFor();
-    expect(await letters.locator('> .step-line .step-do').allTextContents()).toEqual(['Bridge and shrimp', 'Frame on the hip']);
+    expect(await planAB()).toEqual(['Bridge and shrimp', 'Frame on the hip']);
     // The branch under it comes along: it's Frame on the hip's own.
     await page.getByText('If crossface hard').waitFor();
     await page.getByRole('button', { name: 'Edit step: Frame on the hip' }).click();
@@ -167,7 +178,7 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Knee to elbow');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
-    const mainLine = page.getByRole('list', { name: 'Steps' }).locator('> .step.numbered > .step-option:first-of-type > .step-line .step-do');
+    const mainLine = page.getByRole('list', { name: 'Steps' }).locator('> .step.numbered > .step-option > .step-line .step-do');
     expect(await mainLine.allTextContents()).toEqual(['Frame on the hip', 'Knee to elbow']);
     expect(await page.getByRole('button', { name: 'Move Knee to elbow down' }).isDisabled()).toBe(true);
     await page.getByRole('button', { name: 'Move Knee to elbow up' }).click();

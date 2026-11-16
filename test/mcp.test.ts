@@ -403,7 +403,8 @@ describe('MCP tools over HTTP', () => {
     expect(await call('get_game_plan', { name: 'winning the underhook' })).toContain('go to deep half → Deep half guard (bottom). Continues in: Deep half sweeps.');
     expect(await call('get_game_plan')).toMatch(/Deep half guard \(bottom\): Deep half sweeps \[1 step\]\nHalf guard \(bottom\): Bottom half: winning the underhook \[4 steps\]/);
 
-    // Alternatives ("or") read back after the step they're alternatives to, lettered on the main line.
+    // Alternatives ("or") read back as branches of their own under the step they're alternatives to; the main line
+    // goes on from plan A.
     expect(
       await call('save_game_plan', {
         name: 'winning the underhook',
@@ -419,17 +420,43 @@ describe('MCP tools over HTTP', () => {
     expect(await call('get_game_plan', { name: 'winning the underhook' })).toContain(
       [
         'Steps:',
-        '1a. John Wayne sweep (drilling).',
-        '1b. Or: wrestle up from the knee shield.',
+        '1. John Wayne sweep (drilling).',
+        '   Or: wrestle up from the knee shield.',
         '2. shuck pass (learning).',
         '   If they post the far leg: go to deep half.',
-        '   Or: come up to dogfight.',
+        '      Or: come up to dogfight.',
       ].join('\n'),
     );
     await expect(call('save_game_plan', { name: 'winning the underhook', steps: [{ depth: 0, or: true, do: 'a' }] })).rejects.toThrow(
       'Error: Step 1: "or" needs a step before it at the same level to be an alternative to.',
     );
     expect(await call('undo_last')).toBe('Undid: edit to "Bottom half: winning the underhook"');
+    // Inside a branch too: what comes after an alternative is inside it, and the step after it follows plan A.
+    await call('save_game_plan', {
+      name: 'Closed guard',
+      steps: [
+        { depth: 0, do: 'Armbar' },
+        { depth: 1, when: 'they stack', do: 'Triangle' },
+        { depth: 2, do: 'Angle off' },
+        { depth: 2, or: true, do: 'Omoplata' },
+        { depth: 3, do: 'Sit up' },
+        { depth: 3, when: 'they roll', do: 'Follow them over' },
+        { depth: 2, do: 'Finish' },
+      ],
+    });
+    expect(await call('get_game_plan', { name: 'Closed guard' })).toContain(
+      [
+        'Steps:',
+        '1. Armbar (seen).',
+        '   If they stack: triangle.',
+        '      Angle off.',
+        '         Or: omoplata.',
+        '            Sit up.',
+        '            If they roll: follow them over.',
+        '      Finish.',
+      ].join('\n'),
+    );
+    await call('save_game_plan', { name: 'Closed guard', delete: true });
 
     // Putting it on focus, and a bad outline.
     expect(await call('save_game_plan', { name: 'winning the underhook', focus: true })).toBe('Bottom half: winning the underhook: on focus at #1.');

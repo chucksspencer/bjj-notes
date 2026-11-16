@@ -108,8 +108,9 @@ const countSteps = (nodes: { children: Node[] | GamePlanStep[] }[]): number => n
 export type Moves = { up: StepMove | null; down: StepMove | null; earlier: StepMove | null; later: StepMove | null };
 
 /**
- * The moves a step has, among its neighbours as the outline draws them. Inside a branch, the branches ("if
- * they…") and what follows ("then") show as two runs, so a step moves within its own run.
+ * The moves a step has, among its neighbours as the outline draws them. Under a step inside a branch, the
+ * branches ("if they…") and what follows ("then", at the same indent) show as two runs, so a step moves within
+ * its own run. On the main line and inside an "or", everything under a step is one run.
  */
 export function movesAt(tree: Node[], path: Path): Moves {
   const none: Moves = { up: null, down: null, earlier: null, later: null };
@@ -117,14 +118,8 @@ export function movesAt(tree: Node[], path: Path): Moves {
   const i = path.at(-1)!;
   const [start, end] = choiceAt(list, i);
   if (list[i]?.id === undefined) return none;
-  const parentPath = path.slice(0, -1);
-  const parentList = parentPath.length ? siblingsAt(tree, parentPath) : [];
-  const parentAlone = parentPath.length > 0 && (() => {
-    const [s, e] = choiceAt(parentList, parentPath.at(-1)!);
-    return e - s === 1;
-  })();
-  // Two runs only where the parent is a step inside a branch that isn't one of several alternatives.
-  const split = parentPath.length >= 2 && parentAlone;
+  const parent = path.length > 1 ? siblingsAt(tree, path.slice(0, -1))[path.at(-2)!] : null;
+  const split = path.length > 2 && !parent?.or;
   const runs: [number, number][] = [];
   for (let k = 0; k < list.length; ) {
     const [s, e] = choiceAt(list, k);
@@ -197,10 +192,11 @@ const stepAt = (steps: AnyStep[], path: Path): AnyStep | null => {
 const crumb = (s: AnyStep) => `${s.trigger && !s.or ? `If ${s.trigger}: ` : ''}${s.action}`;
 
 /**
- * A game plan's steps as an outline. The main line is numbered; "if they…" branches hang under the step they follow;
- * what comes next in a branch ("then") stays at the same indent, so a long sequence doesn't creep sideways;
- * alternatives ("or") stack under the step they're alternatives to, lettered A, B, C in order of preference.
- * Anything under a step folds away, and a branch that's deep in the tree opens on its own, with a trail back.
+ * A game plan's steps as an outline. The main line is numbered. Under a step hang its branches: "if they…"
+ * (what to do when they react) and "or" (another way to go instead, a branch of its own, so everything after
+ * it is inside it). What comes next after a step in a branch ("then") stays at the same indent, so a long
+ * sequence doesn't creep sideways. Anything under a step folds away, and a branch that's deep in the tree opens
+ * on its own, with a trail back.
  */
 export function StepsOutline({ steps, onEdit, draft = false }: { steps: AnyStep[]; onEdit?: Outline['onEdit']; draft?: boolean }) {
   const [root, setRoot] = useState<Path>([]);
@@ -210,7 +206,7 @@ export function StepsOutline({ steps, onEdit, draft = false }: { steps: AnyStep[
   // The step the view is opened on may have been deleted or moved since.
   const rootStep = root.length ? stepAt(steps, root) : null;
   const at = rootStep ? root : [];
-  const foldable = steps.some(s => s.children.length > 0);
+  const foldable = steps.some(s => s.children.length > 0) || steps.some(s => s.or);
   const ctx: Outline = { onEdit, zoom: draft ? undefined : setRoot, all: all || small || draft, draft };
   return (
     <OutlineContext.Provider value={ctx}>
@@ -235,7 +231,15 @@ export function StepsOutline({ steps, onEdit, draft = false }: { steps: AnyStep[
         {rootStep ? (
           <li className="step level-0">
             {(rootStep.trigger || rootStep.or) && <span className="step-when">{rootStep.or ? 'Or' : `If ${rootStep.trigger}`}</span>}
-            <Option step={rootStep} path={at} level={0} marker={null} choice={false} root />
+            <Option
+              step={rootStep}
+              path={at}
+              level={0}
+              marker={null}
+              alternative={rootStep.or}
+              alternatives={rootStep.or ? [] : alternativesOf(siblingsAtAny(steps, at), at)}
+              root
+            />
           </li>
         ) : (
           <Choices list={steps} base={[]} level={0} numbered />
@@ -250,7 +254,25 @@ export function StepsOutline({ steps, onEdit, draft = false }: { steps: AnyStep[
   );
 }
 
-/** A list of steps, each drawn with its alternatives. `only` picks which to draw (by where each starts). */
+/** The list a step sits in (saved or being edited). */
+function siblingsAtAny(steps: AnyStep[], path: Path): AnyStep[] {
+  let list = steps;
+  for (const i of path.slice(0, -1)) list = list[i]!.children;
+  return list;
+}
+
+/** The alternatives ("or") right after the step at `path`, with their own paths. */
+function alternativesOf(list: AnyStep[], path: Path): { step: AnyStep; path: Path }[] {
+  const i = path.at(-1)!;
+  const [, end] = choiceAt(list, i);
+  const base = path.slice(0, -1);
+  return Array.from({ length: end - i - 1 }, (_, k) => ({ step: list[i + 1 + k]!, path: [...base, i + 1 + k] }));
+}
+
+/**
+ * Steps in a list. Each one is drawn with its alternatives as "or" branches under it. `only` picks which to draw
+ * (by the step they hang off).
+ */
 function Choices({
   list,
   base,
@@ -269,24 +291,16 @@ function Choices({
       {choices(list).map((at, n) => {
         const first = list[at[0]!]!;
         if (only && !only(first)) return null;
-        const choice = at.length > 1;
         return (
           <li key={first.id ?? at[0]} className={`step level-${Math.min(level, MAX_LEVEL)}${numbered ? ' numbered' : ''}`}>
             {!numbered && <span className="step-when">{first.trigger ? `If ${first.trigger}` : 'Then'}</span>}
-            {at.map((i, k) => (
-              <Fragment key={i}>
-                {k > 0 && <span className="step-or">or</span>}
-                <Option
-                  step={list[i]!}
-                  path={[...base, i]}
-                  level={level}
-                  marker={numbered && k === 0 ? String(n + 1) : null}
-                  letter={choice ? String.fromCharCode(65 + k) : null}
-                  choice={choice}
-                  second={k > 0}
-                />
-              </Fragment>
-            ))}
+            <Option
+              step={first}
+              path={[...base, at[0]!]}
+              level={level}
+              marker={numbered ? String(n + 1) : null}
+              alternatives={at.slice(1).map(i => ({ step: list[i]!, path: [...base, i] }))}
+            />
           </li>
         );
       })}
@@ -294,15 +308,17 @@ function Choices({
   );
 }
 
-/** One step (one alternative, where there are several): its line, and everything under it. */
+/**
+ * One step: its line, then what hangs under it: its "if they…" branches, its alternatives ("or", each a branch
+ * with its own steps inside), and what comes next.
+ */
 function Option({
   step,
   path,
   level,
   marker,
-  letter = null,
-  choice,
-  second = false,
+  alternative = false,
+  alternatives = [],
   root = false,
 }: {
   step: AnyStep;
@@ -310,18 +326,17 @@ function Option({
   level: number;
   /** Its number on the main line. */
   marker: string | null;
-  /** A, B, C… when it's one of several alternatives. */
-  letter?: string | null;
-  choice: boolean;
-  /** Not the first alternative: plan B and on. */
-  second?: boolean;
+  /** This step is an alternative ("or"): a branch of its own. */
+  alternative?: boolean;
+  /** Its alternatives, drawn as "or" branches under it. */
+  alternatives?: { step: AnyStep; path: Path }[];
   /** The step the view is opened on: always unfolded. */
   root?: boolean;
 }) {
   const { onEdit, zoom, all, draft } = useContext(OutlineContext);
-  // The main line shows its branches; deeper ones, and fallbacks, wait behind a tap unless there are only a few steps.
-  const [unfolded, setOpen] = useState(all || (level === 0 && !second));
-  const under = countSteps(step.children);
+  // The main line shows its branches; deeper ones wait behind a tap unless there are only a few steps.
+  const [unfolded, setOpen] = useState(all || level === 0);
+  const under = countSteps(step.children) + alternatives.reduce((n, a) => n + 1 + countSteps(a.step.children), 0);
   // Deep in the tree there's no room left to indent: what's under this step opens on its own instead.
   const elsewhere = !!zoom && !root && under > 0 && level >= MAX_LEVEL;
   // While editing, every step shows, so each can be tapped.
@@ -351,17 +366,15 @@ function Option({
       {step.note && <span className="step-note">{step.note}</span>}
     </>
   );
-  // In a branch, what comes next stays at this indent; one of several alternatives keeps its own steps under it.
-  const flat = level >= 1 && !choice;
+  // Inside a branch, what comes next stays at this indent. An alternative starts a branch, so everything after
+  // it is indented under it.
+  const flat = level >= 1 && !alternative;
+  const reactions = step.children.some(c => !c.or && c.trigger);
+  const thens = step.children.some(c => !c.or && !c.trigger);
   return (
     <div className="step-option">
       <div className="step-line">
         {marker && <span className="step-num">{marker}</span>}
-        {letter && (
-          <span className="step-letter" aria-label={`Plan ${letter}`}>
-            {letter}
-          </span>
-        )}
         {onEdit ? (
           <button type="button" className="step-body" aria-label={`Edit step: ${step.action}`} onClick={() => onEdit.step(path)}>
             {body}
@@ -404,19 +417,22 @@ function Option({
           <MoveButtons action={step.action} moves={onEdit.moves(path)} busy={onEdit.busy} onMove={m => onEdit.move(path, m)} />
         </div>
       )}
-      {open && step.children.length > 0 && (
-        <>
-          {(!flat || step.children.some(c => !c.or && c.trigger)) && (
-            <ol className="step-branches">
-              <Choices list={step.children} base={path} level={level + 1} only={flat ? first => !!first.trigger : undefined} />
-            </ol>
-          )}
-          {flat && step.children.some(c => !c.or && !c.trigger) && (
-            <ol className="step-then">
-              <Choices list={step.children} base={path} level={level} only={first => !first.trigger} />
-            </ol>
-          )}
-        </>
+      {open && (reactions || alternatives.length > 0 || (thens && !flat)) && (
+        <ol className="step-branches">
+          {/* Nested (on the main line, and inside an "or"): everything under it, in order. Flat: the branches. */}
+          <Choices list={step.children} base={path} level={level + 1} only={flat ? first => !!first.trigger : undefined} />
+          {alternatives.map(a => (
+            <li key={a.step.id ?? a.path.join('.')} className={`step level-${Math.min(level + 1, MAX_LEVEL)} alternative`}>
+              <span className="step-when">Or</span>
+              <Option step={a.step} path={a.path} level={level + 1} marker={null} alternative />
+            </li>
+          ))}
+        </ol>
+      )}
+      {open && flat && thens && (
+        <ol className="step-then">
+          <Choices list={step.children} base={path} level={level} only={first => !first.trigger} />
+        </ol>
       )}
     </div>
   );
@@ -585,7 +601,7 @@ export function StepsSection({ gamePlan }: { gamePlan: GamePlanDetail }) {
               const [, end] = choiceAt(list, i);
               // "Or" is one more alternative to this step, after the ones it has.
               if (step.mode === 'or') list.splice(end, 0, { ...node, or: true, trigger: null });
-              // "Then" on the main line is the next main-line step (whichever alternative was used); under an
+              // "Then" on the main line is the next main-line step (which follows plan A); under an
               // alternative, or inside a branch, it's what follows that step.
               else if (step.mode === 'then' && step.path.length === 1 && !at.or) list.splice(end, 0, node);
               else at.children.push(node);

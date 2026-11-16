@@ -690,7 +690,7 @@ describe('JSON API', () => {
       [false, 'they base back', 'Octopus sweeps'],
     ]);
     expect(await said('winning the underhook')).toBe(
-      'Bottom half: winning the underhook. When top has the underhook and crossface: John Wayne sweep, to force them to post the underhook hand. Or knee lever. Then come up on the single. Then shuck. If they post the far leg, go to deep half. Or underhook to dogfight. If they base back, octopus sweeps.',
+      'Bottom half: winning the underhook. When top has the underhook and crossface: John Wayne sweep, to force them to post the underhook hand. Or instead, knee lever, then come up on the single. Then shuck. If they post the far leg, go to deep half. Or underhook to dogfight. If they base back, octopus sweeps.',
     );
     for (const orphan of [[{ depth: 0, or: true, action: 'A' }], [{ depth: 0, action: 'A' }, { depth: 1, or: true, action: 'B' }]]) {
       const r = await api('PATCH', `/api/v1/game-plans/${gamePlan.id}`, { steps: orphan });
@@ -796,7 +796,7 @@ describe('JSON API', () => {
     // Read back and said aloud in the new order.
     const said = (await api('GET', `/api/v1/game-plans/speech?q=${encodeURIComponent('closed guard attacks')}`)).body.speech as string;
     expect(said).toBe(
-      'Closed guard attacks. Guillotine. If they posture up, sit up. If they post a hand, hip bump again. Or kimura grip. Then armbar. Then hip bump. Or kimura.',
+      'Closed guard attacks. Guillotine. If they posture up, sit up. If they post a hand, hip bump again. Or kimura grip. Then armbar. Then hip bump. Or instead, kimura.',
     );
 
     // Things that don't move anything are said, not logged.

@@ -195,8 +195,8 @@ export interface GamePlanStep {
   id: number;
   /**
    * True when this is an alternative to the step before it in the same list ("or": plan B, plan C, in order
-   * of preference). It answers the same reaction, so it has no trigger of its own; its children are its own.
-   * On the main line, the next step follows whichever alternative was used.
+   * of preference). It answers the same reaction, so it has no trigger of its own. It starts a branch of its
+   * own: what comes after it is its children. The steps after it in the same list follow plan A.
    */
   or: boolean;
   /** The reaction that leads here ("they post the far leg"); null for "then". */
@@ -235,7 +235,10 @@ export interface GamePlanDetail extends GamePlanView {
 export interface GamePlanStepInput {
   /** 0 = main line; 1 = a branch off the nearest step above it at depth 0; and so on. */
   depth: number;
-  /** An alternative to the nearest step above it at the same depth (under the same step): plan B. */
+  /**
+   * An alternative to the nearest step above it at the same depth (under the same step): plan B. It starts a
+   * branch: what comes after it goes one level deeper; the next step at this depth follows plan A.
+   */
   or?: boolean;
   trigger?: string | null;
   action: string;
