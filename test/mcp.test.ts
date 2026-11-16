@@ -53,7 +53,7 @@ describe('MCP tools over HTTP', () => {
       ].sort(),
     );
     expect(client.getInstructions()).toContain('voice transcription');
-    expect(client.getInstructions()).toContain('"System", "plan" and "area" (its old name) mean a game plan.');
+    expect(client.getInstructions()).toContain('"System" and "plan" mean a game plan.');
   });
 
   it('starts with the imported working list as the focus list', async () => {
@@ -335,11 +335,6 @@ describe('MCP tools over HTTP', () => {
     const id = Number(saved.match(/#(\d+)/)![1]);
     item = await call('get_game_plan', { name: 'ghost escape' });
     expect(item).toMatch(new RegExp(`Notes filed here \\(1\\):\\n- #${id} \\d{4}-\\d{2}-\\d{2}: Shrimp early, before the crossface\\.`));
-    // area and focus are older names for game_plan.
-    for (const old of [{ area: 'ghost' }, { focus: 'ghost' }]) {
-      expect(await call('add_note', { text: 'Frame first.', ...old })).toMatch(/under Ghost escape\.$/);
-      await call('undo_last');
-    }
 
     expect(await call('save_game_plan', { name: 'ghost', rename_to: 'Ghost escape from side control', aliases: ['ghosting'] })).toBe(
       'Ghost escape from side control: renamed to Ghost escape from side control; aliases updated.',

@@ -47,7 +47,7 @@ How to use it well:
 - Say where a note came from with add_note's session (a class, a seminar with its name and instructor, an open mat): "notes from today's class" is {kind: "class"}; "Zen camp seminar by Josh Jones on 2024-02-03" is {kind: "seminar", name: "Zen camp", instructor: "Josh Jones", date: "2024-02-03"}. The same session is reused, not duplicated.
 - Videos and ideas not tried yet go on the To try list (add_note with to_try: true), not on a technique. It's also called "silly Instagram bullshit"; "add this to my SIB" or "something to try" means the same. Reels shared from Instagram land there automatically. Once one has been tried and is worth keeping, file_note keeps it under the technique; get_inbox with to_try: true lists what's waiting.
 - Lab is the short-term working set (get_lab): starred techniques and notes, videos to try, techniques new in the notes, questions for the coach. "Star that" or "flag that" stars whatever "that" is: a note (update_note with starred: true, or add_note with starred: true for a new one) or a technique (save_technique with starred: true). Stars are for what's pertinent now: after 4 weeks they fold away as older stars, and clear_stars unstars old ones (or all). When the coach answers a question, update_note with answered: true and add the answer to the text. The focus list is the long-term guide, over weeks or months.
-- A game plan is a part of ${who}'s game: a name, a description (the strategy, cues, what success looks like), techniques and notes. It can have steps: where it starts, then a main line with branches for how the opponent reacts ("if they post the far leg, go to deep half") and alternatives at any step ("shuck pass, or knee cut": plan A, plan B, preferred first; "Or:" when read back, or: true on the step when saved). "System", "plan" and "area" (its old name) mean a game plan. When ${who} describes one, call save_game_plan with the steps as an outline; get_game_plan reads one back (or lists them all).
+- A game plan is a part of ${who}'s game: a name, a description (the strategy, cues, what success looks like), techniques and notes. It can have steps: where it starts, then a main line with branches for how the opponent reacts ("if they post the far leg, go to deep half") and alternatives at any step ("shuck pass, or knee cut": plan A, plan B, preferred first; "Or:" when read back, or: true on the step when saved). "System" and "plan" mean a game plan. When ${who} describes one, call save_game_plan with the steps as an outline; get_game_plan reads one back (or lists them all).
 - The focus list is the game plans being worked on now, in order; #1 is worked on most. "Add X to my focus" is update_focus add, which puts it at the top unless told otherwise, and makes the game plan if there isn't one. "I'm done with X for now" or "take X off my focus" is update_focus remove: the game plan and its steps stay.
 - "Add a note to my X focus" or "file that under X" is add_note with game_plan: X (and the techniques it's about).
 - Replies are often read aloud, so keep confirmations short. "Undo that" means undo_last.`;
@@ -190,9 +190,7 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
           .optional()
           .describe('Not tried yet ("silly Instagram bullshit"): goes on the To try list instead of being filed'),
         starred: flag.optional().describe('Star it: a recent, pertinent note to keep in front of him (shows in Lab)'),
-        game_plan: z.string().optional().describe('A game plan (or focus item) to file the note under, by its name or a linked technique'),
-        area: z.string().optional().describe('Older name for game_plan'),
-        focus: z.string().optional().describe('Older name for game_plan'),
+        game_plan: z.string().optional().describe('A game plan to file the note under, by its name or a linked technique'),
         source: z
           .object({
             kind: z.enum(SOURCE_KINDS).optional(),
@@ -207,8 +205,7 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
     },
     args =>
       run(async () => {
-        const { focus, area, game_plan, ...rest } = args;
-        return (await addNote(ctx, { ...rest, game_plan: game_plan ?? area ?? focus, session: parseSession(args.session), via: 'mcp' })).message;
+        return (await addNote(ctx, { ...args, session: parseSession(args.session), via: 'mcp' })).message;
       }),
   );
 

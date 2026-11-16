@@ -1,4 +1,5 @@
 import { uid, type Db, type Queryable } from '../db.js';
+import { UserError } from './errors.js';
 
 export interface TechniqueSnapshot {
   id: number;
@@ -19,10 +20,6 @@ export interface TechniqueSnapshot {
 export interface FocusSnapshot {
   id: number;
   rank: number | null;
-  /** Only in undo entries written before focus items became game plans, when the focus list had statuses (only 'active' was ranked). */
-  status?: string;
-  /** Only in undo entries written before goals were folded into descriptions. */
-  goal?: string | null;
 }
 
 /** Links between a game plan and techniques or notes. */
@@ -94,8 +91,6 @@ export type UndoOp =
       /** A game plan the change created. */
       deleteGamePlanId: number | null;
       eventIds: number[];
-      /** Technique links the change added (only in entries written before focus items became game plans). */
-      addedLinks?: { gamePlanId: number; techniqueId: number }[];
     }
   /** Undoes log_session: detaches the notes it attached, then deletes the session (if it made it) or restores its details. */
   | { kind: 'delete_session'; sessionId: number; attachedNoteIds: number[]; created?: boolean; before?: SessionSnapshot | null }
@@ -121,18 +116,13 @@ export type UndoOp =
       edges: EdgeSnapshot[];
       links: LinkSnapshot[];
       noteIds: number[];
-      /** Game plans it was linked to. */
-      gamePlanIds: number[];
+      /** Game plans it was linked to (absent in entries from before 018, which named them differently). */
+      gamePlanIds?: number[];
       /** Game plan steps that were this technique (absent in older entries). */
       stepIds?: number[];
       /** Notes that went to the inbox because this was their only technique. */
       inboxedNoteIds?: number[];
     }
-  /**
-   * Puts a game plan's title and description back. Only in entries written before focus items became game plans
-   * (the oldest carry a goal instead of a description); newer edits use restore_game_plan.
-   */
-  | { kind: 'restore_game_plan_label'; gamePlanId: number; label: string; description?: string | null; goal?: string | null }
   /** Takes back links added to a game plan and puts back ones removed. */
   | { kind: 'restore_game_plan_links'; gamePlanId: number; added: GamePlanLinkIds; removed: GamePlanLinkIds }
   /** Puts a game plan's fields back, and its steps when `steps` is given. */
@@ -285,16 +275,11 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
           me,
         ]);
       }
-      for (const l of op.addedLinks ?? []) {
-        await q.query('delete from game_plan_techniques where game_plan_id = $1 and technique_id = $2 and user_id = $3', [l.gamePlanId, l.techniqueId, me]);
-      }
       if (op.deleteGamePlanId !== null) await q.query('delete from game_plans where id = $1 and user_id = $2', [op.deleteGamePlanId, me]);
       // Everything comes off first, so putting ranks back never collides.
       await q.query('update game_plans set rank = null where user_id = $1 and rank is not null', [me]);
       for (const s of op.items) {
-        const rank = s.status === undefined || s.status === 'active' ? s.rank : null;
-        await q.query('update game_plans set rank = $2, updated_at = now() where id = $1 and user_id = $3', [s.id, rank, me]);
-        if (s.goal !== undefined) await q.query('update game_plans set goal = $2 where id = $1 and user_id = $3', [s.id, s.goal, me]);
+        await q.query('update game_plans set rank = $2, updated_at = now() where id = $1 and user_id = $3', [s.id, s.rank, me]);
       }
       return;
     case 'delete_session':
@@ -381,7 +366,7 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       for (const l of op.links) await insertLink(q, l);
       for (const n of op.noteIds) await insertNoteTechnique(q, n, r.id);
       // Only game plans that are still there: one may have been deleted since.
-      for (const g of op.gamePlanIds) await insertGamePlanTechnique(q, g, r.id);
+      for (const g of op.gamePlanIds ?? []) await insertGamePlanTechnique(q, g, r.id);
       if (op.stepIds?.length) {
         await q.query('update game_plan_steps set technique_id = $2 where id = any($1::int[]) and user_id = $3', [op.stepIds, r.id, me]);
       }
@@ -403,13 +388,6 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       }
       return;
     }
-    case 'restore_game_plan_label':
-      await q.query('update game_plans set name = $2, updated_at = now() where id = $1 and user_id = $3', [op.gamePlanId, op.label, me]);
-      if (op.description !== undefined) {
-        await q.query('update game_plans set description = $2 where id = $1 and user_id = $3', [op.gamePlanId, op.description, me]);
-      }
-      if (op.goal !== undefined) await q.query('update game_plans set goal = $2 where id = $1 and user_id = $3', [op.gamePlanId, op.goal, me]);
-      return;
     case 'restore_game_plan_links':
       if (op.added.techniques.length) {
         await q.query('delete from game_plan_techniques where game_plan_id = $1 and technique_id = any($2::int[]) and user_id = $3', [
@@ -548,6 +526,28 @@ async function insertNoteTechnique(q: Queryable, noteId: number, techniqueId: nu
   );
 }
 
+/** The undo ops this version knows (the compiler checks the list is complete). */
+const UNDO_KINDS: Record<UndoOp['kind'], true> = {
+  delete_note: true,
+  delete_techniques: true,
+  restore_technique: true,
+  restore_focus: true,
+  delete_session: true,
+  refile_note: true,
+  restore_note: true,
+  restore_edge: true,
+  restore_link: true,
+  restore_deleted_technique: true,
+  restore_game_plan_links: true,
+  restore_game_plan: true,
+  restore_deleted_game_plan: true,
+  restore_marks: true,
+  batch: true,
+};
+
+/** Whether this version can undo an entry: older ones in the log may use ops that have since been renamed. */
+const known = (op: UndoOp): boolean => Object.hasOwn(UNDO_KINDS, op.kind) && (op.kind !== 'batch' || op.ops.every(known));
+
 /** Reverses the user's most recent write that hasn't been undone yet. */
 export async function undoLast(db: Db): Promise<string> {
   return db.tx(async q => {
@@ -557,62 +557,10 @@ export async function undoLast(db: Db): Promise<string> {
     );
     const row = rows[0];
     if (!row) return 'Nothing to undo.';
-    const stored: unknown = typeof row.undo === 'string' ? JSON.parse(row.undo) : row.undo;
-    await apply(q, normalizeUndoOp(stored));
+    const op = typeof row.undo === 'string' ? (JSON.parse(row.undo) as UndoOp) : row.undo;
+    if (!known(op)) throw new UserError(`"${row.summary}" was saved by an older version of the app and can't be undone.`);
+    await apply(q, op);
     await q.query('update activity_log set undone = true where id = $1', [row.id]);
     return `Undid: ${row.summary}`;
   });
-}
-
-type Stored = Record<string, unknown>;
-
-/**
- * Undo entries are kept as written, so the log holds older shapes too. This is the one place that knows them:
- * it turns any stored entry into the current shape before it's applied.
- * - Game plans were "areas" until 018, and "focus items" before 016: restore_area, restore_deleted_area,
- *   restore_focus_links and restore_focus_label, and the keys itemId, deleteItemId and focusItemIds.
- * - restore_focus's addedLinks (from before 016) named their ends item and technique.
- */
-export function normalizeUndoOp(stored: unknown): UndoOp {
-  const op = { ...(stored as Stored) };
-  const rename = (from: string, to: string) => {
-    if (from in op) {
-      if (!(to in op)) op[to] = op[from];
-      delete op[from];
-    }
-  };
-  switch (op.kind) {
-    case 'batch':
-      op.ops = (op.ops as unknown[]).map(normalizeUndoOp);
-      break;
-    case 'restore_area':
-      op.kind = 'restore_game_plan';
-      break;
-    case 'restore_deleted_area':
-      op.kind = 'restore_deleted_game_plan';
-      break;
-    case 'restore_focus_links':
-      op.kind = 'restore_game_plan_links';
-      rename('itemId', 'gamePlanId');
-      break;
-    case 'restore_focus_label':
-      op.kind = 'restore_game_plan_label';
-      rename('itemId', 'gamePlanId');
-      break;
-    case 'restore_focus':
-      rename('deleteItemId', 'deleteGamePlanId');
-      op.deleteGamePlanId ??= null;
-      if (Array.isArray(op.addedLinks)) {
-        op.addedLinks = (op.addedLinks as Stored[]).map(l =>
-          'item' in l ? { gamePlanId: l.item, techniqueId: l.technique } : l,
-        );
-      }
-      break;
-    case 'restore_note':
-    case 'restore_deleted_technique':
-      rename('focusItemIds', 'gamePlanIds');
-      break;
-  }
-  if (op.kind === 'restore_deleted_technique') op.gamePlanIds ??= [];
-  return op as UndoOp;
 }

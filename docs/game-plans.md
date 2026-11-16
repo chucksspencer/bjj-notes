@@ -25,11 +25,8 @@ aliases, a start, a premise and the step tree. 017 added alternatives (`alt`). 0
 (`db/migrations/018_game_plans.sql`) renamed everything to game plans: tables, columns, and every index,
 constraint and sequence still named after areas or focus items. 018 changes names only, no rows.
 
-What still answers to the old names, each kept in one place: old undo entries (`normalizeUndoOp` in
-`src/services/activity.ts`), iPhone builds 1.1 and older (`GET /api/v1/plan` in the "legacy routes" block of
-`src/http/api.ts`), `add_note`'s `area` and `focus` arguments, and old web links (`/focus/:id` and `/areas/:id`
-redirect to `/game-plans/:id`; `/positions` to `/game`). `GET /api/v1/focus` keeps a `label` on each item for
-iPhone builds from before focus items had names.
+Nothing answers to the area names any more, apart from old web links (`/focus/:id` and `/areas/:id` redirect to
+`/game-plans/:id`; `/positions` to `/game`). Undo entries saved before 018 can't be undone.
 
 ## Rules that keep it small
 
@@ -84,7 +81,7 @@ Weakest step: Shuck (learning).
 | `get_game_plan` | With `name`: one game plan with its steps. Without: every game plan, on focus or not, by where it starts. |
 | `save_game_plan` | Creates or edits a game plan, including its `steps`, and can put it on or take it off focus. `delete: true` removes it for good. `move` reorders one step, found by what it says ("move the kimura before the guillotine", `to: 'first'`, `prefer: true` for plan A); two steps that say the same thing are asked about, not guessed. |
 | `update_focus` | `add`, `move`, `remove`. `add` on an existing game plan puts it back on the list. `pause`, `backlog`, `complete`, `drop` and `resume` are still accepted and mean remove / add. |
-| `add_note` | `game_plan` files the note under one (`area` and `focus` are older names for it). |
+| `add_note` | `game_plan` files the note under one. |
 | `get_technique` | "In game plans: …". |
 | `search` | Also matches game plan names, aliases, premises, step triggers and actions, so "what do I do when they post the far leg" finds the branch. |
 

@@ -597,34 +597,14 @@ describe('JSON API', () => {
     expect(await undo()).toBe(`Undid: deleting note #${calm.id}`);
     expect((await item(id)).notes.map(n => n.id).sort()).toEqual([calm.id, note.id].sort());
 
-    // Undo entries written before focus items became game plans (and before goals were folded into descriptions) still work.
-    const undoOld = async (op: object) => {
-      await s.db.query("insert into activity_log (action, summary, undo, user_id) values ('edit_focus', 'old entry', $1, 1)", [JSON.stringify(op)]);
-      return undo();
-    };
-    expect(await undoOld({ kind: 'restore_focus_label', itemId: id, label: 'Old title', goal: 'Old goal' })).toBe('Undid: old entry');
-    let row = (await s.db.query<{ name: string; goal: string | null; description: string | null }>('select name, goal, description from game_plans where id = $1', [id]))
-      .rows[0]!;
-    expect(row).toEqual({ name: 'Old title', goal: 'Old goal', description: 'Slow down under pressure.\nGoal: no panic taps.' });
-    // An old snapshot had every item on the list with its status: only active ones were ranked.
-    const listed = (await api<FocusView>('GET', '/api/v1/focus')).body.active;
-    const old = listed.map(f => (f.id === id ? { id, status: 'paused', rank: null, goal: null } : { id: f.id, status: 'active', rank: f.rank }));
-    expect(await undoOld({ kind: 'restore_focus', items: old, deleteItemId: null, eventIds: [], addedLinks: [] })).toBe('Undid: old entry');
-    row = (await s.db.query<{ name: string; goal: string | null; description: string | null }>('select name, goal, description from game_plans where id = $1', [id])).rows[0]!;
-    expect(row.goal).toBeNull();
-    expect((await item(id)).rank).toBeNull();
-    expect((await api<FocusView>('GET', '/api/v1/focus')).body.active.map(f => f.id)).toEqual(listed.filter(f => f.id !== id).map(f => f.id));
-    // And entries written while game plans were called areas (restore_area, restore_focus_links with itemId).
-    await api('POST', `/api/v1/game-plans/${id}/links`, { add: { techniqueIds: [ghost.id] } });
-    const areaEra = {
-      kind: 'batch',
-      ops: [
-        { kind: 'restore_area', before: { id, name: 'Area-era name', aliases: [], description: null, start_position_id: null, start_role: null, premise: null } },
-        { kind: 'restore_focus_links', itemId: id, added: { techniques: [ghost.id], notes: [] }, removed: { techniques: [], notes: [] } },
-      ],
-    };
-    expect(await undoOld(areaEra)).toBe('Undid: old entry');
-    expect(await item(id)).toMatchObject({ name: 'Area-era name', techniques: [] });
+    // An entry saved by an older version, under an op that has since been renamed, is refused rather than skipped,
+    // inside a batch too; nothing changes and it stays in the log.
+    for (const op of [{ kind: 'restore_area', before: {} }, { kind: 'batch', ops: [{ kind: 'restore_focus_label', itemId: id }] }]) {
+      await s.db.query("insert into activity_log (action, summary, undo, user_id) values ('edit_area', 'old entry', $1, 1)", [JSON.stringify(op)]);
+      const r = await api('POST', '/api/v1/undo');
+      expect([r.status, r.body.message]).toEqual([400, '"old entry" was saved by an older version of the app and can\'t be undone.']);
+      await s.db.query("delete from activity_log where summary = 'old entry'");
+    }
 
     // Tidy up for later tests.
     await api('POST', '/api/v1/notes/delete', { ids: [calm.id, note.id] });
@@ -685,10 +665,6 @@ describe('JSON API', () => {
     expect(await said('bottom half guard')).toMatch(/^Bottom half: winning the underhook\./);
     expect(await said('half guard top')).toBe("You don't have a game plan from Half guard on top yet.");
     expect(await said('qwxz zzyq')).toBe("I couldn't find a game plan called qwxz zzyq.");
-    // Installed iPhone builds (1.1 and older) still ask the old address, and read areaId.
-    const legacy = (await api('GET', `/api/v1/plan?q=${encodeURIComponent('winning the underhook')}`)).body;
-    expect(legacy).toMatchObject({ gamePlanId: gamePlan.id, areaId: gamePlan.id });
-    expect(legacy.speech).toMatch(/^Bottom half: winning the underhook\./);
 
     // Alternatives ("or"): plan B for a step, after it and its branches, at the same depth. Undone with the rest.
     const withOr = await api<{ message: string; gamePlan: GamePlanDetail }>('PATCH', `/api/v1/game-plans/${gamePlan.id}`, {
