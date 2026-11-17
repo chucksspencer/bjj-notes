@@ -29,6 +29,7 @@ import { clearStars, markAnswered } from '../services/marks.js';
 import { addNote, deleteNote, deleteNotes, fileNote, updateNote } from '../services/notes.js';
 import { deleteTechnique, deleteTechniques, removeEdge, removeLink, saveTechniqueResult } from '../services/techniques.js';
 import {
+  FOCUS_ACTIONS,
   GI,
   LINK_KINDS,
   NOTE_KINDS,
@@ -138,8 +139,7 @@ const gamePlanCreate = z.object({
   position: z.number().int().min(1).optional(),
 });
 const focusActionBody = z.object({
-  // resume, pause, backlog, complete and drop are the older names (resume = add; the rest = remove).
-  action: z.enum(['add', 'move', 'remove', 'resume', 'pause', 'backlog', 'complete', 'drop']),
+  action: z.enum(FOCUS_ACTIONS),
   position: z.number().int().min(1).optional(),
 });
 const optLine = (max: number) => z.string().trim().max(max).nullable().optional();

@@ -87,8 +87,8 @@ async function placeOnFocus(
   if (to !== null) await q.query('update game_plans set updated_at = now() where id = $1 and user_id = $2', [gamePlanId, me]);
   const event = from === null ? 'added' : to === null ? 'removed' : 'moved';
   const { rows } = await q.query<{ id: number }>(
-    'insert into focus_events (game_plan_id, event, from_rank, to_rank) values ($1, $2, $3, $4) returning id',
-    [gamePlanId, event, from, to],
+    'insert into focus_events (game_plan_id, user_id, event, from_rank, to_rank) values ($1, $2, $3, $4, $5) returning id',
+    [gamePlanId, me, event, from, to],
   );
   return { eventId: rows[0]!.id, from, to };
 }
@@ -120,18 +120,6 @@ export interface UpdateFocusInput {
   create?: boolean;
 }
 
-/** The older focus actions, as what they mean now. */
-const ACTION: Record<FocusAction, 'add' | 'move' | 'remove'> = {
-  add: 'add',
-  move: 'move',
-  remove: 'remove',
-  resume: 'add',
-  pause: 'remove',
-  backlog: 'remove',
-  complete: 'remove',
-  drop: 'remove',
-};
-
 /** Makes a game plan; returns its id. */
 async function insertGamePlan(q: Queryable, name: string, description?: string | null): Promise<number> {
   const { rows } = await q.query<{ id: number }>('insert into game_plans (name, description, user_id) values ($1, $2, $3) returning id', [
@@ -144,7 +132,7 @@ async function insertGamePlan(q: Queryable, name: string, description?: string |
 
 /** Puts a game plan on or off the focus list, or moves it; can make the game plan first. */
 export async function updateFocus(ctx: Ctx, input: UpdateFocusInput): Promise<string> {
-  const action = ACTION[input.action];
+  const action = input.action;
   return ctx.db.tx(async q => {
     const me = uid(q);
     const extra: string[] = [];
@@ -218,7 +206,7 @@ export async function updateFocus(ctx: Ctx, input: UpdateFocusInput): Promise<st
 
 /** Focus history for one game plan or the whole list, oldest first. */
 export async function focusHistory(ctx: Ctx, item?: string, limit = 30): Promise<string> {
-  let where = 'where a.user_id = $2';
+  let where = 'where e.user_id = $2';
   const params: unknown[] = [limit, uid(ctx.db)];
   if (item) {
     const r = await resolveGamePlan(ctx.db, item);
@@ -230,7 +218,7 @@ export async function focusHistory(ctx: Ctx, item?: string, limit = 30): Promise
     await ctx.db.query<{ at: string; name: string; event: string; to_rank: number | null }>(
       `select * from (
          select e.at::date::text as at, a.name, e.event, e.to_rank, e.id
-         from focus_events e join game_plans a on a.id = e.game_plan_id ${where}
+         from focus_events e join game_plans a on a.id = e.game_plan_id and a.user_id = e.user_id ${where}
          order by e.id desc limit $1) x
        order by id`,
       params,
@@ -847,23 +835,25 @@ export async function deleteGamePlan(ctx: Ctx, target: { id?: number; name?: str
       id = r.match.id;
     }
     const row = (
-      await q.query<GamePlanSnapshot & { rank: number | null; goal: string | null; created_at: string; updated_at: string }>(
-        `select id, name, aliases, description, start_position_id, start_role, premise, rank, goal,
+      await q.query<GamePlanSnapshot & { rank: number | null; created_at: string; updated_at: string }>(
+        `select id, name, aliases, description, start_position_id, start_role, premise, rank,
                 created_at::text as created_at, updated_at::text as updated_at
          from game_plans where id = $1 and user_id = $2`,
         [id, me],
       )
     ).rows[0];
     if (!row) return `No game plan #${id}.`;
-    const techniqueIds = (await q.query<{ technique_id: number }>('select technique_id from game_plan_techniques where game_plan_id = $1', [id])).rows.map(
-      r => r.technique_id,
+    const techniqueIds = (
+      await q.query<{ technique_id: number }>('select technique_id from game_plan_techniques where game_plan_id = $1 and user_id = $2', [id, me])
+    ).rows.map(r => r.technique_id);
+    const noteIds = (await q.query<{ note_id: number }>('select note_id from game_plan_notes where game_plan_id = $1 and user_id = $2', [id, me])).rows.map(
+      r => r.note_id,
     );
-    const noteIds = (await q.query<{ note_id: number }>('select note_id from game_plan_notes where game_plan_id = $1', [id])).rows.map(r => r.note_id);
     const steps = (await q.query<StepSnapshot>(STEP_SNAPSHOT_SQL, [id, me])).rows;
     const events = (
       await q.query<Extract<UndoOp, { kind: 'restore_deleted_game_plan' }>['events'][number]>(
-        `select id, event, from_status, to_status, from_rank, to_rank, at::text as at from focus_events where game_plan_id = $1 order by id`,
-        [id],
+        `select id, event, from_rank, to_rank, at::text as at from focus_events where game_plan_id = $1 and user_id = $2 order by id`,
+        [id, me],
       )
     ).rows;
     await q.query('delete from game_plans where id = $1 and user_id = $2', [id, me]);

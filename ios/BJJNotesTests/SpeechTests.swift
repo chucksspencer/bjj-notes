@@ -10,11 +10,25 @@ final class SpeechTests: XCTestCase {
     }
 
     func testFocusReadsTheTopThreeInRankOrder() {
-        let item = { (rank: Int, label: String) in FocusItem(id: rank, label: label, goal: nil, rank: rank, lastNoteOn: nil) }
+        let item = { (rank: Int, name: String) in FocusItem(id: rank, name: name, rank: rank, lastNoteOn: nil) }
         XCTAssertEqual(Speech.focus(FocusView(today: "2026-10-18", active: [])), "Your focus list is empty.")
         XCTAssertEqual(Speech.focus(FocusView(today: "2026-10-18", active: [item(1, "Baratoplata")])), "Your focus is Baratoplata.")
         let five = FocusView(today: "2026-10-18", active: [item(2, "Body lock passing"), item(1, "Baratoplata"), item(3, "Ghost escape"), item(4, "Leg elevation"), item(5, "Shoulder crunch")])
         XCTAssertEqual(Speech.focus(five), "Your focus is Baratoplata, then Body lock passing, then Ghost escape. 2 more on the list.")
+    }
+
+    /// The focus list as the server sends it (GET /api/v1/focus): game plans, read by name, extra fields and all.
+    func testFocusFromServerJSON() throws {
+        let json = """
+        {"today":"2026-11-16","active":[
+          {"id":3,"name":"Ghost escape","aliases":[],"description":null,"rank":1,"start":null,"startRole":null,"premise":null,
+           "techniques":[{"id":5,"name":"Ghost escape","type":"escape","role":"bottom","status":"learning"}],"stepCount":0,"noteCount":1,"lastNoteOn":"2026-11-15"},
+          {"id":1,"name":"Baratoplata","aliases":["barataplata"],"description":"Goal: hit it live","rank":2,"start":null,"startRole":null,"premise":null,
+           "techniques":[],"stepCount":2,"noteCount":0,"lastNoteOn":null}]}
+        """
+        let focus = try JSONDecoder().decode(FocusView.self, from: Data(json.utf8))
+        XCTAssertEqual(focus.active.map(\.name), ["Ghost escape", "Baratoplata"])
+        XCTAssertEqual(Speech.focus(focus), "Your focus is Ghost escape, then Baratoplata.")
     }
 
     /// The Lab as the server sends it (GET /api/v1/lab), extra fields and all.

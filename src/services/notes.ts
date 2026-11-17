@@ -314,7 +314,7 @@ export async function fileNote(
     ).rows[0];
     if (!note) return `No note #${noteId}.`;
     const before = (
-      await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [noteId])
+      await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1 and user_id = $2', [noteId, uid(q)])
     ).rows.map(r => r.technique_id);
     const { ids, created, unresolved } = await linkTechniques(q, techniques, newTechniques, techniqueIds);
     for (const id of ids.keys()) {
@@ -402,7 +402,7 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
     const row = (await q.query<NoteRowSnapshot>(NOTE_SNAPSHOT_SQL, [id, uid(q)])).rows[0];
     if (!row) return `No note #${id}.`;
     const before = (
-      await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [id])
+      await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1 and user_id = $2', [id, uid(q)])
     ).rows.map(r => r.technique_id);
     const body = input.body !== undefined ? input.body.trim() : row.body;
     if (!body) throw new UserError('Note text is empty.');
@@ -419,7 +419,7 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
     const fresh = input.new_techniques?.length ? await linkTechniques(q, [], input.new_techniques) : null;
     if (input.technique_ids || fresh) {
       const ids = new Set([...(input.technique_ids ?? before), ...(fresh ? fresh.ids.keys() : [])]);
-      await q.query('delete from note_techniques where note_id = $1', [id]);
+      await q.query('delete from note_techniques where note_id = $1 and user_id = $2', [id, uid(q)]);
       const { rows } = await q.query<{ id: number }>('select id from techniques where id = any($1::int[]) and user_id = $2', [
         [...ids],
         uid(q),
@@ -439,8 +439,9 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
     if (input.technique_ids || fresh || input.game_plan_ids || toTry !== wasToTry) {
       const count = (
         await q.query<{ c: number }>(
-          `select (select count(*) from note_techniques where note_id = $1) + (select count(*) from game_plan_notes where note_id = $1) as c`,
-          [id],
+          `select (select count(*) from note_techniques where note_id = $1 and user_id = $2)
+                + (select count(*) from game_plan_notes where note_id = $1 and user_id = $2) as c`,
+          [id, uid(q)],
         )
       ).rows[0]!.c;
       await q.query('update notes set inbox = $2, to_try = $3 where id = $1 and user_id = $4', [id, !toTry && Number(count) === 0, toTry, uid(q)]);
@@ -489,9 +490,9 @@ async function removeNote(q: Queryable, id: number): Promise<UndoOp | null> {
   const row = (await q.query<NoteRowSnapshot>(NOTE_SNAPSHOT_SQL, [id, uid(q)])).rows[0];
   if (!row) return null;
   const techniqueIds = (
-    await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1', [id])
+    await q.query<{ technique_id: number }>('select technique_id from note_techniques where note_id = $1 and user_id = $2', [id, uid(q)])
   ).rows.map(r => r.technique_id);
-  const attachmentIds = (await q.query<{ id: number }>('select id from attachments where note_id = $1', [id])).rows.map(r => r.id);
+  const attachmentIds = (await q.query<{ id: number }>('select id from attachments where note_id = $1 and user_id = $2', [id, uid(q)])).rows.map(r => r.id);
   const gamePlanIds = await noteGamePlanIds(q, id);
   await q.query('delete from notes where id = $1 and user_id = $2', [id, uid(q)]);
   return {

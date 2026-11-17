@@ -3,7 +3,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { AccountView, GamePlanDetail, GamePlansView, FocusView, LabView, NoteCreateResult, NoteView, PositionListItem, TechniqueListItem, TechniqueView } from '../src/shared/api.js';
+import type { AccountView, GamePlanDetail, GamePlansView, FocusView, LabView, NoteCreateResult, NoteView, PositionListItem, PositionView, TechniqueListItem, TechniqueView } from '../src/shared/api.js';
 import { search } from '../src/services/explore.js';
 import { API_TOKEN, connect, OWNER_PASSWORD, startServer, type TestServer } from './helpers.js';
 
@@ -181,6 +181,11 @@ describe('separate notebooks over the JSON API', () => {
     expect((await api(sam, 'PATCH', `/api/v1/techniques/${ownerGhost.id}`, { status: 'reliable' })).status).toBe(404);
     expect((await api(sam, 'DELETE', `/api/v1/techniques/${ownerGhost.id}`)).body.message).toBe(`No technique #${ownerGhost.id}.`);
     expect((await api(sam, 'POST', '/api/v1/techniques/delete', { ids: [ownerGhost.id] })).body.message).toBe('Nothing to delete.');
+    // Nor its positions.
+    const ownerEdge = (await api<TechniqueView>(owner, 'GET', `/api/v1/techniques/${ownerGhost.id}`)).body.edges[0]!;
+    expect((await api(sam, 'POST', `/api/v1/techniques/${ownerGhost.id}/edges`, { fromPositionId: ownerEdge.from!.id, fromRole: 'top' })).status).toBe(404);
+    expect((await api(sam, 'DELETE', `/api/v1/techniques/${ownerGhost.id}/edges/${ownerEdge.id}`)).status).toBe(404);
+    expect((await api<PositionView>(sam, 'GET', `/api/v1/positions/${ownerEdge.from!.slug}`)).body.from).toEqual([]);
     expect((await api(sam, 'PATCH', `/api/v1/notes/${ownerNote.id}`, { body: 'mine now' })).status).toBe(404);
     expect((await api(sam, 'POST', `/api/v1/notes/${ownerNote.id}/file`, { techniqueIds: [] })).status).toBe(404);
     expect((await api(sam, 'DELETE', `/api/v1/notes/${ownerNote.id}`)).body.message).toBe(`No note #${ownerNote.id}.`);
@@ -198,8 +203,9 @@ describe('separate notebooks over the JSON API', () => {
     const note = (await api<TechniqueView>(owner, 'GET', `/api/v1/techniques/${ownerGhost.id}`)).body;
     expect(note.notes.map(n => n.body)).toEqual(['Turn to the knees before the hips']);
     expect(note.notes[0]!.starred).toBe(true);
+    expect(note.edges).toEqual([ownerEdge]);
     const focus = (await api<FocusView>(owner, 'GET', '/api/v1/focus')).body;
-    expect(focus.active[0]!.label).toBe('Baratoplata');
+    expect(focus.active[0]!.name).toBe('Baratoplata');
     expect(focus.active).toHaveLength(7);
   });
 
@@ -330,7 +336,7 @@ describe('separate notebooks for Claude and Siri', () => {
       expect(await ownerMcp.call('get_technique', { name: 'ghost escape' })).not.toContain('Frame on the hip');
       expect(await samMcp.call('update_note', { note_id: ownerNote.id, body: 'mine' })).toBe(`No note #${ownerNote.id}.`);
       expect(await samMcp.call('file_note', { note_id: ownerNote.id, techniques: ['Ghost escape'] })).toBe(`No note #${ownerNote.id}.`);
-      expect(await samMcp.call('update_focus', { action: 'drop', item: 'Baratoplata' })).toMatch(/^No (confident )?game plan match/);
+      expect(await samMcp.call('update_focus', { action: 'remove', item: 'Baratoplata' })).toMatch(/^No (confident )?game plan match/);
       expect(await samMcp.call('get_game_plan', { name: 'Baratoplata' })).toMatch(/^No (confident )?game plan match/);
       expect(await samMcp.call('review', { days: 30 })).not.toContain('Ghost escape (2)');
 

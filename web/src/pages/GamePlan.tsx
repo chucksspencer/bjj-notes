@@ -1,6 +1,6 @@
 import { useDeferredValue, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import type { GamePlanDetail, TechniqueRef } from '../../../src/shared/api';
+import type { FocusEvent, GamePlanDetail, TechniqueRef } from '../../../src/shared/api';
 import { useGamePlan, useDeleteGamePlan, useFocus, useLinkGamePlan, useNotes } from '../api';
 import { GamePlanEditSheet, FocusControls } from '../components/GamePlanControls';
 import { useCapture } from '../components/Capture';
@@ -199,16 +199,10 @@ function RelatedNotes({ v, today }: { v: GamePlanDetail; today: string }) {
   );
 }
 
-// Paused, backlogged, completed and dropped are from before focus items became game plans, when the list had statuses.
-const EVENT_TEXT: Record<string, string> = {
+const EVENT_TEXT: Record<FocusEvent, string> = {
   added: 'On focus',
   moved: 'Moved',
   removed: 'Off focus',
-  resumed: 'Back on focus',
-  paused: 'Paused',
-  backlogged: 'Moved to the backlog',
-  completed: 'Done',
-  dropped: 'Off focus',
 };
 
 /** The local calendar date of an ISO timestamp, as YYYY-MM-DD. */
@@ -226,7 +220,7 @@ function History({ v, today }: { v: GamePlanDetail; today: string }) {
         <ul className="row list-plain focus-history">
           {v.history.map((h, i) => (
             <li key={i}>
-              <span className="muted">{friendlyDate(localDate(h.at), today)}:</span> {EVENT_TEXT[h.event] ?? h.event}
+              <span className="muted">{friendlyDate(localDate(h.at), today)}:</span> {EVENT_TEXT[h.event]}
               {h.toRank ? ` at #${h.toRank}` : ''}
             </li>
           ))}

@@ -19,8 +19,8 @@ enum Speech {
     static func focus(_ view: FocusView) -> String {
         let items = view.active.sorted { ($0.rank ?? .max) < ($1.rank ?? .max) }
         guard let first = items.first else { return "Your focus list is empty." }
-        let top = items.prefix(3).dropFirst().map { $0.label }
-        var said = "Your focus is \(first.label)"
+        let top = items.prefix(3).dropFirst().map { $0.name }
+        var said = "Your focus is \(first.name)"
         if !top.isEmpty { said += ", then " + top.joined(separator: ", then ") }
         said += "."
         if items.count > 3 { said += " \(items.count - 3) more on the list." }

@@ -71,7 +71,7 @@ struct FocusSnippet: View {
                         .font(.system(.title3, design: .default).weight(.heavy).width(.condensed))
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 22, alignment: .leading)
-                    Text(item.label)
+                    Text(item.name)
                         .font(.system(.body).weight(.semibold))
                 }
             }

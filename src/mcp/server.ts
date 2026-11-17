@@ -25,7 +25,6 @@ import {
   GI,
   LINK_KINDS,
   NOTE_KINDS,
-  OLD_FOCUS_ACTIONS,
   ROLES,
   SESSION_KINDS,
   SOURCE_KINDS,
@@ -332,9 +331,9 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
     {
       title: 'Change the focus list',
       description:
-        'add puts a game plan on the focus list (default position 1 = top), making the game plan if none matches; move re-ranks one; remove takes one off (the game plan, its steps and notes stay). item is the game plan name or a linked technique name. resume, pause, backlog, complete and drop are older names: resume = add, the rest = remove.',
+        'add puts a game plan on the focus list (default position 1 = top), making the game plan if none matches; move re-ranks one; remove takes one off (the game plan, its steps and notes stay). item is the game plan name or a linked technique name.',
       inputSchema: {
-        action: z.enum([...FOCUS_ACTIONS, ...OLD_FOCUS_ACTIONS]),
+        action: z.enum(FOCUS_ACTIONS),
         item: z.string(),
         position: z.number().int().min(1).optional(),
         techniques: z.array(z.string()).optional().describe('Techniques to link to the game plan'),
