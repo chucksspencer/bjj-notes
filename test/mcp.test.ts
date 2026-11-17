@@ -1,34 +1,41 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+// Claude's MCP tools over HTTP, as the connector calls them. Each block works in a notebook of its own, most of them a
+// copy of the owner's starting one (the working list), through its own connector session.
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { connect, startServer, type TestServer } from './helpers.js';
+import {
+  connect,
+  mcpFor,
+  mcpSession,
+  personWithWorkingList,
+  seedNote,
+  seedTechnique,
+  startServer,
+  type McpSession,
+  type TestServer,
+} from './helpers.js';
 
 let s: TestServer;
-let client: Client;
-
-async function call(name: string, args: Record<string, unknown> = {}): Promise<string> {
-  const res = (await client.callTool({ name, arguments: args })) as { content: { type: string; text: string }[]; isError?: boolean };
-  const text = res.content.map(c => c.text).join('\n');
-  if (res.isError) throw new Error(text);
-  return text;
-}
 
 beforeAll(async () => {
   s = await startServer();
-  const { access_token } = await connect(s);
-  client = new Client({ name: 'test', version: '1.0.0' });
-  await client.connect(
-    new StreamableHTTPClientTransport(new URL(s.mcpUrl), {
-      requestInit: { headers: { Authorization: `Bearer ${access_token}` } },
-    }),
-  );
 });
 afterAll(async () => {
-  await client.close();
   await s.close();
 });
 
-describe('MCP tools over HTTP', () => {
+// The owner, signed in through the connector's own OAuth flow, and the notebook migration 003 imports for them.
+describe('MCP tools: the connector', () => {
+  let claude: McpSession;
+  const call = (name: string, args?: Record<string, unknown>) => claude.call(name, args);
+  let client: Client;
+  beforeAll(async () => {
+    claude = await mcpSession(s, (await connect(s)).access_token);
+    client = claude.client;
+  });
+  afterAll(async () => {
+    await claude.client.close();
+  });
+
   it('lists the tools and the server instructions', async () => {
     const { tools } = await client.listTools();
     expect(tools.map(t => t.name).sort()).toEqual(
@@ -60,6 +67,18 @@ describe('MCP tools over HTTP', () => {
     const focus = await call('get_focus');
     expect(focus).toContain('1. Baratoplata — no notes yet');
     expect(focus).toContain('7. Ankle lock adjustments');
+  });
+});
+
+describe('MCP tools: notes and technique cards', () => {
+  let claude: McpSession;
+  const call = (name: string, args?: Record<string, unknown>) => claude.call(name, args);
+  beforeAll(async () => {
+    const { p } = await personWithWorkingList(s);
+    claude = await mcpFor(p);
+  });
+  afterAll(async () => {
+    await claude.client.close();
   });
 
   it('adds a note with a misheard technique name and shows it on the card', async () => {
@@ -137,6 +156,29 @@ describe('MCP tools over HTTP', () => {
     expect(notes).toContain('[Ghost escape]: Turn to the knees');
   });
 
+  it('undoes a technique edit', async () => {
+    await call('save_technique', { name: 'Baratoplata', status: 'drilling', summary: 'Omoplata variation' });
+    expect(await call('get_technique', { name: 'Baratoplata' })).toContain('Status: drilling.');
+    expect(await call('undo_last')).toBe('Undid: Updated Baratoplata');
+    const card = await call('get_technique', { name: 'Baratoplata' });
+    expect(card).toContain('Status: learning.');
+    expect(card).not.toContain('Omoplata variation');
+  });
+});
+
+describe('MCP tools: the focus list', () => {
+  let claude: McpSession;
+  const call = (name: string, args?: Record<string, unknown>) => claude.call(name, args);
+  beforeAll(async () => {
+    const { p } = await personWithWorkingList(s);
+    // A card a new game plan's name can mention.
+    await seedTechnique(p, { name: 'Kimura', type: 'submission', role: 'bottom', from: [{ slug: 'closed-guard', role: 'bottom' }] });
+    claude = await mcpFor(p);
+  });
+  afterAll(async () => {
+    await claude.client.close();
+  });
+
   it('manages the focus list, with history and undo', async () => {
     expect(await call('update_focus', { action: 'add', item: 'Kimura from closed guard' })).toBe(
       'New game plan, on focus at #1: Kimura from closed guard (linked to Kimura).',
@@ -167,6 +209,25 @@ describe('MCP tools over HTTP', () => {
     expect(await call('update_focus', { action: 'add', item: 'ankle lock adjustments' })).toBe('Already #3 on focus: Ankle lock adjustments.');
     const history = await call('get_focus', { history: true, item: 'ankle lock' });
     expect(history).toMatch(/added \(#7\): Ankle lock adjustments\n.*removed: Ankle lock adjustments\n.*added \(#3\): Ankle lock adjustments/);
+  });
+});
+
+describe('MCP tools: the inbox and sessions', () => {
+  let claude: McpSession;
+  const call = (name: string, args?: Record<string, unknown>) => claude.call(name, args);
+  beforeAll(async () => {
+    const { p, ghost, techniques } = await personWithWorkingList(s);
+    // Two notes from today, for the session to attach.
+    await seedNote(p, { text: 'Turn to the knees before the hips; keep the far elbow tight so he cannot follow.', techniqueIds: [ghost.id], kind: 'rolling' });
+    await seedNote(p, {
+      text: 'Lift with the bottom hook, then come up on the far side.',
+      techniqueIds: [techniques['Leg elevation']!.id],
+      source: { url: 'https://youtu.be/abc123', timestamp: '4:32' },
+    });
+    claude = await mcpFor(p);
+  });
+  afterAll(async () => {
+    await claude.client.close();
   });
 
   it('sends unplaceable notes to the inbox and files them later', async () => {
@@ -229,6 +290,18 @@ describe('MCP tools over HTTP', () => {
     );
     expect(await call('undo_last')).toBe(`Undid: edit to note #${id}`);
     expect(await call('get_technique', { name: 'Ghost escape' })).toContain(`- 2024-02-03 instruction #${id}:`);
+  });
+});
+
+describe('MCP tools: To try, stars and the Lab', () => {
+  let claude: McpSession;
+  const call = (name: string, args?: Record<string, unknown>) => claude.call(name, args);
+  beforeAll(async () => {
+    const { p } = await personWithWorkingList(s);
+    claude = await mcpFor(p);
+  });
+  afterAll(async () => {
+    await claude.client.close();
   });
 
   it('keeps "silly Instagram bullshit" on the To try list until it is kept', async () => {
@@ -312,6 +385,22 @@ describe('MCP tools over HTTP', () => {
     expect(await call('update_note', { note_id: qid, answered: true, text: 'Do I hide the arm first?\n\nAnswer: yes.' })).toBe(
       `Updated note #${qid}, marked answered.`,
     );
+  });
+});
+
+describe('MCP tools: game plans', () => {
+  let claude: McpSession;
+  const call = (name: string, args?: Record<string, unknown>) => claude.call(name, args);
+  beforeAll(async () => {
+    const { p, ghost, gamePlans } = await personWithWorkingList(s);
+    // Ghost escape at the top of the focus list, with a note from today; and an Armbar card for a step to use.
+    await p.api('POST', `/api/v1/focus/${gamePlans['Ghost escape']!.id}/actions`, { action: 'move', position: 1 });
+    await seedNote(p, { text: 'Turn to the knees before the hips.', techniqueIds: [ghost.id] });
+    await seedTechnique(p, { name: 'Armbar', type: 'submission', role: 'top' });
+    claude = await mcpFor(p);
+  });
+  afterAll(async () => {
+    await claude.client.close();
   });
 
   it('keeps a description and filed notes on a game plan', async () => {
@@ -503,14 +592,5 @@ describe('MCP tools over HTTP', () => {
     expect(await call('get_game_plan', { name: 'winning the underhook' })).toContain('Continues in: Deep half sweeps.');
     await call('save_game_plan', { name: 'Deep half sweeps', delete: true });
     await call('save_game_plan', { name: 'winning the underhook', delete: true });
-  });
-
-  it('undoes a technique edit', async () => {
-    await call('save_technique', { name: 'Baratoplata', status: 'drilling', summary: 'Omoplata variation' });
-    expect(await call('get_technique', { name: 'Baratoplata' })).toContain('Status: drilling.');
-    expect(await call('undo_last')).toBe('Undid: Updated Baratoplata');
-    const card = await call('get_technique', { name: 'Baratoplata' });
-    expect(card).toContain('Status: learning.');
-    expect(card).not.toContain('Omoplata variation');
   });
 });
