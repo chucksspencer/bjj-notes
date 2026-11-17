@@ -1,5 +1,5 @@
 // Your account (name, email, password, Siri tokens) and, for the owner, the people who can sign in.
-import express, { type RequestHandler, type Request, type Response, type Router } from 'express';
+import express, { type ErrorRequestHandler, type RequestHandler, type Request, type Response, type Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { z } from 'zod';
 import type {
@@ -25,6 +25,7 @@ import {
   removeUser,
   revokeApiToken,
   revokeInvite,
+  TooManySignInsError,
   updateProfile,
   type User,
 } from '../auth/users.js';
@@ -142,7 +143,6 @@ export function accountRouter(opts: AccountRouterOptions): Router {
       const view: AccountView = {
         me: toMe(user),
         tokens: await listApiTokens(db, user.id),
-        ownerApiToken: user.isOwner,
         shareShortcutUrl: opts.shareShortcutUrl ?? null,
       };
       if (user.isOwner) {
@@ -172,7 +172,7 @@ export function accountRouter(opts: AccountRouterOptions): Router {
     h(async (req, res): Promise<MessageResult> => {
       const b = z.object({ current: z.string().max(200), password: z.string().max(200) }).parse(req.body);
       const user = await me(res);
-      await db.tx(q => changePassword(q, user, b.current, b.password, sessionHashOf(req)));
+      await changePassword(db, user, b.current, b.password, sessionHashOf(req));
       return { message: 'Password changed. Claude and Siri Shortcuts need to sign in again.' };
     }),
   );
@@ -228,7 +228,7 @@ export function accountRouter(opts: AccountRouterOptions): Router {
       const user = await owner(res);
       const target = await getUser(db, id.parse(req.params.id));
       if (!target) throw new NotFoundError('No such person.');
-      if (target.isOwner) throw new UserError('Your password is the OWNER_PASSWORD secret; change it in GitHub and redeploy.');
+      if (target.isOwner) throw new UserError('Change your own password on your Account page.');
       const made = await createInvite(db, { createdBy: user.id, purpose: 'reset', userId: target.id });
       res.status(201);
       return { url: linkFor(made.token), invite: made.invite };
@@ -246,6 +246,11 @@ export function accountRouter(opts: AccountRouterOptions): Router {
     }),
   );
 
-  r.use(['/api/v1/account', '/api/v1/invites', '/api/v1/people'], apiErrors);
+  // Too many wrong current passwords: the same answer as signing in.
+  const tooMany: ErrorRequestHandler = (err, _req, res, next) => {
+    if (err instanceof TooManySignInsError && !res.headersSent) res.status(429).json({ error: 'too_many', message: err.message });
+    else next(err);
+  };
+  r.use(['/api/v1/account', '/api/v1/invites', '/api/v1/people'], tooMany, apiErrors);
   return r;
 }

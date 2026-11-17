@@ -3,7 +3,7 @@ import { rateLimit } from 'express-rate-limit';
 import { redirectUriMatches } from '@modelcontextprotocol/sdk/server/auth/handlers/authorize.js';
 import type { Db } from '../db.js';
 import { loginHeaders, type NotesOAuthProvider } from './provider.js';
-import { authenticate } from './users.js';
+import { signIn, TooManySignInsError } from './users.js';
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -52,9 +52,10 @@ export function loginPage(opts: { clientName: string; fields: Record<string, str
 }
 
 /** POST /oauth/login: checks the email and password and completes the authorization redirect for that person. */
-export function loginRouter(provider: NotesOAuthProvider, db: Db, ownerPassword: string): Router {
+export function loginRouter(provider: NotesOAuthProvider, db: Db): Router {
   const router = express.Router();
-  // Wrong passwords count (a success is the redirect back to Claude), so people sharing a network don't lock each other out.
+  // Per IP, in memory: the cheap first line. Wrong passwords count (a success is the redirect back to Claude),
+  // so people sharing a network don't lock each other out. `signIn` also limits each account, in the database.
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 10,
@@ -86,7 +87,18 @@ export function loginRouter(provider: NotesOAuthProvider, db: Db, ownerPassword:
       resource: f.resource ?? '',
     };
     const email = (f.email ?? '').slice(0, 254);
-    const user = await authenticate(db, email, f.password ?? '', ownerPassword);
+    let user;
+    try {
+      user = await signIn(db, email, f.password ?? '');
+    } catch (err) {
+      if (!(err instanceof TooManySignInsError)) throw err;
+      res
+        .status(429)
+        .type('html')
+        .set(loginHeaders(redirectUri))
+        .send(loginPage({ clientName: client.client_name ?? 'An app', fields, email, error: err.message }));
+      return;
+    }
     if (!user) {
       res
         .status(401)

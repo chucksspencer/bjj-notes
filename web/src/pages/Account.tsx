@@ -142,18 +142,6 @@ function Password({ a }: { a: AccountView }) {
   const toast = useToast();
   const [current, setCurrent] = useState('');
   const [password, setPassword] = useState('');
-  if (a.me.isOwner) {
-    return (
-      <section>
-        <h2 className="section-title">Password</h2>
-        <div className="panel">
-          <p className="account-note">
-            Your password is the <code>OWNER_PASSWORD</code> secret in GitHub. To change it, update the secret and run the deploy.
-          </p>
-        </div>
-      </section>
-    );
-  }
   return (
     <section>
       <h2 className="section-title">Password</h2>
@@ -287,7 +275,6 @@ function Tokens({ a }: { a: AccountView }) {
         <p className="account-note">
           Shortcuts send notes to <code>{captureUrl}</code> with a token in the <code>Authorization</code> header (
           <code>Bearer</code> then the token). Make one token per phone or shortcut, so you can remove it on its own.
-          {a.ownerApiToken && ' The API_TOKEN secret works too.'}
         </p>
         {a.tokens.map(t => (
           <div className="row row-split" key={t.id}>

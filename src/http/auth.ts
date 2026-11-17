@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response, type Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { sha256 } from '../auth/provider.js';
-import { authenticate, getUser, userForApiToken, type User } from '../auth/users.js';
+import { getUser, signIn, TooManySignInsError, userForApiToken, type User } from '../auth/users.js';
 import type { Db } from '../db.js';
 import type { SessionInfo } from '../shared/api.js';
 
@@ -41,8 +41,6 @@ export const sessionInfo = (u: User): SessionInfo => ({
 
 export interface WebAuthOptions {
   db: Db;
-  ownerPassword: string;
-  apiToken: string;
   /** Set the Secure flag (true whenever the public URL is https). */
   secureCookies: boolean;
 }
@@ -82,7 +80,7 @@ export function webAuth(opts: WebAuthOptions) {
     try {
       const bearer = (req.get('authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
       if (bearer) {
-        const userId = await userForApiToken(db, bearer, opts.apiToken);
+        const userId = await userForApiToken(db, bearer);
         if (userId !== null) {
           res.locals.userId = userId;
           return next();
@@ -105,8 +103,9 @@ export function webAuth(opts: WebAuthOptions) {
   };
 
   const router: Router = express.Router();
-  // Wrong passwords count toward the limit; successful sign-ins don't, so several people behind one
-  // network (a gym's wifi) aren't locked out by each other.
+  // Per IP, in memory: the cheap first line (`signIn` also limits each account, in the database). Wrong
+  // passwords count toward it; successful sign-ins don't, so several people behind one network (a gym's
+  // wifi) aren't locked out by each other.
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 10,
@@ -135,7 +134,14 @@ export function webAuth(opts: WebAuthOptions) {
       }
       const password = typeof req.body?.password === 'string' ? req.body.password : '';
       const email = typeof req.body?.email === 'string' ? req.body.email.slice(0, 254) : '';
-      const user = await authenticate(db, email, password, opts.ownerPassword);
+      let user;
+      try {
+        user = await signIn(db, email, password);
+      } catch (err) {
+        if (!(err instanceof TooManySignInsError)) throw err;
+        res.status(429).json({ error: 'too_many', message: err.message });
+        return;
+      }
       if (!user) {
         res.status(401).json({ error: 'wrong_password', message: 'Wrong email or password.' });
         return;

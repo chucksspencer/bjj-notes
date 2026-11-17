@@ -6,10 +6,10 @@ export interface Config {
   databaseUrl?: string;
   /** Folder for the embedded database; in memory if unset (development only). */
   pgliteDir?: string;
-  /** Password for the OAuth login page shown when connecting Claude. */
-  ownerPassword: string;
-  /** Bearer token for the Siri Shortcut endpoints under /api. */
-  apiToken: string;
+  /** The owner's first password: copied into their account at startup if they have none yet, otherwise ignored. */
+  ownerPassword?: string;
+  /** The owner's first Siri token: added to their tokens at startup, once, otherwise ignored. */
+  apiToken?: string;
   /** Enables Claude-powered parsing of dictated notes in /api/capture, and search by meaning. */
   anthropicApiKey?: string;
   captureModel: string;
@@ -30,10 +30,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (publicUrl.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(publicUrl.hostname)) {
     problems.push('PUBLIC_URL must use https (except localhost).');
   }
-  const ownerPassword = env.OWNER_PASSWORD ?? '';
-  if (ownerPassword.length < 12) problems.push('OWNER_PASSWORD must be at least 12 characters.');
-  const apiToken = env.API_TOKEN ?? '';
-  if (apiToken.length < 32) problems.push('API_TOKEN must be at least 32 characters (try: openssl rand -base64 32).');
+  const ownerPassword = env.OWNER_PASSWORD || undefined;
+  if (ownerPassword && ownerPassword.length < 12) problems.push('OWNER_PASSWORD must be at least 12 characters.');
+  const apiToken = env.API_TOKEN || undefined;
+  if (apiToken && apiToken.length < 32) problems.push('API_TOKEN must be at least 32 characters (try: openssl rand -base64 32).');
   const timeZone = env.TIME_ZONE ?? 'America/Chicago';
   try {
     new Intl.DateTimeFormat('en-US', { timeZone });
