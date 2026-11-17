@@ -159,6 +159,8 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Frame on the hip');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
+    // The toast from the step before can still be showing: the sheet closing is what says this write is on screen.
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
     await page.getByRole('list', { name: 'Steps' }).getByText('Frame on the hip').waitFor();
 
     // A branch: what to do when they react.
@@ -168,6 +170,7 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Ghost escape');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
     await page.getByText('If crossface hard').waitFor();
 
     // An alternative: plan B for the first step, which can be made plan A.
@@ -175,6 +178,7 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Bridge and shrimp');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
     // Plan A and plan B side by side, each a branch with its own steps under it.
     const first = page.getByRole('list', { name: 'Steps' }).locator('> .step.numbered').first();
     const planAB = async () => first.locator('> .step-option > .step-line .step-do').allTextContents();
@@ -186,6 +190,7 @@ describe.runIf(run)('web app (end to end)', () => {
       await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill(action);
       await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
       await page.getByText('Step added').waitFor();
+      await page.getByRole('dialog').waitFor({ state: 'hidden' });
     };
     await add(1, 'Take the back');
     await add(0, 'Hold the hip');
@@ -204,6 +209,7 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByLabel('Why, or the cue (optional)').fill('Seat belt first');
     await page.getByRole('dialog').getByLabel('Why, or the cue (optional)').press('Enter');
     await page.getByText('Step saved').waitFor();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
     await page.getByText('Seat belt first').waitFor();
     expect(await stepIds()).toEqual(idsBefore);
     expect(await page.locator('.step-option', { hasText: 'Frame on the hip' }).first().evaluate(el => (el as HTMLElement & { kept?: boolean }).kept)).toBe(true);
@@ -254,6 +260,7 @@ describe.runIf(run)('web app (end to end)', () => {
     // Now that the page is up to date, the same sheet saves.
     await cue.press('Enter');
     await page.getByText('Step saved').waitFor();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
     await page.getByRole('list', { name: 'Steps' }).getByText('Overwritten?').waitFor();
     expect(await stepIds()).toEqual(idsBefore);
 
@@ -261,6 +268,7 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Knee to elbow');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
     const mainLine = page.getByRole('list', { name: 'Steps' }).locator('> .step.numbered > .step-option:first-of-type > .step-line .step-do');
     expect(await mainLine.allTextContents()).toEqual(['Frame on the hip', 'Knee to elbow']);
     expect(await page.getByRole('button', { name: 'Move Knee to elbow down' }).isDisabled()).toBe(true);
