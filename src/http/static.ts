@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 export const DEFAULT_WEB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'dist', 'public');
 
 // Paths that belong to the server, never to the web app's client-side routes.
-const SERVER_PATHS = /^\/(api|mcp|oauth|\.well-known|authorize|token|register|revoke|healthz)(\/|$)/;
+const SERVER_PATHS = /^\/(api|mcp|oauth|\.well-known|authorize|token|register|revoke|healthz|readyz)(\/|$)/;
 
 const CSP = [
   "default-src 'self'",

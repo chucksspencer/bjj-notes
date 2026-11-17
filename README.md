@@ -55,7 +55,7 @@ In this repo: **Settings → Secrets and variables → Actions → New repositor
 1. **Actions → CI → Run workflow** on `main`.
 2. When it finishes, the run summary shows the **Claude connector URL**: `https://bjj-notes-<project number>.us-central1.run.app/mcp`.
 
-From then on, every push to `main` tests, builds and deploys. The deploy copies your GitHub secrets into Google Secret Manager (only when they change), so GitHub stays the one place you edit them.
+From then on, every push to `main` tests, builds and deploys. The deploy copies your GitHub secrets into Google Secret Manager (only when they change), so GitHub stays the one place you edit them. After the rollout the deploy calls `/readyz` and fails if the new revision can't reach its database.
 
 ### 6. Connect Claude
 
@@ -207,7 +207,7 @@ The image is also built for Arm, so it runs as-is on a cheap VM with Docker Comp
 ```
 src/
   server.ts          entry point: config, database, migrations, HTTP
-  app.ts             routes: OAuth, /mcp (stateless Streamable HTTP), /api, the web app, /healthz
+  app.ts             routes: OAuth, /mcp (stateless Streamable HTTP), /api, the web app, /healthz, /readyz
   http/              the web app's sign-in (cookie sessions), JSON API (/api/v1), account and invites, static hosting
   shared/api.ts      types shared by the JSON API and the web app
   mcp/server.ts      the 12 MCP tools and the instructions Claude sees

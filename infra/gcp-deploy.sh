@@ -117,6 +117,20 @@ if [ -z "${PUBLIC_URL:-}" ] && ! grep -qxF "$URL" <<<"$KNOWN"; then
     --update-env-vars="PUBLIC_URL=$URL" --quiet
 fi
 
+# 4. Check that the new revision is really up: /readyz reaches the database (and so means migrations finished).
+#    Uses the service's own address, which resolves from here even if a custom domain doesn't yet.
+CHECK_URL="$(jq -r '.status.url' <<<"$DESCRIBE")"
+ready=""
+for attempt in 1 2 3 4 5 6; do
+  if ready="$(curl -fsS --max-time 20 "$CHECK_URL/readyz" 2>/dev/null)" && jq -e '.ok == true' >/dev/null 2>&1 <<<"$ready"; then
+    echo "Ready (attempt $attempt): $ready"
+    break
+  fi
+  ready=""
+  [ "$attempt" -eq 6 ] || sleep 5
+done
+[ -n "$ready" ] || fail "The new revision is serving, but $CHECK_URL/readyz never said ok: it can't reach its database or hasn't finished migrations. See: gcloud run services logs read $SERVICE --project=$PROJECT_ID --region=$REGION --limit=50"
+
 echo "Claude connector URL: $URL/mcp"
 echo "Siri capture URL:     $URL/api/capture"
 if [ -n "${GITHUB_ACTIONS:-}" ]; then

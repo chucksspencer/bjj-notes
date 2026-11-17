@@ -9,7 +9,8 @@ scratch is in the [README](../README.md); this is for after that. Keep it curren
 | --- | --- |
 | The app | https://bjjnotes.chuckspencer.com (the `run.app` address works too) |
 | Claude connector | https://bjjnotes.chuckspencer.com/mcp |
-| Health check | https://bjjnotes.chuckspencer.com/healthz |
+| Health check | https://bjjnotes.chuckspencer.com/healthz (the server is up; does not touch the database) |
+| Readiness check | https://bjjnotes.chuckspencer.com/readyz (reaches the database; says the newest migration, or 503) |
 | Code, CI, settings | github.com/chucksspencer/bjj-notes (public). `main` is what's live. |
 | Server | Google Cloud Run service `bjj-notes` in `us-central1`: 1 CPU, 512 MiB, at most one instance, scales to zero. The Google Cloud project is labelled `app=bjj-notes` (`gcloud projects list --filter=labels.app=bjj-notes`). |
 | Database | Neon Postgres, free plan. Neon itself can rewind only the last 6 hours. |
@@ -56,6 +57,12 @@ workflow** so the deploy copies it to the server.
   release (three weeks for major versions). Merge them when CI is green.
 - **Database migrations** run when the server starts: each file in `db/migrations` once, in order, each in its
   own transaction.
+- **Housekeeping** (`src/services/housekeeping.ts`) runs once each time the server starts (it scales to zero, so that
+  is the main trigger) and every 24 hours while it stays up; a line in the logs says what it removed. It deletes:
+  activity log entries older than 90 days (each person's newest 200 stay); photos and videos left without a note
+  after 30 days, unless a live undo entry still needs them; sign-in codes expired a day ago; tokens expired 7 days
+  ago; registered clients over 7 days old with no codes or tokens; browser sessions past their expiry; and invites
+  used or expired over 30 days ago. Notes and everything in a notebook are never touched.
 
 ## Things that expire
 
@@ -119,10 +126,10 @@ $10 a month; the next deploy puts it back to 0 unless `infra/gcp-deploy.sh` is c
 
 | Symptom | Look at |
 | --- | --- |
-| Nothing loads | `/healthz`. Then Actions (did a deploy fail?) and the logs. |
+| Nothing loads | `/healthz` (server up) and `/readyz` (database reachable, migrations done). Then Actions (did a deploy fail?) and the logs. |
 | Claude can't use BJJ Notes, or keeps asking to sign in | Remove and re-add the connector with the `/mcp` address above. |
 | Siri says it couldn't reach BJJ Notes | `/healthz`; the token still exists on the Account page; the Shortcut's address. In the iPhone app, a note said offline is sent later by itself. |
-| A deploy failed | The failed step in the Actions run. Usual causes: a missing secret, a failing test, Google Cloud permissions (re-run `infra/gcp-bootstrap.sh`; safe to repeat). |
+| A deploy failed | (A deploy also fails when `/readyz` doesn't say ok within about 30 seconds of the rollout: the new revision is serving but can't reach its database or finish migrations; read the logs with the `gcloud run services logs read` command in the error.) The failed step in the Actions run. Usual causes: a missing secret, a failing test, Google Cloud permissions (re-run `infra/gcp-bootstrap.sh`; safe to repeat). |
 | A backup failed | The Backup run's log. A missing bucket or permission: re-run `infra/gcp-bootstrap.sh`. |
 | Account page says search by meaning failed | The error it shows: usually the Anthropic key or billing. Search keeps working by words meanwhile. |
 | The iPhone app won't open after months | The TestFlight build expired: run the iOS workflow. |
