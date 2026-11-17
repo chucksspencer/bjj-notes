@@ -28,7 +28,7 @@ export interface TestServer {
  * Each test server gets a fresh database: embedded PGlite by default, or a new database on a real
  * Postgres server when TEST_PG_ADMIN_URL is set (exercises the production node-postgres adapter).
  */
-async function freshDb(): Promise<{ db: Db; drop: () => Promise<void> }> {
+export async function freshDb(): Promise<{ db: Db; drop: () => Promise<void> }> {
   const admin = process.env.TEST_PG_ADMIN_URL;
   if (!admin) return { db: await pgliteDb(), drop: async () => {} };
   const name = `bjj_test_${randomUUID().replace(/-/g, '')}`;

@@ -21,6 +21,8 @@ export type SessionKind = 'class' | 'open_mat' | 'private' | 'seminar' | 'compet
 export type LinkKind = 'chain' | 'counter' | 'variation' | 'setup' | 'related';
 /** add puts a game plan on the focus list (at a position, default the top), move re-ranks it, remove takes it off. */
 export type FocusAction = 'add' | 'move' | 'remove';
+/** What happened on the focus list: a game plan went on, moved, or came off. */
+export type FocusEvent = 'added' | 'moved' | 'removed';
 export type PositionCategory = 'standing' | 'guard' | 'pin' | 'back' | 'leg' | 'transitional';
 
 export interface TechniqueRef {
@@ -229,7 +231,7 @@ export interface GamePlanDetail extends GamePlanView {
   /** How many notes on its techniques aren't linked to it. */
   relatedCount: number;
   /** Every time it went on or off the focus list or moved on it, oldest first. */
-  history: { at: string; event: string; toRank: number | null }[];
+  history: { at: string; event: FocusEvent; toRank: number | null }[];
 }
 
 /** One step to save. Steps are flat, in reading order; depth says where each one hangs. */
@@ -300,11 +302,8 @@ export interface GamePlanLinksInput {
   remove?: { techniqueIds?: number[]; noteIds?: number[] };
 }
 
-/** An item on the focus list. */
-export interface FocusItem extends GamePlanView {
-  /** The same as name, for app builds from before focus items had names (they read label). */
-  label: string;
-}
+/** An item on the focus list: a game plan with a rank. */
+export type FocusItem = GamePlanView;
 
 export interface FocusView {
   /** Today's date in the server's configured time zone, YYYY-MM-DD. */

@@ -160,8 +160,9 @@ describe('MCP tools over HTTP', () => {
     expect(await call('get_game_plan')).toContain('Ankle lock adjustments');
     expect(await call('update_focus', { action: 'remove', item: 'ankle lock' })).toBe('Already off focus: Ankle lock adjustments.');
 
-    // Older action names still work: resume puts it back on, pause takes it off.
-    expect(await call('update_focus', { action: 'resume', item: 'ankle lock', position: 3 })).toBe('On focus at #3: Ankle lock adjustments.');
+    // Only add, move and remove: the older names (resume, pause...) are gone.
+    await expect(call('update_focus', { action: 'resume', item: 'ankle lock', position: 3 })).rejects.toThrow();
+    expect(await call('update_focus', { action: 'add', item: 'ankle lock', position: 3 })).toBe('On focus at #3: Ankle lock adjustments.');
     // Adding what's already there doesn't make a second one.
     expect(await call('update_focus', { action: 'add', item: 'ankle lock adjustments' })).toBe('Already #3 on focus: Ankle lock adjustments.');
     const history = await call('get_focus', { history: true, item: 'ankle lock' });

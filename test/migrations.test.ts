@@ -1,16 +1,25 @@
 // Migrations that change what's already in a notebook, checked against data from before them.
 import { afterEach, describe, expect, it } from 'vitest';
-import { migrate, pgliteDb, type Db } from '../src/db.js';
+import { forUser, migrate, type Db } from '../src/db.js';
+import { undo } from '../src/services/activity.js';
+import { freshDb } from './helpers.js';
 
 let db: Db;
+let drop: () => Promise<void>;
 
 afterEach(async () => {
   await db.close();
+  await drop();
 });
+
+/** A fresh database (PGlite, or Postgres with TEST_PG_ADMIN_URL), so each migration is checked on both. */
+async function fresh() {
+  ({ db, drop } = await freshDb());
+}
 
 /** A fresh database brought up to just before `name`, so data can be put in place for that migration. */
 async function migrateUpTo(name: string) {
-  db = await pgliteDb();
+  await fresh();
   await migrate(db, { before: name });
 }
 
@@ -138,7 +147,7 @@ describe('018: game plans', () => {
   });
 
   it('leaves no names from areas or focus items in the schema', async () => {
-    db = await pgliteDb();
+    await fresh();
     await migrate(db);
     const old = '(^|_)(areas?|focus_items?)(_|$)';
     const names = [
@@ -156,6 +165,119 @@ describe('018: game plans', () => {
       )),
     ].map(r => r.n);
     expect(names).toEqual([]);
+  });
+});
+
+describe('019: cleanup', () => {
+  const q = async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows;
+  const columns = async (table: string) =>
+    (await q<{ column_name: string }>('select column_name from information_schema.columns where table_name = $1', [table])).map(c => c.column_name);
+
+  it('drops what focus items and areas left behind, and keeps every notebook to itself', async () => {
+    await migrateUpTo('019_cleanup.sql');
+    const owner = (await q<{ id: number }>('select id from users where is_owner'))[0]!.id;
+    const sam = (await q<{ id: number }>("insert into users (email, name) values ('sam@example.com', 'Sam') returning id"))[0]!.id;
+    const plans = await q<{ id: number }>('select id from game_plans where user_id = $1 order by rank', [owner]);
+    expect(plans.length).toBe(7);
+    // An old goal (folded into the description by 015), and two game plans sharing a rank.
+    await db.query("update game_plans set goal = 'Hit it live' where id = $1", [plans[0]!.id]);
+    await db.query('update game_plans set rank = 2 where id = $1', [plans[2]!.id]);
+    // Sam's list has gaps and a tie: 3, 3, 8.
+    const samPlans: number[] = [];
+    for (const [name, rank] of [['Sam A', 3], ['Sam B', 3], ['Sam C', 8], ['Sam off', null]] as const) {
+      samPlans.push((await q<{ id: number }>('insert into game_plans (name, rank, user_id) values ($1, $2, $3) returning id', [name, rank, sam]))[0]!.id);
+    }
+    // One of each older focus event.
+    const old = ['resumed', 'paused', 'completed', 'backlogged', 'dropped', 'moved', 'removed'];
+    for (const event of old) {
+      await db.query("insert into focus_events (game_plan_id, event, from_status, to_status) values ($1, $2, 'active', 'paused')", [plans[1]!.id, event]);
+    }
+    await db.query("insert into focus_events (game_plan_id, event) values ($1, 'added')", [samPlans[0]]);
+    const samTech = (await q<{ id: number }>("insert into techniques (name, type, user_id) values ('Kimura', 'submission', $1) returning id", [sam]))[0]!.id;
+    const pos = (await q<{ id: number }>("select id from positions where slug = 'half-guard'"))[0]!.id;
+    await db.query("insert into technique_edges (technique_id, from_position_id, from_role) values ($1, $2, 'bottom')", [samTech, pos]);
+    const ownerEdges = (await q<{ c: number }>('select count(*)::int as c from technique_edges e join techniques t on t.id = e.technique_id where t.user_id = $1', [owner]))[0]!.c;
+    expect(ownerEdges).toBe(5);
+    // An undo entry from before: deleting a game plan that had a goal and an older focus event.
+    const deleted = {
+      kind: 'restore_deleted_game_plan',
+      row: { id: 9001, name: 'Old plan', aliases: [], description: null, start_position_id: null, start_role: null, premise: null, rank: 1,
+             goal: 'An old goal', created_at: '2026-01-01 00:00:00+00', updated_at: '2026-01-01 00:00:00+00' },
+      techniqueIds: [],
+      noteIds: [],
+      steps: [],
+      events: [{ id: 9001, event: 'paused', from_status: 'active', to_status: 'paused', from_rank: 1, to_rank: null, at: '2026-01-02 00:00:00+00' }],
+    };
+    await db.query("insert into activity_log (action, summary, undo, user_id) values ('delete_game_plan', 'delete \"Old plan\"', $1, $2)", [JSON.stringify(deleted), owner]);
+
+    expect(await migrate(db, { through: '019_cleanup.sql' })).toEqual(['019_cleanup.sql']);
+
+    // Goals and the focus statuses are gone.
+    expect(await columns('game_plans')).not.toContain('goal');
+    expect(await columns('focus_events')).not.toContain('from_status');
+    expect(await columns('focus_events')).not.toContain('to_status');
+    // Older events read as what they meant, each with its owner.
+    const events = await q<{ event: string; user_id: number }>('select event, user_id from focus_events where game_plan_id = $1 order by id', [plans[1]!.id]);
+    expect(events.map(e => e.event)).toEqual(['added', 'added', 'removed', 'removed', 'removed', 'removed', 'moved', 'removed']);
+    expect(events.every(e => e.user_id === owner)).toBe(true);
+    expect(await q('select user_id from focus_events where game_plan_id = $1', [samPlans[0]])).toEqual([{ user_id: sam }]);
+    await expect(db.query("insert into focus_events (game_plan_id, user_id, event) values ($1, $2, 'paused')", [plans[1]!.id, owner])).rejects.toThrow();
+    // Edges know whose they are.
+    expect((await q<{ c: number }>('select count(*)::int as c from technique_edges where user_id = $1', [owner]))[0]!.c).toBe(ownerEdges);
+    expect(await q('select user_id from technique_edges where technique_id = $1', [samTech])).toEqual([{ user_id: sam }]);
+    expect((await q<{ c: number }>('select count(*)::int as c from technique_edges e join techniques t on t.id = e.technique_id where e.user_id <> t.user_id'))[0]!.c).toBe(0);
+    // Nothing can point at someone else's technique or game plan.
+    const ownerTech = (await q<{ id: number }>("select id from techniques where user_id = $1 and name = 'Ghost escape'", [owner]))[0]!.id;
+    await expect(db.query("insert into technique_edges (technique_id, user_id, from_position_id) values ($1, $2, $3)", [ownerTech, sam, pos])).rejects.toThrow();
+    await expect(db.query("insert into focus_events (game_plan_id, user_id, event) values ($1, $2, 'added')", [plans[0]!.id, sam])).rejects.toThrow();
+    // Deleting a technique still takes its edges with it.
+    await db.query('delete from techniques where id = $1', [samTech]);
+    expect(await q('select id from technique_edges where technique_id = $1', [samTech])).toEqual([]);
+
+    // Each list runs 1, 2, 3... with ties kept in id order; game plans off focus stay off.
+    const ranks = async (user: number) => (await q<{ id: number; rank: number | null }>('select id, rank from game_plans where user_id = $1 order by rank nulls last, id', [user]));
+    expect((await ranks(owner)).map(r => r.rank)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect((await ranks(owner)).slice(1, 3).map(r => r.id)).toEqual([plans[1]!.id, plans[2]!.id]);
+    expect(await ranks(sam)).toEqual([
+      { id: samPlans[0], rank: 1 },
+      { id: samPlans[1], rank: 2 },
+      { id: samPlans[2], rank: 3 },
+      { id: samPlans[3], rank: null },
+    ]);
+    // Two of a rank can't be committed, but a swap a row at a time inside one transaction can.
+    await expect(db.tx(q => q.query('update game_plans set rank = 1 where id = $1', [samPlans[1]]))).rejects.toThrow(/game_plans_user_rank/);
+    await expect(db.query('update game_plans set rank = 1 where id = $1', [samPlans[1]])).rejects.toThrow(/game_plans_user_rank/);
+    await db.tx(async t => {
+      await t.query('update game_plans set rank = 2 where id = $1', [samPlans[0]]);
+      await t.query('update game_plans set rank = 1 where id = $1', [samPlans[1]]);
+    });
+    expect((await ranks(sam)).map(r => r.id)).toEqual([samPlans[1], samPlans[0], samPlans[2], samPlans[3]]);
+    // Another person's list can have the same ranks.
+    expect((await q<{ c: number }>('select count(*)::int as c from game_plans where rank = 1'))[0]!.c).toBe(2);
+
+    // The single-user indexes are gone, and the per-person ones are there.
+    const indexes = (await q<{ indexname: string }>("select indexname from pg_indexes where schemaname = 'public'")).map(r => r.indexname);
+    for (const gone of ['notes_inbox', 'notes_observed_on', 'notes_open_questions', 'notes_starred', 'notes_to_try', 'sessions_date', 'sessions_date_kind', 'techniques_starred', 'focus_events_item']) {
+      expect(indexes).not.toContain(gone);
+    }
+    expect(indexes).toEqual(
+      expect.arrayContaining([
+        'notes_user_inbox',
+        'notes_user_to_try',
+        'notes_user_starred',
+        'notes_user_open_questions',
+        'techniques_user_starred',
+        'technique_edges_user',
+        'focus_events_game_plan',
+        'focus_events_user',
+        'game_plans_user_rank',
+      ]),
+    );
+
+    // The old undo entry still works: its goal and the older event's statuses are ignored.
+    expect(await undo(forUser(db, owner))).toBe('Undid: delete "Old plan"');
+    expect((await ranks(owner)).map(r => [r.id, r.rank])).toEqual([[9001, 1], ...plans.map((p, i) => [p.id, i + 2])]);
+    expect(await q('select event, user_id from focus_events where id = 9001')).toEqual([{ event: 'removed', user_id: owner }]);
   });
 });
 

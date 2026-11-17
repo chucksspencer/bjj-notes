@@ -320,7 +320,7 @@ export function captureRouter(base: Ctx, structurer: Structurer | null): Router 
 
   router.get('/api/focus', auth, async (_req, res) => {
     const text = await getFocus(userCtx(base, userIdOf(res)));
-    // Drop the "last note" detail for speech; keep rank and label.
+    // Drop the "last note" detail for speech; keep rank and name.
     const speech = text
       .split('\n')
       .filter(l => /^\d+\. /.test(l))

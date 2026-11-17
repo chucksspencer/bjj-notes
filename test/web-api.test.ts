@@ -255,8 +255,8 @@ describe('JSON API', () => {
     let focus = (await api<FocusView>('GET', '/api/v1/focus')).body;
     expect(focus.active.map(f => f.rank)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     const ghostItem = focus.active.find(f => f.name === 'Ghost escape')!;
-    // label is the name again, for app builds from before focus items had names.
-    expect(ghostItem.label).toBe('Ghost escape');
+    // No second copy of the name under the old focus items' field.
+    expect(ghostItem).not.toHaveProperty('label');
     expect(ghostItem.techniques.map(t => t.name)).toEqual(['Ghost escape']);
     expect(ghostItem.lastNoteOn).toBe('2026-10-12');
 
@@ -269,10 +269,11 @@ describe('JSON API', () => {
     const gamePlans = (await api<GamePlansView>('GET', '/api/v1/game-plans')).body.gamePlans;
     expect(gamePlans.find(a => a.id === ghostItem.id)).toMatchObject({ name: 'Ghost escape', rank: null });
     expect(gamePlans.slice(0, 6).map(a => a.rank)).toEqual([1, 2, 3, 4, 5, 6]);
-    // The older action names still work: resume puts it back.
-    const back = await api('POST', `/api/v1/focus/${ghostItem.id}/actions`, { action: 'resume', position: 3 });
+    // Only add, move and remove: the older names (resume, pause...) are gone.
+    expect((await api('POST', `/api/v1/focus/${ghostItem.id}/actions`, { action: 'resume', position: 3 })).status).toBe(400);
+    const back = await api('POST', `/api/v1/focus/${ghostItem.id}/actions`, { action: 'add', position: 3 });
     expect(back.body.message).toBe('On focus at #3: Ghost escape.');
-    await api('POST', `/api/v1/focus/${ghostItem.id}/actions`, { action: 'pause' });
+    await api('POST', `/api/v1/focus/${ghostItem.id}/actions`, { action: 'remove' });
 
     const added = await api<{ message: string; gamePlan: GamePlanDetail }>('POST', '/api/v1/game-plans', { name: 'Kimura from guard', techniqueIds: [], position: 2 });
     expect(added.status).toBe(201);

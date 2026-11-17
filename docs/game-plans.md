@@ -20,13 +20,17 @@ The tree is always called its *steps*, never its "plan", so nothing reads "the g
 | now | game plans | `game_plans`, `game_plan_steps`, `game_plan_techniques`, `game_plan_notes`, `focus_events.game_plan_id` |
 
 016 (`db/migrations/016_areas.sql`) turned focus items into areas: on focus became "has a rank", and paused,
-backlog, done and removed all became off focus (the old states stay readable in `focus_events`); it added
-aliases, a start, a premise and the step tree. 017 added alternatives (`alt`). 018
-(`db/migrations/018_game_plans.sql`) renamed everything to game plans: tables, columns, and every index,
-constraint and sequence still named after areas or focus items. 018 changes names only, no rows.
+backlog, done and removed all became off focus; it added aliases, a start, a premise and the step tree. 017 added
+alternatives (`alt`). 018 (`db/migrations/018_game_plans.sql`) renamed everything to game plans: tables, columns,
+and every index, constraint and sequence still named after areas or focus items. 018 changes names only, no rows.
+019 (`db/migrations/019_cleanup.sql`) cleared out the rest: the unused `goal` column (folded into the description
+in 015), the old statuses in the focus history (`resumed` is now `added`; `paused`, `completed`, `backlogged` and
+`dropped` are `removed`) with `focus_events.from_status` and `to_status`, the older `update_focus` actions, and
+the focus list's `label` field (the name again, for iPhone app builds before 1.3).
 
-Nothing answers to the area names any more, apart from old web links (`/focus/:id` and `/areas/:id` redirect to
-`/game-plans/:id`; `/positions` to `/game`). Undo entries saved before 018 can't be undone.
+Nothing answers to the area or focus item names any more, apart from old web links (`/focus/:id` and `/areas/:id`
+redirect to `/game-plans/:id`; `/positions` to `/game`). Undo entries saved before 018 can't be undone; ones saved
+before 019 still can (a goal they carry is ignored, and old focus events are put back as what they mean now).
 
 ## Rules that keep it small
 
@@ -85,7 +89,7 @@ Weakest step: Shuck (learning).
 | `get_focus` | The ranked list. `history` for what went on and off it. |
 | `get_game_plan` | With `name`: one game plan with its steps. Without: every game plan, on focus or not, by where it starts. |
 | `save_game_plan` | Creates or edits a game plan, including its `steps`, and can put it on or take it off focus. `delete: true` removes it for good. `move` reorders one step, found by what it says ("move the kimura before the guillotine", `to: 'first'`, `prefer: true` for plan A); two steps that say the same thing are asked about, not guessed. |
-| `update_focus` | `add`, `move`, `remove`. `add` on an existing game plan puts it back on the list. `pause`, `backlog`, `complete`, `drop` and `resume` are still accepted and mean remove / add. |
+| `update_focus` | `add`, `move`, `remove`. `add` on an existing game plan puts it back on the list. |
 | `add_note` | `game_plan` files the note under one. |
 | `get_technique` | "In game plans: …". |
 | `search` | Also matches game plan names, aliases, premises, step triggers and actions, so "what do I do when they post the far leg" finds the branch. |

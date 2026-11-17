@@ -130,11 +130,13 @@ export type UndoOp =
   /** Recreates a deleted game plan with its links, steps and focus history, back at its place on the focus list. */
   | {
       kind: 'restore_deleted_game_plan';
-      row: GamePlanSnapshot & { rank: number | null; goal: string | null; created_at: string; updated_at: string };
+      /** Entries from before migration 019 also carry `goal`, which is ignored. */
+      row: GamePlanSnapshot & { rank: number | null; created_at: string; updated_at: string };
       techniqueIds: number[];
       noteIds: number[];
       steps: StepSnapshot[];
-      events: { id: number; event: string; from_status: string | null; to_status: string | null; from_rank: number | null; to_rank: number | null; at: string }[];
+      /** Entries from before 019 may have the older events (paused, resumed...) and from_status/to_status, which are ignored. */
+      events: { id: number; event: string; from_rank: number | null; to_rank: number | null; at: string }[];
     }
   /** Puts stars (or answered marks) back as they were after clearing several at once. */
   | { kind: 'restore_marks'; mark: 'starred' | 'answered'; notes: MarkSnapshot[]; techniques: MarkSnapshot[] }
@@ -198,10 +200,11 @@ export async function logActivity(q: Queryable, action: string, summary: string,
   return id;
 }
 
+/** Puts a position edge back, if its technique is still there. */
 async function insertEdge(q: Queryable, e: EdgeSnapshot) {
   await q.query(
-    `insert into technique_edges (id, technique_id, from_position_id, from_role, to_position_id, to_role)
-     select $1, $2, $3, $4, $5, $6 where exists (select 1 from techniques where id = $2 and user_id = $7)
+    `insert into technique_edges (id, technique_id, user_id, from_position_id, from_role, to_position_id, to_role)
+     select $1, $2, $7, $3, $4, $5, $6 where exists (select 1 from techniques where id = $2 and user_id = $7)
      on conflict do nothing`,
     [e.id, e.technique_id, e.from_position_id, e.from_role, e.to_position_id, e.to_role, uid(q)],
   );
@@ -262,7 +265,7 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       );
       if (op.addedEdgeIds.length) {
         await q.query(
-          'delete from technique_edges where id = any($1::int[]) and technique_id in (select id from techniques where user_id = $2)',
+          'delete from technique_edges where id = any($1::int[]) and user_id = $2',
           [op.addedEdgeIds, me],
         );
       }
@@ -274,10 +277,7 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
     }
     case 'restore_focus':
       if (op.eventIds.length) {
-        await q.query('delete from focus_events where id = any($1::int[]) and game_plan_id in (select id from game_plans where user_id = $2)', [
-          op.eventIds,
-          me,
-        ]);
+        await q.query('delete from focus_events where id = any($1::int[]) and user_id = $2', [op.eventIds, me]);
       }
       if (op.deleteGamePlanId !== null) await q.query('delete from game_plans where id = $1 and user_id = $2', [op.deleteGamePlanId, me]);
       // Everything comes off first, so putting ranks back never collides.
@@ -430,9 +430,9 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       // Back at its old place on the focus list: what's there now moves down one.
       if (r.rank !== null) await q.query('update game_plans set rank = rank + 1 where user_id = $1 and rank >= $2', [me, r.rank]);
       await q.query(
-        `insert into game_plans (id, name, aliases, description, start_position_id, start_role, premise, rank, goal, created_at, updated_at, user_id)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-        [r.id, r.name, r.aliases, r.description, r.start_position_id, r.start_role, r.premise, r.rank, r.goal, r.created_at, r.updated_at, me],
+        `insert into game_plans (id, name, aliases, description, start_position_id, start_role, premise, rank, created_at, updated_at, user_id)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [r.id, r.name, r.aliases, r.description, r.start_position_id, r.start_role, r.premise, r.rank, r.created_at, r.updated_at, me],
       );
       for (const t of op.techniqueIds) await insertGamePlanTechnique(q, r.id, t);
       for (const n of op.noteIds) await insertGamePlanNote(q, r.id, n);
@@ -440,9 +440,9 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       await insertSteps(q, r.id, op.steps);
       for (const e of op.events) {
         await q.query(
-          `insert into focus_events (id, game_plan_id, event, from_status, to_status, from_rank, to_rank, at)
-           values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [e.id, r.id, e.event, e.from_status, e.to_status, e.from_rank, e.to_rank, e.at],
+          `insert into focus_events (id, game_plan_id, user_id, event, from_rank, to_rank, at)
+           values ($1, $2, $3, $4, $5, $6, $7)`,
+          [e.id, r.id, me, focusEvent(e.event), e.from_rank, e.to_rank, e.at],
         );
       }
       await renumberFocus(q);
@@ -456,6 +456,10 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       return;
   }
 }
+
+/** A focus event as it's stored now: the older ones (from when the list had statuses) as what they meant, as migration 019 did. */
+const focusEvent = (event: string): string =>
+  event === 'added' || event === 'moved' || event === 'removed' ? event : event === 'resumed' ? 'added' : 'removed';
 
 /** Files a note under a game plan again, if both are still there. */
 async function insertGamePlanNote(q: Queryable, gamePlanId: number, noteId: number) {
@@ -568,7 +572,7 @@ export async function undo(db: Db, id?: number): Promise<string> {
     const op = typeof row.undo === 'string' ? (JSON.parse(row.undo) as UndoOp) : row.undo;
     if (!known(op)) throw new UserError(`"${row.summary}" was saved by an older version of the app and can't be undone.`);
     await apply(q, op);
-    await q.query('update activity_log set undone = true where id = $1', [row.id]);
+    await q.query('update activity_log set undone = true where id = $1 and user_id = $2', [row.id, uid(q)]);
     return `Undid: ${row.summary}`;
   });
 }

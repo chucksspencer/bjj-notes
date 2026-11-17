@@ -5,6 +5,7 @@ import type {
   GamePlansView,
   GamePlanView,
   EdgeView,
+  FocusEvent,
   FocusView,
   LabView,
   LinkView,
@@ -276,15 +277,15 @@ export async function techniqueView(q: Queryable, id: number, noteLimit = 20): P
   ).rows[0];
   if (!t) return null;
 
-  const edges = (await q.query<EdgeRow>(`${EDGE_SELECT} where e.technique_id = $1 order by e.id`, [id])).rows.map(toEdge);
+  const edges = (await q.query<EdgeRow>(`${EDGE_SELECT} where e.technique_id = $1 and e.user_id = $2 order by e.id`, [id, uid(q)])).rows.map(toEdge);
   const links = (
     await q.query<{ kind: LinkView['kind']; dir: 'out' | 'in'; note: string | null; ref: unknown }>(
       `select l.kind, 'out' as dir, l.note, ${TECH_REF_JSON} as ref
-       from technique_links l join techniques t on t.id = l.to_id where l.from_id = $1
+       from technique_links l join techniques t on t.id = l.to_id where l.from_id = $1 and l.user_id = $2
        union all
        select l.kind, 'in' as dir, l.note, ${TECH_REF_JSON} as ref
-       from technique_links l join techniques t on t.id = l.from_id where l.to_id = $1`,
-      [id],
+       from technique_links l join techniques t on t.id = l.from_id where l.to_id = $1 and l.user_id = $2`,
+      [id, uid(q)],
     )
   ).rows.map(r => ({ kind: r.kind, direction: r.dir, note: r.note, technique: json<TechniqueRef>(r.ref) }));
   const gamePlans = (
@@ -300,8 +301,8 @@ export async function techniqueView(q: Queryable, id: number, noteLimit = 20): P
   const counts = (
     await q.query<{ c: number; last: string | null }>(
       `select count(*)::int as c, max(n.observed_on)::text as last
-       from note_techniques nt join notes n on n.id = nt.note_id where nt.technique_id = $1`,
-      [id],
+       from note_techniques nt join notes n on n.id = nt.note_id where nt.technique_id = $1 and nt.user_id = $2`,
+      [id, uid(q)],
     )
   ).rows[0]!;
 
@@ -493,8 +494,7 @@ const toGamePlan = (r: GamePlanRow): GamePlanView => ({
 /** The focus list, top first. */
 export async function focusView(ctx: Ctx, q: Queryable = ctx.db): Promise<FocusView> {
   const { rows } = await q.query<GamePlanRow>(`${GAME_PLAN_SELECT} where a.user_id = $1 and a.rank is not null order by a.rank, a.id`, [uid(q)]);
-  // label: the name under its old field, which app builds from before focus items had names read.
-  return { today: today(ctx), active: rows.map(toGamePlan).map(a => ({ ...a, label: a.name })) };
+  return { today: today(ctx), active: rows.map(toGamePlan) };
 }
 
 /** Every game plan: on focus first, in order, then the rest by name. */
@@ -576,9 +576,9 @@ export async function gamePlanView(q: Queryable, id: number): Promise<GamePlanDe
     await q.query<{ c: number }>(`select count(*)::int as c from notes n where n.user_id = $2 and ${relatedToGamePlan('$1')}`, [id, uid(q)])
   ).rows[0]!.c;
   const history = (
-    await q.query<{ at: string; event: string; to_rank: number | null }>(
-      `select ${iso('e.at')} as at, e.event, e.to_rank from focus_events e where e.game_plan_id = $1 order by e.id`,
-      [id],
+    await q.query<{ at: string; event: FocusEvent; to_rank: number | null }>(
+      `select ${iso('e.at')} as at, e.event, e.to_rank from focus_events e where e.game_plan_id = $1 and e.user_id = $2 order by e.id`,
+      [id, uid(q)],
     )
   ).rows;
   return {
@@ -647,8 +647,7 @@ export async function positionList(q: Queryable): Promise<PositionListItem[]> {
   }>(
     `select p.id, p.slug, p.name, p.category, p.aliases,
             (select count(distinct e.technique_id)::int from technique_edges e
-               join techniques t on t.id = e.technique_id
-              where t.user_id = $1 and (e.from_position_id = p.id or e.to_position_id = p.id)) as techniques
+              where e.user_id = $1 and (e.from_position_id = p.id or e.to_position_id = p.id)) as techniques
      from positions p order by p.id`,
     [uid(q)],
   );
@@ -668,20 +667,20 @@ export async function positionView(q: Queryable, positionId: number, role?: Role
                       pf.id as pf_id, pf.slug as pf_slug, pf.name as pf_name,
                       pt.id as pt_id, pt.slug as pt_slug, pt.name as pt_name,
                       t.id as t_id, t.name as t_name, t.type as t_type, t.role as t_role, t.status as t_status
-               from technique_edges e join techniques t on t.id = e.technique_id
+               from technique_edges e join techniques t on t.id = e.technique_id and t.user_id = e.user_id
                left join positions pf on pf.id = e.from_position_id
                left join positions pt on pt.id = e.to_position_id`;
   const toPT = (r: Row) => ({ id: r.t_id, name: r.t_name, type: r.t_type, role: r.t_role, status: r.t_status, edge: toEdge(r) });
   const from = (
     await q.query<Row>(
-      `${sel} where t.user_id = $3 and e.from_position_id = $1 and ($2::text is null or e.from_role is null or e.from_role = $2)
+      `${sel} where e.user_id = $3 and e.from_position_id = $1 and ($2::text is null or e.from_role is null or e.from_role = $2)
        order by t.type, t.name`,
       [pos.id, role ?? null, uid(q)],
     )
   ).rows.map(toPT);
   const into = (
     await q.query<Row>(
-      `${sel} where t.user_id = $3 and e.to_position_id = $1 and ($2::text is null or e.to_role is null or e.to_role = $2)
+      `${sel} where e.user_id = $3 and e.to_position_id = $1 and ($2::text is null or e.to_role is null or e.to_role = $2)
        order by t.name`,
       [pos.id, role ?? null, uid(q)],
     )
