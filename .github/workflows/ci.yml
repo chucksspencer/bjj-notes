@@ -35,7 +35,15 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Verify package signatures from the npm registry
-        run: npm audit signatures
+        # The registry now and then fails to serve a signing key ("has attestations but no corresponding public
+        # key"), naming a different package each time. A real bad signature fails all three tries.
+        run: |
+          for try in 1 2 3; do
+            npm audit signatures && exit 0
+            echo "::warning::npm audit signatures failed (try $try of 3)"
+            sleep 20
+          done
+          exit 1
       - name: No known high or critical vulnerabilities in production packages
         run: npm audit --omit=dev --audit-level=high
       - run: npm run typecheck
