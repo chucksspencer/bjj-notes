@@ -121,6 +121,16 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
   app.get('/healthz', (_req, res) => {
     res.json({ ok: true });
   });
+  // Readiness: reaches the database and says which migration it is on (the deploy waits for this).
+  app.get('/readyz', async (_req, res) => {
+    try {
+      await ctx.db.query('select 1');
+      const { rows } = await ctx.db.query<{ name: string }>('select name from schema_migrations order by name desc limit 1');
+      res.json({ ok: true, migration: rows[0]?.name ?? null });
+    } catch {
+      res.status(503).json({ ok: false });
+    }
+  });
   app.use(webAppRouter(opts.webDir));
 
   return app;
