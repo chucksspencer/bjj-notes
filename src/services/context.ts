@@ -14,9 +14,9 @@ export interface Ctx {
   gamePlanDrafter?: GamePlanDrafter | null;
 }
 
-/** The context for one signed-in user's requests. */
-export function userCtx(base: Ctx, userId: number): Ctx {
-  return { ...base, db: forUser(base.db, userId) };
+/** The context for one signed-in user's requests. `activityIds` collects the undo entries the request writes. */
+export function userCtx(base: Ctx, userId: number, activityIds?: number[]): Ctx {
+  return { ...base, db: forUser(base.db, userId, activityIds) };
 }
 
 export function today(ctx: Ctx): string {

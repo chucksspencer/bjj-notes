@@ -546,9 +546,7 @@ export async function editGamePlan(ctx: Ctx, id: number, patch: GamePlanPatch): 
       steps,
     );
     if (!r) return `No game plan #${id}.`;
-    // Logged even when nothing changed, so the Undo the app offers never reaches back to an earlier change.
-    const undo: UndoOp = r.ops.length === 0 ? { kind: 'batch', ops: [] } : r.ops.length === 1 ? r.ops[0]! : { kind: 'batch', ops: r.ops };
-    await logActivity(q, 'edit_game_plan', `edit to "${r.before}"`, undo);
+    if (r.ops.length) await logActivity(q, 'edit_game_plan', `edit to "${r.before}"`, r.ops.length === 1 ? r.ops[0]! : { kind: 'batch', ops: r.ops });
     return r.parts.length ? `${r.name}: ${r.parts.join('; ')}.` : `Nothing changed on ${r.name}.`;
   });
 }

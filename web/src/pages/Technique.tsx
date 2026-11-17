@@ -141,7 +141,7 @@ function TechniqueBody({ v, today, onEdit }: { v: TechniqueView; today: string; 
               className="btn ghost small"
               aria-label="Remove position"
               disabled={removeEdge.isPending}
-              onClick={() => removeEdge.mutate(e.id, { onSuccess: () => toast.show('Position removed', { undoable: true }), onError: toast.error })}
+              onClick={() => removeEdge.mutate(e.id, { onSuccess: r => toast.show('Position removed', { undoId: r.activityId }), onError: toast.error })}
             >
               <Icon name="close" size={18} />
             </button>
@@ -201,7 +201,7 @@ function TechniqueBody({ v, today, onEdit }: { v: TechniqueView; today: string; 
               onClick={() =>
                 removeLink.mutate(
                   { otherId: l.technique.id, kind: l.kind, direction: l.direction },
-                  { onSuccess: () => toast.show('Link removed', { undoable: true }), onError: toast.error },
+                  { onSuccess: r => toast.show('Link removed', { undoId: r.activityId }), onError: toast.error },
                 )
               }
             >
@@ -232,7 +232,7 @@ function TechniqueBody({ v, today, onEdit }: { v: TechniqueView; today: string; 
             if (!window.confirm(`Delete ${v.name}? Notes stay; any that were only about this go to your inbox.`)) return;
             del.mutate(v.id, {
               onSuccess: r => {
-                toast.show(r.message.replace(/\.$/, ''), { undoable: true });
+                toast.show(r.message.replace(/\.$/, ''), { undoId: r.activityId });
                 navigate('/library');
               },
               onError: toast.error,
@@ -266,8 +266,8 @@ function useSave(v: TechniqueView, onClose: () => void) {
     pending: patch.isPending,
     save: (p: Parameters<typeof patch.mutate>[0]) =>
       patch.mutate(p, {
-        onSuccess: () => {
-          toast.show('Saved', { undoable: true });
+        onSuccess: r => {
+          toast.show('Saved', { undoId: r.activityId });
           onClose();
         },
         onError: toast.error,
@@ -456,8 +456,8 @@ function PositionSheet({ v, onClose }: { v: TechniqueView; onClose: () => void }
           add.mutate(
             { fromPositionId: from || null, fromRole: fromRole || null, toPositionId: to || null, toRole: toRole || null },
             {
-              onSuccess: () => {
-                toast.show('Position added', { undoable: true });
+              onSuccess: r => {
+                toast.show('Position added', { undoId: r.activityId });
                 onClose();
               },
               onError: toast.error,
@@ -499,8 +499,8 @@ function LinkSheet({ v, onClose }: { v: TechniqueView; onClose: () => void }) {
           add.mutate(
             { kind, techniqueId: target[0].id },
             {
-              onSuccess: () => {
-                toast.show('Link added', { undoable: true });
+              onSuccess: r => {
+                toast.show('Link added', { undoId: r.activityId });
                 onClose();
               },
               onError: toast.error,

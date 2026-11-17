@@ -75,7 +75,7 @@ Open the server's address in Safari and sign in with your email and `OWNER_PASSW
 - **Game**: your game plans by where they start, then the positions you have something from (the rest fold away). A position shows the game plans that start there, what you have from it top or bottom, the ways in, and the gaps.
 - **Account** (the person icon at the top of Focus): your name and belt (Claude knows both), email, password, Siri Shortcut tokens and, for the owner, People. The app wears your belt's colours, in light and dark mode; a black belt's rank bar is red. Signed out, and in its icon, the app is a black belt.
 
-Every change shows an **Undo** button, the same undo Claude uses when you say "undo that".
+Every change shows an **Undo** button, the same undo Claude uses when you say "undo that". The button undoes the change it was shown for, and only while nothing else has been saved since; if something has, it says so and changes nothing.
 
 ### 8. Siri Shortcuts
 
