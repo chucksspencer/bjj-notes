@@ -14,7 +14,7 @@ export function FocusControls({ gamePlan, count, compact = false }: { gamePlan: 
   const toast = useToast();
   const on = gamePlan.rank !== null;
   const run = (action: 'add' | 'move' | 'remove', position?: number) =>
-    act.mutate({ id: gamePlan.id, action, position }, { onSuccess: r => toast.show(r.message.replace(/\.$/, ''), { undoable: true }), onError: toast.error });
+    act.mutate({ id: gamePlan.id, action, position }, { onSuccess: r => toast.show(r.message.replace(/\.$/, ''), { undoId: r.activityId }), onError: toast.error });
   const first = gamePlan.rank === 1;
   const last = gamePlan.rank === count;
   return (
@@ -83,8 +83,8 @@ export function GamePlanEditSheet({ gamePlan, onClose }: { gamePlan: GamePlanVie
                 .filter(Boolean),
             },
             {
-              onSuccess: () => {
-                toast.show('Saved', { undoable: true });
+              onSuccess: r => {
+                toast.show('Saved', { undoId: r.activityId });
                 onClose();
               },
               onError: toast.error,

@@ -25,7 +25,7 @@ export function Inbox() {
     if (!window.confirm(`Delete ${countOf(selection.ids.length, 'note')}?`)) return;
     del.mutate(selection.ids, {
       onSuccess: r => {
-        toast.show(r.message.replace(/\.$/, ''), { undoable: true });
+        toast.show(r.message.replace(/\.$/, ''), { undoId: r.activityId });
         selection.stop();
       },
       onError: toast.error,
@@ -119,7 +119,7 @@ function FileSheet({ note, onClose }: { note: NoteView; onClose: () => void }) {
             { id: note.id, techniqueIds: selected.map(t => t.id), newTechniques: newOnes },
             {
               onSuccess: r => {
-                toast.show(`Filed under ${r.techniques.map(t => t.name).join(', ')}`, { undoable: true });
+                toast.show(`Filed under ${r.techniques.map(t => t.name).join(', ')}`, { undoId: r.activityId });
                 onClose();
               },
               onError: toast.error,

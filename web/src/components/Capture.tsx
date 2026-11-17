@@ -73,8 +73,8 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
           ...(unchanged ? {} : originPayload(origin, date)),
         },
         {
-          onSuccess: () => {
-            toast.show('Note updated', { undoable: true });
+          onSuccess: r => {
+            toast.show('Note updated', { undoId: r.activityId });
             onClose();
           },
           onError: toast.error,
@@ -99,7 +99,7 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
         onSuccess: r => {
           const names = [...r.note.gamePlans.map(a => a.name), ...r.note.techniques.map(t => t.name)];
           toast.show(r.note.toTry ? 'Added to To try' : names.length ? `Saved to ${names.join(', ')}` : 'Saved to your inbox', {
-            undoable: true,
+            undoId: r.activityId,
           });
           onClose();
         },
@@ -202,8 +202,8 @@ function NoteForm({ state, onClose }: { state: NonNullable<State>; onClose: () =
             disabled={busy}
             onClick={() =>
               del.mutate(editing.id, {
-                onSuccess: () => {
-                  toast.show('Note deleted', { undoable: true });
+                onSuccess: r => {
+                  toast.show('Note deleted', { undoId: r.activityId });
                   onClose();
                 },
                 onError: toast.error,

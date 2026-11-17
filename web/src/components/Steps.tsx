@@ -448,7 +448,7 @@ export function StepsSection({ gamePlan }: { gamePlan: GamePlanDetail }) {
       { gamePlanId: gamePlan.id, stepId, ...m },
       {
         onSuccess: r => {
-          toast.show(r.message, { undoable: true });
+          toast.show(r.message, { undoId: r.activityId });
           after?.();
         },
         onError: toast.error,
@@ -459,8 +459,8 @@ export function StepsSection({ gamePlan }: { gamePlan: GamePlanDetail }) {
     edit.mutate(
       { id: gamePlan.id, steps: toInput(next) },
       {
-        onSuccess: () => {
-          toast.show(done, { undoable: true });
+        onSuccess: r => {
+          toast.show(done, { undoId: r.activityId });
           after?.();
         },
         onError: toast.error,
@@ -798,8 +798,8 @@ function StartSheet({ gamePlan, onClose }: { gamePlan: GamePlanDetail; onClose: 
           edit.mutate(
             { id: gamePlan.id, startPositionId: start, startRole: start ? role : null, premise: premise.trim() || null },
             {
-              onSuccess: () => {
-                toast.show('Saved', { undoable: true });
+              onSuccess: r => {
+                toast.show('Saved', { undoId: r.activityId });
                 onClose();
               },
               onError: toast.error,
@@ -889,8 +889,8 @@ function DescribeSheet({ gamePlan, onClose }: { gamePlan: GamePlanDetail; onClos
                     ...(d.premise ? { premise: d.premise } : {}),
                   },
                   {
-                    onSuccess: () => {
-                      toast.show('Steps saved', { undoable: true });
+                    onSuccess: r => {
+                      toast.show('Steps saved', { undoId: r.activityId });
                       onClose();
                     },
                     onError: toast.error,

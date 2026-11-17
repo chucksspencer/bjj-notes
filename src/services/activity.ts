@@ -185,13 +185,17 @@ export const NOTE_SNAPSHOT_SQL = `select id, body, raw_text, kind, observed_on::
   source_timestamp, inbox, to_try, starred_at::text as starred_at, answered_at::text as answered_at, created_via,
   created_at::text as created_at from notes where id = $1 and user_id = $2`;
 
-export async function logActivity(q: Queryable, action: string, summary: string, undo: UndoOp): Promise<void> {
-  await q.query('insert into activity_log (action, summary, undo, user_id) values ($1, $2, $3, $4)', [
+/** Records a write so it can be undone. Returns the entry's id (also added to the request's collector, if the handle has one). */
+export async function logActivity(q: Queryable, action: string, summary: string, undo: UndoOp): Promise<number> {
+  const { rows } = await q.query<{ id: number }>('insert into activity_log (action, summary, undo, user_id) values ($1, $2, $3, $4) returning id', [
     action,
     summary,
     JSON.stringify(undo),
     uid(q),
   ]);
+  const id = rows[0]!.id;
+  q.activityIds?.push(id);
+  return id;
 }
 
 async function insertEdge(q: Queryable, e: EdgeSnapshot) {
@@ -548,14 +552,18 @@ const UNDO_KINDS: Record<UndoOp['kind'], true> = {
 /** Whether this version can undo an entry: older ones in the log may use ops that have since been renamed. */
 const known = (op: UndoOp): boolean => Object.hasOwn(UNDO_KINDS, op.kind) && (op.kind !== 'batch' || op.ops.every(known));
 
-/** Reverses the user's most recent write that hasn't been undone yet. */
-export async function undoLast(db: Db): Promise<string> {
+/**
+ * Reverses the user's most recent write that hasn't been undone yet. With an id (the app's Undo button), it reverses
+ * that entry only, and only while it is still the newest: if something else was written since, nothing changes.
+ */
+export async function undo(db: Db, id?: number): Promise<string> {
   return db.tx(async q => {
     const { rows } = await q.query<{ id: number; summary: string; undo: UndoOp | string }>(
       'select id, summary, undo from activity_log where user_id = $1 and not undone order by id desc limit 1 for update',
       [uid(q)],
     );
     const row = rows[0];
+    if (id !== undefined && row?.id !== id) throw new UserError("Something else changed since then, so that can't be undone from here.");
     if (!row) return 'Nothing to undo.';
     const op = typeof row.undo === 'string' ? (JSON.parse(row.undo) as UndoOp) : row.undo;
     if (!known(op)) throw new UserError(`"${row.summary}" was saved by an older version of the app and can't be undone.`);

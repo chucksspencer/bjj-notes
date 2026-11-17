@@ -8,6 +8,8 @@ export interface Queryable {
   exec(sql: string): Promise<void>;
   /** The signed-in user whose notebook this handle reads and writes (see forUser). */
   readonly uid?: number;
+  /** Where logActivity notes the ids of the entries a request writes (see forUser), so the caller can say which change was its own. */
+  readonly activityIds?: number[];
 }
 
 export interface Db extends Queryable {
@@ -19,12 +21,13 @@ export interface Db extends Queryable {
  * The same database, for one user's requests: the handle (and every transaction it opens) carries the
  * user's id, which every notebook query filters and writes by. Services read it with uid().
  */
-export function forUser(db: Db, userId: number): Db {
+export function forUser(db: Db, userId: number, activityIds?: number[]): Db {
   return {
     uid: userId,
+    activityIds,
     query: (sql, params) => db.query(sql, params),
     exec: sql => db.exec(sql),
-    tx: fn => db.tx(q => fn({ query: (sql, params) => q.query(sql, params), exec: sql => q.exec(sql), uid: userId })),
+    tx: fn => db.tx(q => fn({ query: (sql, params) => q.query(sql, params), exec: sql => q.exec(sql), uid: userId, activityIds })),
     close: async () => {
       throw new Error('A per-user handle does not own the connection.');
     },

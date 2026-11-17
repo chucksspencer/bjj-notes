@@ -86,6 +86,43 @@ describe.runIf(run)('web app (end to end)', () => {
     expect(await page.locator('.focus-row .row-title').first().textContent()).toBe('Baratoplata');
   });
 
+  it('refuses Undo when something else was saved since, and leaves that change alone', async () => {
+    const send = (method: string, url: string, body?: unknown) =>
+      page.evaluate(
+        async ([m, u, b]) => {
+          const res = await fetch(u as string, {
+            method: m as string,
+            headers: { 'x-bjj-app': '1', ...(b ? { 'content-type': 'application/json' } : {}) },
+            body: b ? JSON.stringify(b) : undefined,
+          });
+          return { status: res.status, body: await res.json() };
+        },
+        [method, url, body] as const,
+      );
+    // The list is still refreshing after the last undo, which can close a menu opened too soon: open it until it stays.
+    await expect
+      .poll(async () => {
+        await page.getByRole('button', { name: 'Change Ghost escape' }).click();
+        return page.getByRole('button', { name: 'Top', exact: true }).isVisible();
+      })
+      .toBe(true);
+    await page.getByRole('button', { name: 'Top', exact: true }).click();
+    await page.getByText('Moved to #1: Ghost escape').waitFor();
+    // Meanwhile, Claude or Siri (here: a direct API call) saves something else.
+    expect((await send('POST', '/api/v1/techniques', { name: 'Made elsewhere', type: 'submission' })).status).toBe(201);
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.getByText("Something else changed since then, so that can't be undone from here.").waitFor();
+    // Nothing was reverted: the focus list is as the UI left it, and the other change is still there.
+    expect(await page.locator('.focus-row .row-title').first().textContent()).toBe('Ghost escape');
+    expect(((await send('GET', '/api/v1/techniques')).body as { name: string }[]).map(t => t.name)).toContain('Made elsewhere');
+    // Tidy up: take both changes back, newest first.
+    expect((await send('POST', '/api/v1/undo')).status).toBe(200);
+    expect((await send('POST', '/api/v1/undo')).status).toBe(200);
+    await page.reload();
+    await page.locator('.focus-row').first().waitFor();
+    expect(await page.locator('.focus-row .row-title').first().textContent()).toBe('Baratoplata');
+  });
+
   it('opens a game plan, writes its description and files a note under it', async () => {
     await page.locator('.focus-row .row-title', { hasText: 'Ghost escape' }).click();
     await page.getByRole('heading', { name: 'Ghost escape', level: 1 }).waitFor();

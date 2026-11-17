@@ -125,7 +125,7 @@ function AddToFocus({ onClose }: { onClose: () => void }) {
             { name: label, description: description.trim() || undefined, techniqueIds: techniques.map(t => t.id), position },
             {
               onSuccess: r => {
-                toast.show(`Added ${label}`, { undoable: true });
+                toast.show(`Added ${label}`, { undoId: r.activityId });
                 onClose();
                 // A new game plan with nothing in it yet: open it, to describe it or give it steps.
                 if (!r.gamePlan.techniques.length && !r.gamePlan.description) navigate(`/game-plans/${r.gamePlan.id}`);
@@ -163,8 +163,8 @@ function AddToFocus({ onClose }: { onClose: () => void }) {
                       act.mutate(
                         { id: a.id, action: 'add', position },
                         {
-                          onSuccess: () => {
-                            toast.show(`${a.name} is back on focus`, { undoable: true });
+                          onSuccess: r => {
+                            toast.show(`${a.name} is back on focus`, { undoId: r.activityId });
                             onClose();
                           },
                           onError: toast.error,
