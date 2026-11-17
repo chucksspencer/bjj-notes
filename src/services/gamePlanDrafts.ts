@@ -143,7 +143,7 @@ export async function draftGamePlan(ctx: Ctx, text: string): Promise<GamePlanDra
   const positionNames = new Map<number, string>();
   const tIds = resolved.map(s => s.technique_id).filter((t): t is number => t !== null);
   if (tIds.length) {
-    for (const r of (await q.query<{ id: number; name: string }>('select id, name from techniques where id = any($1::int[])', [tIds])).rows) {
+    for (const r of (await q.query<{ id: number; name: string }>('select id, name from techniques where id = any($1::int[]) and user_id = $2', [tIds, uid(q)])).rows) {
       techniqueNames.set(r.id, r.name);
     }
   }

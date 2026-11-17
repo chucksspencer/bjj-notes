@@ -158,8 +158,9 @@ $10 a month; the next deploy puts it back to 0 unless `infra/gcp-deploy.sh` is c
   a description, technique cards, notes filed under it, and optionally steps (a system). Being on focus is just a
   rank. The tree inside is called its *steps*, never its "plan", so nothing reads "the game plan's plan"; "plan A",
   "plan B" are the alternatives at a step. See [game-plans.md](game-plans.md). The old one-line goal was folded
-  into the description (migration 015); the `goal` column stays, unused, only so undo entries from before can
-  still put goals back. A later migration can drop it.
+  into the description (migration 015), and the column was dropped in 019; undo entries from before ignore it.
+  A rank is unique per person (`game_plans_user_rank`, checked at commit), so anything that writes ranks runs
+  in a transaction (`ctx.db.tx`).
 - **Renames go all the way down** (tables, columns, constraints, routes, MCP tools), with no compatibility
   layers: there's one person using the app, and the iPhone app ships alongside the server. Undo entries saved
   under an op's old name are refused ("saved by an older version of the app"), not translated.

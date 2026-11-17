@@ -189,9 +189,9 @@ export async function saveTechniqueResult(ctx: Ctx, input: SaveTechniqueInput): 
       const fromId = e.from_id ?? from?.match?.id ?? null;
       const toId = e.to_id ?? to?.match?.id ?? null;
       const { rows } = await q.query<{ id: number }>(
-        `insert into technique_edges (technique_id, from_position_id, from_role, to_position_id, to_role)
-         values ($1, $2, $3, $4, $5) on conflict do nothing returning id`,
-        [id, fromId, e.from_role ?? next.role ?? null, toId, e.to_role ?? null],
+        `insert into technique_edges (technique_id, user_id, from_position_id, from_role, to_position_id, to_role)
+         values ($1, $2, $3, $4, $5, $6) on conflict do nothing returning id`,
+        [id, uid(q), fromId, e.from_role ?? next.role ?? null, toId, e.to_role ?? null],
       );
       if (rows[0]) addedEdgeIds.push(rows[0].id);
     }
@@ -298,8 +298,7 @@ export async function removeEdge(ctx: Ctx, techniqueId: number, edgeId: number):
   return ctx.db.tx(async q => {
     const edge = (
       await q.query<EdgeSnapshot>(
-        `delete from technique_edges where id = $1 and technique_id = $2
-           and exists (select 1 from techniques t where t.id = $2 and t.user_id = $3)
+        `delete from technique_edges where id = $1 and technique_id = $2 and user_id = $3
          returning id, technique_id, from_position_id, from_role, to_position_id, to_role`,
         [edgeId, techniqueId, uid(q)],
       )
@@ -338,8 +337,8 @@ async function removeTechnique(q: Queryable, id: number): Promise<{ name: string
   if (!row) return null;
   const edges = (
     await q.query<EdgeSnapshot>(
-      'select id, technique_id, from_position_id, from_role, to_position_id, to_role from technique_edges where technique_id = $1',
-      [id],
+      'select id, technique_id, from_position_id, from_role, to_position_id, to_role from technique_edges where technique_id = $1 and user_id = $2',
+      [id, uid(q)],
     )
   ).rows;
   const links = (

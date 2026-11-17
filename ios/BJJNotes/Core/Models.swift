@@ -7,10 +7,10 @@ struct TechniqueRef: Codable, Hashable {
     let name: String
 }
 
+/// A game plan on the focus list.
 struct FocusItem: Codable, Identifiable, Hashable {
     let id: Int
-    let label: String
-    let goal: String?
+    let name: String
     let rank: Int?
     let lastNoteOn: String?
 }
