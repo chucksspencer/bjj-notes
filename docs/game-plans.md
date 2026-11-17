@@ -28,6 +28,10 @@ in 015), the old statuses in the focus history (`resumed` is now `added`; `pause
 `dropped` are `removed`) with `focus_events.from_status` and `to_status`, the older `update_focus` actions, and
 the focus list's `label` field (the name again, for iPhone app builds before 1.3).
 020 (`db/migrations/020_step_options.sql`) made alternatives explicit: `alt` became `option` (see the rule below).
+022 (`db/migrations/022_derived.sql`) stopped storing the cards steps use in `game_plan_techniques`: a row whose
+card a step of the same game plan used was taken to be the step's and deleted; the rest stayed as links someone
+made. Undo entries from before 022 still undo: a deleted game plan or card comes back without re-linking cards its
+steps account for, and the link removal batched with old step edits is a no-op.
 
 Nothing answers to the area or focus item names any more, apart from old web links (`/focus/:id` and `/areas/:id`
 redirect to `/game-plans/:id`; `/positions` to `/game`). Undo entries saved before 018 can't be undone; ones saved
@@ -67,8 +71,13 @@ GamePlanStep = { id, option, action, technique, to, toRole, note, continuesIn, s
 - A step always keeps its `action` text as said. `technique_id` and `to_position_id` are optional
   links on top. "Octopus sweeps" is a valid step with no card.
 - Triggers and the premise are free text. Opponent reactions are not normalised.
-- A game plan's techniques are its `game_plan_techniques` plus the cards its steps link. Saving steps adds
-  their cards to `game_plan_techniques`, so notes on them show up under the game plan.
+- A game plan's techniques are the cards someone linked (`game_plan_techniques`) plus the cards its steps use,
+  read through the `game_plan_cards` view (022), which says which (`linked`, `in_steps`; `linked` and
+  `usedInSteps` on each of `GamePlanView.techniques`). Steps don't link anything: a card used by a step is on the
+  game plan while a step uses it and goes with the last such step, unless someone also linked it. Unlinking a card
+  only a step accounts for is refused, naming the step; linking one makes it a link of its own, which stays
+  without the step. Everything that reads a game plan's cards or a card's game plans (its page, the card's "In",
+  notes from its techniques, the last note date, matching a game plan by a card's name) reads the view.
 - Readiness is read off the technique statuses of the steps. A game plan has no status of its own.
 - Hand-offs are derived: a step whose `to_position_id` and role match another game plan's start shows
   "continues in: <that game plan>".
@@ -173,6 +182,8 @@ way in (`fromOutline`).
 - **Note sheet:** one "File under" search across techniques and game plans. Technique matches come first, and
   game plan matches wait for them, so a game plan that shares a card's name doesn't catch the tap. A note filed
   only under a game plan leaves the inbox.
+- **Techniques sheet:** lists the cards someone linked, to add and remove; cards there only because a step uses
+  them are named underneath ("Used in a step, so here while the step is: …") and can't be removed there.
 - **Technique card:** "In" with the card's game plans under its belt; "Related" keeps variations and counters.
 
 ## Siri

@@ -91,7 +91,7 @@ export async function resolveGamePlan(q: Queryable, name: string, onFocusOnly = 
               max(bjj_name_score(c, $1)) as score,
               bool_or(bjj_norm(c) = bjj_norm($1)) as exact
        from game_plans a
-       left join game_plan_techniques ax on ax.game_plan_id = a.id
+       left join game_plan_cards ax on ax.game_plan_id = a.id and ax.user_id = a.user_id
        left join techniques t on t.id = ax.technique_id
        cross join lateral unnest(array_remove(array_cat(array[a.name, t.name], a.aliases), null)) as c
        where a.user_id = $2 and ${onFocusOnly ? 'a.rank is not null' : 'true'}

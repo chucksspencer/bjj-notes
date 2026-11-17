@@ -5,7 +5,7 @@ import { mediaTag } from './attachments.js';
 import { today, type Ctx } from './context.js';
 import type { NoteView, Status, TechniqueListItem, TechniqueType } from '../shared/api.js';
 import { searchNotes, searchTechniques } from './semantic.js';
-import { GAME_PLAN_LAST_NOTE_SQL, LAB_DAYS, labView, positionView, techniqueList } from './views.js';
+import { GAME_PLAN_LAST_NOTE_SQL, inboxWhere, LAB_DAYS, labView, positionView, techniqueList } from './views.js';
 import { daysAgo, isoDate, type Role } from './vocab.js';
 
 /** What you can do from a position (optionally as top or bottom), what leads into it, and the gaps. */
@@ -143,7 +143,7 @@ export async function review(ctx: Ctx, days = 7): Promise<string> {
       [me],
     )
   ).rows.filter(f => !f.last_note || Date.parse(end) - Date.parse(f.last_note) > 14 * 86_400_000);
-  const inbox = (await q.query<{ c: number }>('select count(*)::int as c from notes where user_id = $1 and inbox', [me])).rows[0]!.c;
+  const inbox = (await q.query<{ c: number }>(`select count(*)::int as c from notes n where n.user_id = $1 and ${inboxWhere('n')}`, [me])).rows[0]!.c;
 
   const sessionTotal = sessions.reduce((s, r) => s + r.c, 0);
   const lines = [

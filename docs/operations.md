@@ -196,6 +196,14 @@ $10 a month; the next deploy puts it back to 0 unless `infra/gcp-deploy.sh` is c
   (Claude, "Describe it") still replaces them all. A step write that says what it last saw (`expectedUpdatedAt`)
   is refused with 409 if the game plan changed since, instead of the last writer silently winning. Undo entries
   that carry steps from before 020 are refused, not translated.
+- **Derive, don't store** (migration 022). What follows from other facts is worked out where it's read, not
+  kept in sync by hand. The inbox: a note is in it when it isn't To try and nothing files it (no technique, no
+  game plan), worked out by `inboxWhere` in `src/services/views.ts` for the list, counts, search, Claude and Siri.
+  The one fact of its own is `notes.unplaced`: a technique it named couldn't be matched, which keeps it in the
+  inbox even when something else files it, until it's filed again (`file_note`, a change to its techniques, game
+  plans or To try, or filing it under a game plan). A game plan's cards: `game_plan_techniques` holds only the
+  links someone made, and the `game_plan_cards` view adds the cards its steps use. The cost is a subquery per read,
+  which at a notebook's size doesn't matter; no new index.
 - **Renames go all the way down** (tables, columns, constraints, routes, MCP tools), with no compatibility
   layers: there's one person using the app, and the iPhone app ships alongside the server. Undo entries saved
   under an op's old name are refused ("saved by an older version of the app"), not translated.

@@ -291,6 +291,31 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByText(/^Undid: add/).waitFor();
   });
 
+  it('lists a card a step uses on the game plan, without offering to unlink it', async () => {
+    // A step with a card, added here straight through the API.
+    const path = new URL(page.url()).pathname;
+    const added = await page.evaluate(async path => {
+      const h = { 'x-bjj-app': '1', 'content-type': 'application/json' };
+      const plan = await (await fetch(`/api/v1${path}`, { headers: h })).json();
+      const cards = await (await fetch('/api/v1/techniques', { headers: h })).json();
+      const card = cards.find((t: { id: number }) => !plan.techniques.some((p: { id: number }) => p.id === t.id));
+      const res = await fetch(`/api/v1${path}/steps`, { method: 'POST', headers: h, body: JSON.stringify({ relation: 'then', action: card.name, techniqueId: card.id }) });
+      return { name: card.name as string, stepId: (await res.json()).stepId as number };
+    }, path);
+    await page.reload();
+    await page.locator('.row-split', { has: page.getByRole('heading', { name: 'Techniques' }) }).getByRole('button').click();
+    const sheet = page.getByRole('dialog');
+    await sheet.getByText(`Used in a step, so here while the step is: ${added.name}.`).waitFor();
+    expect(await sheet.getByRole('button', { name: `Remove ${added.name}` }).count()).toBe(0);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    // Tidy up: the step goes, and the card with it.
+    const status = await page.evaluate(
+      async ([path, stepId]) => (await fetch(`/api/v1${path}/steps/${stepId}`, { method: 'DELETE', headers: { 'x-bjj-app': '1' } })).status,
+      [path, added.stepId] as const,
+    );
+    expect(status).toBe(200);
+  });
+
   it('files an inbox note under a new technique', async () => {
     await page.getByRole('button', { name: 'New note' }).click();
     await page.getByPlaceholder('What did you learn or notice?').fill('Angle the shin before dropping the hip.');

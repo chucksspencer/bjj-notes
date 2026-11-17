@@ -1,5 +1,6 @@
 // Read side: structured views used by the web app's JSON API and by the MCP text formatters.
 import type {
+  GamePlanCardRef,
   GamePlanDetail,
   GamePlanRef,
   GamePlansView,
@@ -42,8 +43,8 @@ export const GAME_PLAN_LAST_NOTE_SQL = `greatest(
     (select max(n.observed_on) from game_plan_notes an join notes n on n.id = an.note_id where an.game_plan_id = a.id),
     (select max(n.observed_on) from notes n
        join note_techniques nt on nt.note_id = n.id
-       join game_plan_techniques ax on ax.technique_id = nt.technique_id
-      where ax.game_plan_id = a.id))::text`;
+       join game_plan_cards ax on ax.technique_id = nt.technique_id
+      where ax.game_plan_id = a.id and ax.user_id = a.user_id))::text`;
 
 /** A game plan (aliased `a`) as a GamePlanRef. */
 const GAME_PLAN_REF_JSON = `json_build_object('id', a.id, 'name', a.name, 'rank', a.rank)`;
@@ -67,6 +68,16 @@ const originMatches = (text: string, param: string) =>
 const iso = (col: string) => `(to_json(${col}) #>> '{}')`;
 
 // ---------- notes ----------
+
+/**
+ * Whether a note (aliased `alias`) is in the inbox: it isn't on the To try list, and either nothing files it (no
+ * technique, no game plan) or a technique it named couldn't be placed (`unplaced`). Worked out here, never stored;
+ * everything that lists or counts the inbox uses this.
+ */
+export const inboxWhere = (alias = 'n') =>
+  `(not ${alias}.to_try and (${alias}.unplaced
+     or (not exists (select 1 from note_techniques x where x.note_id = ${alias}.id)
+         and not exists (select 1 from game_plan_notes y where y.note_id = ${alias}.id))))`;
 
 interface NoteRow {
   id: number;
@@ -98,7 +109,7 @@ interface NoteRow {
 }
 
 const NOTE_SELECT = `
-  select n.id, n.body, n.raw_text, n.kind, n.observed_on::text as observed_on, n.source_timestamp, n.inbox, n.to_try,
+  select n.id, n.body, n.raw_text, n.kind, n.observed_on::text as observed_on, n.source_timestamp, ${inboxWhere('n')} as inbox, n.to_try,
          ${iso('n.starred_at')} as starred_at, ${iso('n.answered_at')} as answered_at, ${ATTACHMENTS_JSON} as attachments,
          n.session_id, n.created_via,
          s.id as s_id, s.kind as s_kind, s.url as s_url, s.title as s_title, s.author as s_author,
@@ -182,7 +193,7 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
     return `$${params.length}`;
   };
   where.push(`n.user_id = ${p(uid(q))}`);
-  if (opts.inbox !== undefined) where.push(`n.inbox = ${p(opts.inbox)}`);
+  if (opts.inbox !== undefined) where.push(opts.inbox ? inboxWhere('n') : `not ${inboxWhere('n')}`);
   if (opts.toTry !== undefined) where.push(`n.to_try = ${p(opts.toTry)}`);
   if (opts.starred !== undefined) where.push(`n.starred_at is ${opts.starred ? 'not ' : ''}null`);
   if (opts.kind !== undefined) where.push(`n.kind = ${p(opts.kind)}`);
@@ -215,7 +226,7 @@ export async function noteList(q: Queryable, opts: NoteQuery = {}): Promise<Note
 
 /** Notes (aliased `n`) on a game plan's techniques that aren't filed under the game plan itself. */
 const relatedToGamePlan = (gamePlan: string) =>
-  `(exists (select 1 from note_techniques x join game_plan_techniques ax on ax.technique_id = x.technique_id
+  `(exists (select 1 from note_techniques x join game_plan_cards ax on ax.technique_id = x.technique_id and ax.user_id = x.user_id
             where x.note_id = n.id and ax.game_plan_id = ${gamePlan})
     and not exists (select 1 from game_plan_notes y where y.note_id = n.id and y.game_plan_id = ${gamePlan}))`;
 
@@ -293,8 +304,7 @@ export async function techniqueView(q: Queryable, id: number, noteLimit = 20): P
   const gamePlans = (
     await q.query<GamePlanRef>(
       `select a.id, a.name, a.rank from game_plans a
-       where a.user_id = $2 and (exists (select 1 from game_plan_techniques ax where ax.game_plan_id = a.id and ax.technique_id = $1)
-                                 or exists (select 1 from game_plan_steps st where st.game_plan_id = a.id and st.technique_id = $1))
+       where a.user_id = $2 and exists (select 1 from game_plan_cards ax where ax.game_plan_id = a.id and ax.technique_id = $1 and ax.user_id = $2)
        order by ${GAME_PLAN_ORDER}`,
       [id, uid(q)],
     )
@@ -448,6 +458,10 @@ export async function techniqueList(q: Queryable, f: TechniqueQuery = {}): Promi
 
 // ---------- game plans ----------
 
+/** A card on a game plan (from game_plan_cards, aliased `ax`, with the card as `t`): linked by someone, used by a step, or both. */
+const GAME_PLAN_CARD_JSON = `json_build_object('id', t.id, 'name', t.name, 'type', t.type, 'role', t.role, 'status', t.status,
+  'linked', ax.linked, 'usedInSteps', ax.in_steps)`;
+
 interface GamePlanRow {
   id: number;
   name: string;
@@ -470,9 +484,9 @@ interface GamePlanRow {
 const GAME_PLAN_SELECT = `
   select a.id, a.name, a.aliases, a.description, a.rank, a.premise, a.start_role, ${iso('a.created_at')} as created_at, ${iso('a.updated_at')} as updated_at,
          sp.id as sp_id, sp.slug as sp_slug, sp.name as sp_name,
-         coalesce((select json_agg(${TECH_REF_JSON} order by t.name)
-                   from game_plan_techniques ax join techniques t on t.id = ax.technique_id
-                   where ax.game_plan_id = a.id), '[]'::json) as techniques,
+         coalesce((select json_agg(${GAME_PLAN_CARD_JSON} order by t.name)
+                   from game_plan_cards ax join techniques t on t.id = ax.technique_id
+                   where ax.game_plan_id = a.id and ax.user_id = a.user_id), '[]'::json) as techniques,
          (select count(*)::int from game_plan_steps st where st.game_plan_id = a.id) as step_count,
          (select count(*)::int from game_plan_notes an where an.game_plan_id = a.id) as note_count,
          ${GAME_PLAN_LAST_NOTE_SQL} as last_note
@@ -488,7 +502,7 @@ const toGamePlan = (r: GamePlanRow): GamePlanView => ({
   start: r.sp_id ? { id: r.sp_id, slug: r.sp_slug!, name: r.sp_name! } : null,
   startRole: r.start_role,
   premise: r.premise,
-  techniques: json<TechniqueRef[]>(r.techniques),
+  techniques: json<GamePlanCardRef[]>(r.techniques),
   stepCount: r.step_count,
   noteCount: r.note_count,
   lastNoteOn: r.last_note,

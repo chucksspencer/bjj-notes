@@ -54,24 +54,11 @@ export interface ResolvedStep {
   note: string | null;
 }
 
-/** Links technique cards to a game plan, so notes on them show up there; returns the ones newly linked. */
-async function linkCards(q: Queryable, gamePlanId: number, techniqueIds: (number | null)[]): Promise<number[]> {
-  const linked: number[] = [];
-  for (const t of new Set(techniqueIds.filter((t): t is number => t !== null))) {
-    const { rows } = await q.query(
-      'insert into game_plan_techniques (game_plan_id, technique_id, user_id) values ($1, $2, $3) on conflict do nothing returning technique_id',
-      [gamePlanId, t, uid(q)],
-    );
-    if (rows[0]) linked.push(t);
-  }
-  return linked;
-}
-
 /**
- * Replaces a game plan's steps with an outline. Each step's technique card is linked to the game plan too;
- * returns those newly linked card ids.
+ * Replaces a game plan's steps with an outline. The cards the steps use are on the game plan because of them
+ * (game_plan_cards); nothing is linked.
  */
-export async function writeSteps(q: Queryable, gamePlanId: number, steps: ResolvedStep[]): Promise<number[]> {
+export async function writeSteps(q: Queryable, gamePlanId: number, steps: ResolvedStep[]): Promise<void> {
   const problem = outlineProblem(steps);
   if (problem) throw new UserError(problem);
   const me = uid(q);
@@ -90,7 +77,6 @@ export async function writeSteps(q: Queryable, gamePlanId: number, steps: Resolv
   };
   await insert(fromOutline(steps, s => s), null);
   await touch(q, gamePlanId);
-  return linkCards(q, gamePlanId, steps.map(s => s.technique_id));
 }
 
 /** The card and position a step names by id, kept only if they're there (and the card is yours). */
@@ -174,12 +160,8 @@ export async function resolveStepNames(q: Queryable, steps: NamedStepInput[], mi
 
 const OR_HAS_NO_TRIGGER = 'An alternative answers the same reaction as its plan A, so it has none of its own. Change the reaction on plan A.';
 
-/** What undoes a change to a game plan's steps: the steps as they were (ids included), and any card links it made. */
-function stepsUndo(before: GamePlanSnapshot, steps: StepSnapshot[], linked: number[]): UndoOp {
-  const restore: UndoOp = { kind: 'restore_game_plan', before, steps };
-  if (!linked.length) return restore;
-  return { kind: 'batch', ops: [restore, { kind: 'restore_game_plan_links', gamePlanId: before.id, added: { techniques: linked, notes: [] }, removed: { techniques: [], notes: [] } }] };
-}
+/** What undoes a change to a game plan's steps: the steps as they were, ids included. */
+const stepsUndo = (before: GamePlanSnapshot, steps: StepSnapshot[]): UndoOp => ({ kind: 'restore_game_plan', before, steps });
 
 const stepIn = (steps: StepSnapshot[], id: number): StepSnapshot => {
   const step = steps.find(s => s.id === id);
@@ -254,9 +236,8 @@ export async function addStep(ctx: Ctx, gamePlanId: number, input: StepAdd): Pro
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id`,
       [gamePlanId, me, parent, ordinal, option, trigger, action, techniqueId, toPositionId, input.toRole ?? null, clean(input.note)],
     );
-    const linked = await linkCards(q, gamePlanId, [techniqueId]);
     await touch(q, gamePlanId);
-    await logActivity(q, 'add_step', `edit to "${before.name}"`, stepsUndo(before, steps, linked));
+    await logActivity(q, 'add_step', `edit to "${before.name}"`, stepsUndo(before, steps));
     return { message: `Added ${action}.`, stepId: rows[0]!.id };
   });
 }
@@ -285,9 +266,8 @@ export async function updateStep(ctx: Ctx, gamePlanId: number, stepId: number, p
        where id = $1 and game_plan_id = $8 and user_id = $9`,
       [stepId, next.trigger, next.action, next.technique_id, next.to_position_id, next.to_role, next.note, gamePlanId, me],
     );
-    const linked = await linkCards(q, gamePlanId, [next.technique_id]);
     await touch(q, gamePlanId);
-    await logActivity(q, 'edit_step', `edit to "${before.name}"`, stepsUndo(before, steps, linked));
+    await logActivity(q, 'edit_step', `edit to "${before.name}"`, stepsUndo(before, steps));
     return `Saved ${next.action}.`;
   });
 }
@@ -312,7 +292,7 @@ export async function deleteStep(ctx: Ctx, gamePlanId: number, stepId: number, e
       slots.map(slot => (slot[0]!.ordinal === self.ordinal && self.option === 0 ? self.trigger : slot[0]!.trigger)),
     );
     await touch(q, gamePlanId);
-    await logActivity(q, 'delete_step', `edit to "${before.name}"`, stepsUndo(before, steps, []));
+    await logActivity(q, 'delete_step', `edit to "${before.name}"`, stepsUndo(before, steps));
     return `Deleted ${self.action}${under ? ` and the ${plural(under, 'step')} after it` : ''}.`;
   });
 }
@@ -392,7 +372,7 @@ export async function moveStep(ctx: Ctx, gamePlanId: number, stepId: number, mov
     const r = await moveIn(q, steps, stepId, move);
     if (!r.changed) return r.message;
     await touch(q, gamePlanId);
-    await logActivity(q, 'move_step', `move in "${before.name}"`, stepsUndo(before, steps, []));
+    await logActivity(q, 'move_step', `move in "${before.name}"`, stepsUndo(before, steps));
     return `${r.message}.`;
   });
 }

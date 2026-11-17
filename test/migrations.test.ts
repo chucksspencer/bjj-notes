@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { forUser, migrate, type Db } from '../src/db.js';
 import { undo } from '../src/services/activity.js';
+import { inboxWhere } from '../src/services/views.js';
 import { freshDb } from './helpers.js';
 
 let db: Db;
@@ -399,3 +400,137 @@ describe('021: the owner as an ordinary account', () => {
     expect((await db.query<{ c: number }>("select count(*)::int as c from sign_in_failures where at > now() - interval '1 minute'")).rows[0]!.c).toBe(1);
   });
 });
+
+describe('022: derive the inbox and step cards', () => {
+  const q = async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows;
+  const one = async (sql: string, params: unknown[] = []) => (await q<{ id: number }>(sql, params))[0]!.id;
+
+  it('works the inbox out from what files a note, keeping only names that could not be placed', async () => {
+    await migrateUpTo('022_derived.sql');
+    const owner = await one('select id from users where is_owner');
+    const tech = await one("insert into techniques (name, type, user_id) values ('Inbox card', 'sweep', $1) returning id", [owner]);
+    const gp = await one("insert into game_plans (name, user_id) values ('Inbox plan', $1) returning id", [owner]);
+    // [body, stored inbox flag, to_try, has a technique, filed under a game plan, in the inbox by the rule, unplaced after]
+    const fixtures: [string, boolean, boolean, boolean, boolean, boolean, boolean][] = [
+      ['nothing files it', true, false, false, false, true, false],
+      ['stale: unfiled, flag off', false, false, false, false, true, false],
+      ['filed, flag off', false, false, true, false, false, false],
+      ['a name not placed', true, false, true, false, true, true],
+      ['under a game plan, a name not placed', true, false, false, true, true, true],
+      ['under a game plan', false, false, false, true, false, false],
+      ['to try, stale flag on', true, true, false, false, false, false],
+      ['to try', false, true, false, false, false, false],
+    ];
+    const ids: number[] = [];
+    for (const [body, inbox, toTry, hasTech, hasPlan] of fixtures) {
+      const id = await one('insert into notes (body, inbox, to_try, user_id) values ($1, $2, $3, $4) returning id', [body, inbox, toTry, owner]);
+      if (hasTech) await db.query('insert into note_techniques (note_id, technique_id, user_id) values ($1, $2, $3)', [id, tech, owner]);
+      if (hasPlan) await db.query('insert into game_plan_notes (game_plan_id, note_id, user_id) values ($1, $2, $3)', [gp, id, owner]);
+      ids.push(id);
+    }
+    // An undo entry from before: an edit to the note with a name not placed, its snapshot saying `inbox`.
+    const noteId = ids[3]!;
+    const row = (await q(NOTE_SNAPSHOT_SQL_BEFORE_022, [noteId, owner]))[0]!;
+    await db.query("insert into activity_log (action, summary, undo, user_id) values ('update_note', 'old edit', $1, $2)", [
+      JSON.stringify({ kind: 'restore_note', row, techniqueIds: [tech] }),
+      owner,
+    ]);
+
+    expect(await migrate(db, { through: '022_derived.sql' })).toEqual(['022_derived.sql']);
+    const columns = (await q<{ column_name: string }>("select column_name from information_schema.columns where table_name = 'notes'")).map(c => c.column_name);
+    expect(columns).not.toContain('inbox');
+    expect(columns).toContain('unplaced');
+    expect((await q("select indexname from pg_indexes where indexname = 'notes_user_inbox'")).length).toBe(0);
+
+    // Whatever the stored flag said, the inbox is the rule.
+    const derived = await q<{ id: number; inbox: boolean; unplaced: boolean }>(
+      `select n.id, ${inboxWhere('n')} as inbox, n.unplaced from notes n where n.id = any($1::int[]) order by n.id`,
+      [ids],
+    );
+    expect(derived.map(d => [d.inbox, d.unplaced])).toEqual(fixtures.map(f => [f[5], f[6]]));
+
+    // The old entry still undoes: a note filed with a name not placed comes back still waiting on it.
+    await db.query('update notes set unplaced = false where id = $1', [noteId]);
+    await db.query('delete from note_techniques where note_id = $1', [noteId]);
+    expect(await undo(forUser(db, owner))).toBe('Undid: old edit');
+    expect(await q(`select n.unplaced, ${inboxWhere('n')} as inbox from notes n where n.id = $1`, [noteId])).toEqual([{ unplaced: true, inbox: true }]);
+  });
+
+  it("keeps only the links someone made, reads a game plan's cards through the view, and undoes older entries", async () => {
+    await migrateUpTo('022_derived.sql');
+    const owner = await one('select id from users where is_owner');
+    const sam = await one("insert into users (email, name) values ('sam@example.com', 'Sam') returning id");
+    const card = (name: string, user: number) => one("insert into techniques (name, type, user_id) values ($1, 'sweep', $2) returning id", [name, user]);
+    const [stepCard, linkCard, elsewhere] = [await card('Step card', owner), await card('Link card', owner), await card('Elsewhere card', owner)];
+    const samCard = await card('Step card', sam);
+    const plan = await one("insert into game_plans (name, user_id) values ('Cards', $1) returning id", [owner]);
+    const other = await one("insert into game_plans (name, user_id) values ('Other', $1) returning id", [owner]);
+    const samPlan = await one("insert into game_plans (name, user_id) values ('Sam cards', $1) returning id", [sam]);
+    const step = (gamePlan: number, user: number, ordinal: number, action: string, technique: number | null) =>
+      one('insert into game_plan_steps (game_plan_id, user_id, ordinal, action, technique_id) values ($1, $2, $3, $4, $5) returning id', [
+        gamePlan,
+        user,
+        ordinal,
+        action,
+        technique,
+      ]);
+    const stepId = await step(plan, owner, 1, 'Step', stepCard);
+    await step(other, owner, 1, 'Elsewhere', elsewhere);
+    await step(samPlan, sam, 1, 'Sam step', samCard);
+    const link = (gamePlan: number, technique: number, user: number) =>
+      db.query('insert into game_plan_techniques (game_plan_id, technique_id, user_id) values ($1, $2, $3)', [gamePlan, technique, user]);
+    // Saved by step writes (stepCard), linked by hand (linkCard, and elsewhere: a card another plan's step uses), and Sam's.
+    await link(plan, stepCard, owner);
+    await link(plan, linkCard, owner);
+    await link(plan, elsewhere, owner);
+    await link(samPlan, samCard, sam);
+
+    // Undo entries from before: adding a step that linked its card (batched), and deleting a game plan whose
+    // techniques included its steps' card.
+    const log = (summary: string, op: object) =>
+      db.query("insert into activity_log (action, summary, undo, user_id) values ('x', $1, $2, $3)", [summary, JSON.stringify(op), owner]);
+    const before = { id: plan, name: 'Cards', aliases: [], description: null, start_position_id: null, start_role: null, premise: null };
+    const gone = { ...before, id: 7001, name: 'Gone', rank: null, created_at: '2026-01-01 00:00:00+00', updated_at: '2026-01-01 00:00:00+00' };
+    const goneStep = { id: 7101, parent_id: null, ordinal: 1, option: 0, trigger: null, action: 'Gone step', technique_id: stepCard, to_position_id: null, to_role: null, note: null };
+    await log('old delete', { kind: 'restore_deleted_game_plan', row: gone, techniqueIds: [stepCard, linkCard], noteIds: [], steps: [goneStep], events: [] });
+    await log('old add step', {
+      kind: 'batch',
+      ops: [
+        { kind: 'restore_game_plan', before, steps: [] },
+        { kind: 'restore_game_plan_links', gamePlanId: plan, added: { techniques: [stepCard], notes: [] }, removed: { techniques: [], notes: [] } },
+      ],
+    });
+
+    expect(await migrate(db, { through: '022_derived.sql' })).toEqual(['022_derived.sql']);
+    const links = async () =>
+      (
+        await q<{ g: number; t: number }>(
+          'select game_plan_id as g, technique_id as t from game_plan_techniques where game_plan_id = any($1::int[]) order by game_plan_id, technique_id',
+          [[plan, other, samPlan]],
+        )
+      ).map(r => [r.g, r.t]);
+    // Rows a step of the same game plan accounts for are gone (Sam's too); the rest stay.
+    expect(await links()).toEqual([[plan, linkCard], [plan, elsewhere]]);
+    const cards = async (gamePlan: number) =>
+      (await q<{ technique_id: number; linked: boolean; in_steps: boolean }>(
+        'select technique_id, linked, in_steps from game_plan_cards where game_plan_id = $1 order by technique_id',
+        [gamePlan],
+      )).map(r => [r.technique_id, r.linked, r.in_steps]);
+    expect(await cards(plan)).toEqual([[stepCard, false, true], [linkCard, true, false], [elsewhere, true, false]]);
+    expect(await cards(other)).toEqual([[elsewhere, false, true]]);
+    expect(await cards(samPlan)).toEqual([[samCard, false, true]]);
+
+    // The batched step entry undoes without error: the step goes, and its card with it.
+    expect(await undo(forUser(db, owner))).toBe('Undid: old add step');
+    expect(await q('select id from game_plan_steps where id = $1', [stepId])).toEqual([]);
+    expect(await cards(plan)).toEqual([[linkCard, true, false], [elsewhere, true, false]]);
+    // The deleted game plan comes back with its step; only the card its step doesn't use is linked again.
+    expect(await undo(forUser(db, owner))).toBe('Undid: old delete');
+    expect(await cards(7001)).toEqual([[stepCard, false, true], [linkCard, true, false]]);
+  });
+});
+
+/** How undo entries snapshotted a note before 022. */
+const NOTE_SNAPSHOT_SQL_BEFORE_022 = `select id, body, raw_text, kind, observed_on::text as observed_on, session_id, source_id,
+  source_timestamp, inbox, to_try, starred_at::text as starred_at, answered_at::text as answered_at, created_via,
+  created_at::text as created_at from notes where id = $1 and user_id = $2`;

@@ -230,11 +230,14 @@ function History({ v, today }: { v: GamePlanDetail; today: string }) {
   );
 }
 
+/** The cards linked to the game plan, to add and remove. Cards there only because a step uses them are listed, not removable. */
 function TechniquesSheet({ v, onClose }: { v: GamePlanDetail; onClose: () => void }) {
-  const [techniques, setTechniques] = useState<TechniqueRef[]>(v.techniques);
+  const linked = v.techniques.filter(t => t.linked);
+  const inSteps = v.techniques.filter(t => t.usedInSteps && !t.linked);
+  const [techniques, setTechniques] = useState<TechniqueRef[]>(linked);
   const link = useLinkGamePlan();
   const toast = useToast();
-  const before = new Set(v.techniques.map(t => t.id));
+  const before = new Set(linked.map(t => t.id));
   const after = new Set(techniques.map(t => t.id));
   const add = [...after].filter(id => !before.has(id));
   const remove = [...before].filter(id => !after.has(id));
@@ -257,6 +260,9 @@ function TechniquesSheet({ v, onClose }: { v: GamePlanDetail; onClose: () => voi
         }}
       >
         <TechniquePicker label="Technique cards" selected={techniques} onChange={setTechniques} />
+        {inSteps.length > 0 && (
+          <p className="section-hint">Used in a step, so here while the step is: {inSteps.map(t => t.name).join(', ')}.</p>
+        )}
         <button className="btn block" type="submit" disabled={link.isPending}>
           Save
         </button>

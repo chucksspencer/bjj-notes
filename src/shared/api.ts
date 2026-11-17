@@ -110,6 +110,7 @@ export interface NoteView {
   source: SourceView | null;
   sourceTimestamp: string | null;
   techniques: TechniqueRef[];
+  /** In the inbox: worked out from what files it (see `inboxWhere`), not stored. */
   inbox: boolean;
   /** On the To try list: saved to try out before it's kept (filed) or tossed. */
   toTry: boolean;
@@ -168,6 +169,14 @@ export interface GamePlanRef {
   rank: number | null;
 }
 
+/** A technique card on a game plan, and why it's there (one can be both). */
+export interface GamePlanCardRef extends TechniqueRef {
+  /** Linked to the game plan by you (or by Claude for you). */
+  linked: boolean;
+  /** One of its steps uses this card. It stays while a step does, and can't be unlinked on its own. */
+  usedInSteps: boolean;
+}
+
 /**
  * A game plan: a part of your game, with a description, techniques and notes, and optionally steps (where it
  * starts, then a main line that branches on how the opponent reacts). A game plan with steps is what's called a
@@ -182,8 +191,8 @@ export interface GamePlanView extends GamePlanRef {
   startRole: Role | null;
   /** The situation it's for, e.g. "top has the underhook and crossface". */
   premise: string | null;
-  /** Linked techniques, including every technique one of its steps is. */
-  techniques: TechniqueRef[];
+  /** Its technique cards: the ones linked to it and the ones its steps use, once each. */
+  techniques: GamePlanCardRef[];
   /** How many steps it has (0 = none yet). */
   stepCount: number;
   /** How many notes are linked to it directly. */

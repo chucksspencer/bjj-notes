@@ -95,7 +95,17 @@ export type UndoOp =
     }
   /** Undoes log_session: detaches the notes it attached, then deletes the session (if it made it) or restores its details. */
   | { kind: 'delete_session'; sessionId: number; attachedNoteIds: number[]; created?: boolean; before?: SessionSnapshot | null }
-  | { kind: 'refile_note'; noteId: number; inbox: boolean; toTry?: boolean; techniqueIds: number[]; createdTechniqueIds: number[] }
+  | {
+      kind: 'refile_note';
+      noteId: number;
+      /** Whether a technique it named couldn't be placed (entries from before 022 have `inbox` instead). */
+      unplaced?: boolean;
+      /** Entries from before 022: the stored inbox flag, read as `unplaced` when the note had techniques. */
+      inbox?: boolean;
+      toTry?: boolean;
+      techniqueIds: number[];
+      createdTechniqueIds: number[];
+    }
   /** Puts a note back exactly as it was (after an edit or a delete). */
   | {
       kind: 'restore_note';
@@ -117,11 +127,16 @@ export type UndoOp =
       edges: EdgeSnapshot[];
       links: LinkSnapshot[];
       noteIds: number[];
-      /** Game plans it was linked to (absent in entries from before 018, which named them differently). */
+      /** Game plans someone linked it to. */
+      linkedGamePlanIds?: number[];
+      /**
+       * Entries from before 022: game plans it was on, linked or used by a step (absent before 018). Ones whose
+       * restored steps use it get it back through the steps; the rest are linked again.
+       */
       gamePlanIds?: number[];
       /** Game plan steps that were this technique (absent in older entries). */
       stepIds?: number[];
-      /** Notes that went to the inbox because this was their only technique. */
+      /** Entries from before 022: notes that went to the inbox. Ignored: the inbox follows from the links put back. */
       inboxedNoteIds?: number[];
     }
   /** Takes back links added to a game plan and puts back ones removed. */
@@ -133,7 +148,10 @@ export type UndoOp =
       kind: 'restore_deleted_game_plan';
       /** Entries from before migration 019 also carry `goal`, which is ignored. */
       row: GamePlanSnapshot & { rank: number | null; created_at: string; updated_at: string };
-      techniqueIds: number[];
+      /** The cards someone linked to it (the ones its steps use come back with the steps). */
+      linkedTechniqueIds?: number[];
+      /** Entries from before 022: every card on it, linked or used by a step. Ones its steps use aren't linked again. */
+      techniqueIds?: number[];
       noteIds: number[];
       steps: StepSnapshot[];
       /** Entries from before 019 may have the older events (paused, resumed...) and from_status/to_status, which are ignored. */
@@ -153,7 +171,10 @@ export interface NoteRowSnapshot {
   session_id: number | null;
   source_id: number | null;
   source_timestamp: string | null;
-  inbox: boolean;
+  /** Absent in entries from before 022, which have `inbox` instead. */
+  unplaced?: boolean;
+  /** Entries from before 022: the stored inbox flag. Only read to tell whether a filed note had an unplaced name. */
+  inbox?: boolean;
   /** Absent in undo entries written before the To try list existed. */
   to_try?: boolean;
   starred_at?: string | null;
@@ -185,7 +206,7 @@ export interface LinkSnapshot {
 }
 
 export const NOTE_SNAPSHOT_SQL = `select id, body, raw_text, kind, observed_on::text as observed_on, session_id, source_id,
-  source_timestamp, inbox, to_try, starred_at::text as starred_at, answered_at::text as answered_at, created_via,
+  source_timestamp, unplaced, to_try, starred_at::text as starred_at, answered_at::text as answered_at, created_via,
   created_at::text as created_at from notes where id = $1 and user_id = $2`;
 
 /** Records a write so it can be undone. Returns the entry's id (also added to the request's collector, if the handle has one). */
@@ -297,12 +318,12 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
     case 'restore_note': {
       const r = op.row;
       await q.query(
-        `insert into notes (id, body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via, created_at,
+        `insert into notes (id, body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, unplaced, to_try, created_via, created_at,
                             starred_at, answered_at, user_id)
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
          on conflict (id) do update set body = excluded.body, raw_text = excluded.raw_text, kind = excluded.kind,
            observed_on = excluded.observed_on, session_id = excluded.session_id, source_id = excluded.source_id,
-           source_timestamp = excluded.source_timestamp, inbox = excluded.inbox, to_try = excluded.to_try,
+           source_timestamp = excluded.source_timestamp, unplaced = excluded.unplaced, to_try = excluded.to_try,
            starred_at = excluded.starred_at, answered_at = excluded.answered_at
          where notes.user_id = excluded.user_id`,
         [
@@ -314,7 +335,7 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
           r.session_id,
           r.source_id,
           r.source_timestamp,
-          r.inbox,
+          r.unplaced ?? (r.inbox === true && !r.to_try && (op.techniqueIds.length > 0 || (op.gamePlanIds?.length ?? 0) > 0)),
           r.to_try ?? false,
           r.created_via,
           r.created_at,
@@ -370,13 +391,18 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       for (const e of op.edges) await insertEdge(q, e);
       for (const l of op.links) await insertLink(q, l);
       for (const n of op.noteIds) await insertNoteTechnique(q, n, r.id);
-      // Only game plans that are still there: one may have been deleted since.
-      for (const g of op.gamePlanIds ?? []) await insertGamePlanTechnique(q, g, r.id);
       if (op.stepIds?.length) {
         await q.query('update game_plan_steps set technique_id = $2 where id = any($1::int[]) and user_id = $3', [op.stepIds, r.id, me]);
       }
-      if (op.inboxedNoteIds?.length) {
-        await q.query('update notes set inbox = false where id = any($1::int[]) and user_id = $2', [op.inboxedNoteIds, me]);
+      // Only game plans that are still there: one may have been deleted since.
+      for (const g of op.linkedGamePlanIds ?? []) await insertGamePlanTechnique(q, g, r.id);
+      if (op.gamePlanIds?.length) {
+        const viaSteps = new Set(
+          (await q.query<{ game_plan_id: number }>('select distinct game_plan_id from game_plan_steps where technique_id = $1 and user_id = $2', [r.id, me])).rows.map(
+            s => s.game_plan_id,
+          ),
+        );
+        for (const g of op.gamePlanIds) if (!viaSteps.has(g)) await insertGamePlanTechnique(q, g, r.id);
       }
       return;
     }
@@ -407,11 +433,9 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
           op.added.notes,
           me,
         ]);
-        await refreshInbox(q, op.added.notes);
       }
       for (const t of op.removed.techniques) await insertGamePlanTechnique(q, op.gamePlanId, t);
       for (const n of op.removed.notes) await insertGamePlanNote(q, op.gamePlanId, n);
-      if (op.removed.notes.length) await refreshInbox(q, op.removed.notes);
       return;
     case 'restore_game_plan': {
       const b = op.before;
@@ -435,10 +459,11 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [r.id, r.name, r.aliases, r.description, r.start_position_id, r.start_role, r.premise, r.rank, r.created_at, r.updated_at, me],
       );
-      for (const t of op.techniqueIds) await insertGamePlanTechnique(q, r.id, t);
       for (const n of op.noteIds) await insertGamePlanNote(q, r.id, n);
-      await refreshInbox(q, op.noteIds);
       await insertSteps(q, r.id, op.steps);
+      for (const t of op.linkedTechniqueIds ?? []) await insertGamePlanTechnique(q, r.id, t);
+      const viaSteps = new Set(op.steps.map(st => st.technique_id));
+      for (const t of op.techniqueIds ?? []) if (!viaSteps.has(t)) await insertGamePlanTechnique(q, r.id, t);
       for (const e of op.events) {
         await q.query(
           `insert into focus_events (id, game_plan_id, user_id, event, from_rank, to_rank, at)
@@ -452,7 +477,12 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
     case 'refile_note':
       await q.query('delete from note_techniques where note_id = $1 and user_id = $2', [op.noteId, me]);
       for (const t of op.techniqueIds) await insertNoteTechnique(q, op.noteId, t);
-      await q.query('update notes set inbox = $2, to_try = $3 where id = $1 and user_id = $4', [op.noteId, op.inbox, op.toTry ?? false, me]);
+      await q.query('update notes set unplaced = $2, to_try = $3 where id = $1 and user_id = $4', [
+        op.noteId,
+        op.unplaced ?? (op.inbox === true && op.techniqueIds.length > 0),
+        op.toTry ?? false,
+        me,
+      ]);
       await deleteTechniques(q, op.createdTechniqueIds);
       return;
   }
@@ -497,21 +527,6 @@ export async function insertSteps(q: Queryable, gamePlanId: number, steps: StepS
   for (const st of steps) {
     if (st.parent_id !== null) await q.query('update game_plan_steps set parent_id = $2 where id = $1 and user_id = $3', [st.id, st.parent_id, me]);
   }
-}
-
-/**
- * Notes are in the inbox when nothing files them: no technique and no game plan. Rechecks the given notes after
- * their game plans changed (To try notes stay out of the inbox).
- */
-export async function refreshInbox(q: Queryable, noteIds: number[]): Promise<void> {
-  if (!noteIds.length) return;
-  await q.query(
-    `update notes n set inbox = not n.to_try
-       and not exists (select 1 from note_techniques x where x.note_id = n.id)
-       and not exists (select 1 from game_plan_notes y where y.note_id = n.id)
-     where n.id = any($1::int[]) and n.user_id = $2`,
-    [noteIds, uid(q)],
-  );
 }
 
 /** Closes gaps in the focus list so it runs 1, 2, 3... */

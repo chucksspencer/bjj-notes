@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Structurer } from '../src/capture.js';
+import { inboxWhere } from '../src/services/views.js';
 import { API_TOKEN, startServer, type TestServer } from './helpers.js';
 
 let s: TestServer | undefined;
@@ -67,7 +68,7 @@ describe('Siri capture API', () => {
 
     const rows = (
       await s.db.query<{ body: string; url: string; kind: string; source_id: number; to_try: boolean; inbox: boolean }>(
-        'select n.body, s.url, s.kind, n.source_id, n.to_try, n.inbox from notes n join sources s on s.id = n.source_id order by n.id',
+        `select n.body, s.url, s.kind, n.source_id, n.to_try, ${inboxWhere('n')} as inbox from notes n join sources s on s.id = n.source_id order by n.id`,
       )
     ).rows;
     expect(rows.map(({ source_id: _, ...r }) => r)).toEqual([

@@ -7,7 +7,6 @@ import type { GamePlanLinksInput, GamePlanPatch, Role } from '../shared/api.js';
 import { stepsIn } from '../shared/steps.js';
 import {
   logActivity,
-  refreshInbox,
   renumberFocus,
   STEP_SNAPSHOT_SQL,
   type GamePlanLinkIds,
@@ -266,6 +265,24 @@ async function linkIn(q: Queryable, id: number, change: GamePlanLinksInput) {
     if (rows[0]) added.notes.push(n.id);
   }
   if (change.remove?.techniqueIds?.length) {
+    // A card only there because a step uses it can't be unlinked: the step would still use it.
+    const inSteps = (
+      await q.query<{ name: string; plan: string; actions: string[] }>(
+        `select t.name, a.name as plan, array_agg(st.action order by st.id) as actions
+         from game_plan_steps st join techniques t on t.id = st.technique_id and t.user_id = st.user_id
+         join game_plans a on a.id = st.game_plan_id and a.user_id = st.user_id
+         where st.game_plan_id = $1 and st.technique_id = any($2::int[]) and st.user_id = $3
+           and not exists (select 1 from game_plan_techniques gt where gt.game_plan_id = st.game_plan_id and gt.technique_id = st.technique_id)
+         group by t.id, t.name, a.name order by t.name`,
+        [id, change.remove.techniqueIds, me],
+      )
+    ).rows;
+    if (inSteps.length) {
+      const [first] = inSteps;
+      const steps = [...new Set(first!.actions)].map(a => `"${a}"`).join(', ');
+      const which = first!.actions.length === 1 ? 'a step uses' : 'steps use';
+      throw new UserError(`${first!.name} is on ${first!.plan} because ${which} it (${steps}). Change or delete the step to take it off.`);
+    }
     const { rows } = await q.query<{ technique_id: number; name: string }>(
       `delete from game_plan_techniques ax using techniques t
        where ax.game_plan_id = $1 and ax.technique_id = any($2::int[]) and ax.user_id = $3 and t.id = ax.technique_id
@@ -284,8 +301,8 @@ async function linkIn(q: Queryable, id: number, change: GamePlanLinksInput) {
     );
     removed.notes.push(...rows.map(r => r.note_id));
   }
-  // A note filed under a game plan is filed: it leaves the inbox (and comes back if that was all that filed it).
-  await refreshInbox(q, [...added.notes, ...removed.notes]);
+  // Filing a note under a game plan is filing it: a name that couldn't be placed no longer holds it in the inbox.
+  if (added.notes.length) await q.query('update notes set unplaced = false where id = any($1::int[]) and user_id = $2', [added.notes, me]);
 
   const parts: string[] = [];
   if (linkedNames.length || added.notes.length) {
@@ -356,15 +373,13 @@ async function editIn(q: Queryable, id: number, f: Fields, steps?: ResolvedStep[
     );
   }
   let stepsBefore: StepSnapshot[] | undefined;
-  let linked: number[] = [];
   if (steps) {
     stepsBefore = (await q.query<StepSnapshot>(STEP_SNAPSHOT_SQL, [id, me])).rows;
-    linked = await writeSteps(q, id, steps);
+    await writeSteps(q, id, steps);
     parts.push(steps.length ? `steps saved (${plural(steps.length, 'step')})` : stepsBefore.length ? 'steps cleared' : 'no steps');
   }
   const ops: UndoOp[] = [];
   if (fieldsChanged || steps) ops.push({ kind: 'restore_game_plan', before, ...(stepsBefore ? { steps: stepsBefore } : {}) });
-  if (linked.length) ops.push({ kind: 'restore_game_plan_links', gamePlanId: id, added: { techniques: linked, notes: [] }, removed: { techniques: [], notes: [] } });
   return { before: before.name, name: after.name, parts, ops };
 }
 
@@ -546,7 +561,8 @@ export async function deleteGamePlan(ctx: Ctx, target: { id?: number; name?: str
       )
     ).rows[0];
     if (!row) return `No game plan #${id}.`;
-    const techniqueIds = (
+    // Only the links someone made: the cards its steps use come back with the steps.
+    const linkedTechniqueIds = (
       await q.query<{ technique_id: number }>('select technique_id from game_plan_techniques where game_plan_id = $1 and user_id = $2', [id, me])
     ).rows.map(r => r.technique_id);
     const noteIds = (await q.query<{ note_id: number }>('select note_id from game_plan_notes where game_plan_id = $1 and user_id = $2', [id, me])).rows.map(
@@ -561,8 +577,7 @@ export async function deleteGamePlan(ctx: Ctx, target: { id?: number; name?: str
     ).rows;
     await q.query('delete from game_plans where id = $1 and user_id = $2', [id, me]);
     await renumberFocus(q);
-    await refreshInbox(q, noteIds);
-    await logActivity(q, 'delete_game_plan', `delete "${row.name}"`, { kind: 'restore_deleted_game_plan', row, techniqueIds, noteIds, steps, events });
+    await logActivity(q, 'delete_game_plan', `delete "${row.name}"`, { kind: 'restore_deleted_game_plan', row, linkedTechniqueIds, noteIds, steps, events });
     return `Deleted ${row.name}.${noteIds.length ? ` Its ${plural(noteIds.length, 'note')} stay.` : ''}`;
   });
 }
