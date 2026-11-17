@@ -89,7 +89,7 @@ describe('housekeep', () => {
     await q("delete from notes where body = 'n'");
   });
 
-  it('prunes OAuth codes, tokens, clients, web sessions and invites at their cutoffs', async () => {
+  it('prunes OAuth codes, tokens, clients, web sessions, invites and sign-in failures at their cutoffs', async () => {
     const owner = (await q<{ id: number }>('select id from users where is_owner'))[0]!.id;
     const client = (id: string, days: number) => q(`insert into oauth_clients (client_id, info, created_at) values ($1, '{}', ${ago(days)})`, [id]);
     for (const [id, days] of [['c-old-empty', 10], ['c-new-empty', 2], ['c-old-token', 10], ['c-old-code', 10]] as const) await client(id, days);
@@ -125,13 +125,16 @@ describe('housekeep', () => {
     await invite('inv-used-recent', -5, 5);
     await invite('inv-open', -5, null);
 
+    await q(`insert into sign_in_failures (account, at) values ('old@example.com', now() - interval '25 hours'), ('new@example.com', now() - interval '23 hours')`);
+
     const done = await housekeep(s.db);
-    expect(done).toMatchObject({ oauth_codes: 1, oauth_tokens: 2, oauth_clients: 1, web_sessions: 1, invites: 2 });
+    expect(done).toMatchObject({ oauth_codes: 1, oauth_tokens: 2, oauth_clients: 1, web_sessions: 1, invites: 2, sign_in_failures: 1 });
+    expect(await ids('select account as k from sign_in_failures')).toEqual(['new@example.com']);
     expect(await ids('select code_hash as k from oauth_codes')).toEqual(['code-recent']);
     expect(await ids('select token_hash as k from oauth_tokens')).toEqual(['tok-future', 'tok-recent']);
     expect(await ids("select client_id as k from oauth_clients where client_id like 'c-%'")).toEqual(['c-new-empty', 'c-old-code', 'c-old-token']);
     expect(await ids("select token_hash as k from web_sessions where token_hash like 'ws-%'")).toEqual(['ws-valid']);
     expect(await ids("select token_hash as k from invites where token_hash like 'inv-%'")).toEqual(['inv-expired-recent', 'inv-open', 'inv-used-recent']);
-    expect(await housekeep(s.db)).toMatchObject({ oauth_codes: 0, oauth_tokens: 0, web_sessions: 0, invites: 0 });
+    expect(await housekeep(s.db)).toMatchObject({ oauth_codes: 0, oauth_tokens: 0, web_sessions: 0, invites: 0, sign_in_failures: 0 });
   });
 });

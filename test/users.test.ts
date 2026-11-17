@@ -5,7 +5,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AccountView, GamePlanDetail, GamePlansView, FocusView, LabView, NoteCreateResult, NoteView, PositionListItem, TechniqueListItem, TechniqueView } from '../src/shared/api.js';
 import { search } from '../src/services/explore.js';
-import { API_TOKEN, connect, OWNER_PASSWORD, startServer, type TestServer } from './helpers.js';
+import { hashPassword, importOwnerApiToken, importOwnerPassword, importOwnerSecrets } from '../src/auth/users.js';
+import { API_TOKEN, connect, form, OWNER_PASSWORD, pkce, REDIRECT_URI, startServer, type TestServer } from './helpers.js';
 
 let s: TestServer;
 
@@ -415,7 +416,10 @@ describe('passwords and removing people', () => {
     expect((await api(before.other, 'GET', '/api/v1/focus')).status).toBe(401);
     expect((await api(sam, 'GET', '/api/v1/focus')).status).toBe(200); // the browser that made the change stays signed in
     expect((await api<AccountView>(sam, 'GET', '/api/v1/account')).body.tokens).toHaveLength(0);
-    expect((await api(owner, 'POST', '/api/v1/account/password', { current: OWNER_PASSWORD, password: 'whatever-12345' })).status).toBe(400);
+    // The owner's form checks the current password the same way (the owner's own change is tested below, on its own server).
+    expect((await api(owner, 'POST', '/api/v1/account/password', { current: 'not my password', password: 'whatever-12345' })).body.message).toBe(
+      'Your current password is wrong.',
+    );
   });
 
   it('resets a password with a link from the owner, ending every sign-in', async () => {
@@ -493,5 +497,150 @@ describe('owner without an email yet', () => {
       body: JSON.stringify({ password: OWNER_PASSWORD }),
     });
     expect(pwOnly.status).toBe(401);
+  });
+});
+
+describe('the owner is an ordinary account', () => {
+  let o: TestServer;
+  beforeAll(async () => {
+    o = await startServer();
+  });
+  afterAll(async () => {
+    await o.close();
+  });
+
+  let n = 0;
+  /** Each sign-in from a different address, so the per-IP limit stays out of the way of the per-account one. */
+  const post = (p: string, body: Record<string, unknown>, ip = `10.0.0.${++n % 250}`) =>
+    fetch(`${o.base}${p}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-bjj-app': '1', 'x-forwarded-for': ip },
+      body: JSON.stringify(body),
+    });
+  const session = async (email: string, password: string) => {
+    const res = await post('/api/v1/session', { email, password });
+    return { status: res.status, body: (await res.json()) as any, cookie: res.headers.get('set-cookie')?.split(';')[0] };
+  };
+  const q = async <T = Record<string, any>>(sql: string, params: unknown[] = []) => (await o.db.query<T>(sql, params)).rows;
+  const failures = async (account: string) => (await q<{ c: number }>('select count(*)::int as c from sign_in_failures where account = $1', [account]))[0]!.c;
+  const capture = (token: string) =>
+    fetch(`${o.base}/api/capture`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ text: 'Siri' }) });
+
+  it('signs the owner in against the stored hash, and ignores OWNER_PASSWORD once imported', async () => {
+    const row = (await q<{ password_hash: string | null }>('select password_hash from users where is_owner'))[0]!;
+    expect(row.password_hash).toMatch(/^scrypt\$/);
+    expect((await session('', OWNER_PASSWORD)).status).toBe(200);
+    expect((await session('', 'some other password')).status).toBe(401);
+    await q("delete from sign_in_failures");
+    // A changed secret on a later start does nothing: the owner already has a password.
+    expect(await importOwnerSecrets(o.db, { ownerPassword: 'a brand new owner password', apiToken: API_TOKEN })).toEqual([]);
+    expect((await session('', 'a brand new owner password')).status).toBe(401);
+    const me = await session('Owner@Example.com', OWNER_PASSWORD); // and claims the email, as before
+    expect(me.body.user).toMatchObject({ isOwner: true, email: 'owner@example.com' });
+    await q("delete from sign_in_failures");
+  });
+
+  it('keeps API_TOKEN as an ordinary token that stays deleted', async () => {
+    const owner = { cookie: (await session('owner@example.com', OWNER_PASSWORD)).cookie! };
+    expect((await capture(API_TOKEN)).status).toBe(200);
+    const view = (await (await fetch(`${o.base}/api/v1/account`, { headers: { cookie: owner.cookie } })).json()) as AccountView;
+    expect(view.tokens.map(t => t.label)).toEqual(['Original Siri token']);
+    expect(view.tokens[0]!.lastUsedAt).not.toBeNull();
+    expect('ownerApiToken' in view).toBe(false);
+    const del = await fetch(`${o.base}/api/v1/account/tokens/${view.tokens[0]!.id}`, { method: 'DELETE', headers: { cookie: owner.cookie, 'x-bjj-app': '1' } });
+    expect(del.status).toBe(200);
+    expect((await capture(API_TOKEN)).status).toBe(401);
+    // A restart with the secret still set doesn't bring it back.
+    expect(await importOwnerApiToken(o.db, API_TOKEN)).toBe(false);
+    expect((await capture(API_TOKEN)).status).toBe(401);
+    expect((await q("select value from app_state where key = 'imported_owner_api_token'"))[0]).toEqual({ value: 'yes' });
+  });
+
+  it('lets the owner change their password on the Account page', async () => {
+    const owner = (await session('owner@example.com', OWNER_PASSWORD)).cookie!;
+    const change = await fetch(`${o.base}/api/v1/account/password`, {
+      method: 'POST',
+      headers: { cookie: owner, 'content-type': 'application/json', 'x-bjj-app': '1' },
+      body: JSON.stringify({ current: OWNER_PASSWORD, password: 'the owner changed it' }),
+    });
+    expect(change.status).toBe(200);
+    expect((await session('owner@example.com', OWNER_PASSWORD)).status).toBe(401);
+    expect((await session('owner@example.com', 'the owner changed it')).status).toBe(200);
+    expect((await fetch(`${o.base}/api/v1/focus`, { headers: { cookie: owner } })).status).toBe(200); // this browser stays signed in
+    await q("delete from sign_in_failures");
+  });
+
+  it('refuses to start with no owner password and no OWNER_PASSWORD; the recovery steps work', async () => {
+    await q('update users set password_hash = null where is_owner');
+    await expect(importOwnerPassword(o.db, undefined)).rejects.toThrow(/OWNER_PASSWORD/);
+    await expect(importOwnerSecrets(o.db, {})).rejects.toThrow(/OWNER_PASSWORD/);
+    expect(await importOwnerSecrets(o.db, { ownerPassword: 'recovered owner password' })).toEqual(['OWNER_PASSWORD as the owner\'s password']);
+    expect((await session('owner@example.com', 'recovered owner password')).status).toBe(200);
+    expect((await session('owner@example.com', 'the owner changed it')).status).toBe(401);
+    await q("delete from sign_in_failures");
+  });
+
+  it('limits wrong passwords per account, in the database', async () => {
+    await q("insert into users (email, name, password_hash) values ('pat@example.com', 'Pat', $1)", [await hashPassword('pat-password-1')]);
+    for (let i = 0; i < 10; i++) expect((await session('Owner@example.com', `wrong guess ${i}`)).status).toBe(401);
+    expect(await failures('owner@example.com')).toBe(10);
+    // Now even the right password is refused, without being checked, from any address.
+    const blocked = await session('owner@example.com', 'recovered owner password');
+    expect(blocked.status).toBe(429);
+    expect(blocked.body).toEqual({ error: 'too_many', message: 'Too many wrong passwords. Try again in a few minutes.' });
+    expect(await failures('owner@example.com')).toBe(10);
+    // Someone else is unaffected.
+    expect((await session('pat@example.com', 'pat-password-1')).status).toBe(200);
+
+    // The Claude connector's sign-in page says the same.
+    const client = (await (
+      await fetch(`${o.base}/register`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ client_name: 'Claude', redirect_uris: [REDIRECT_URI], token_endpoint_auth_method: 'none' }),
+      })
+    ).json()) as { client_id: string };
+    const oauth = await fetch(`${o.base}/oauth/login`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-forwarded-for': '10.0.1.1' },
+      body: form({
+        client_id: client.client_id,
+        redirect_uri: REDIRECT_URI,
+        code_challenge: pkce().challenge,
+        scope: 'notes',
+        email: 'owner@example.com',
+        password: 'recovered owner password',
+      }),
+    });
+    expect(oauth.status).toBe(429);
+    expect(await oauth.text()).toContain('Too many wrong passwords. Try again in a few minutes.');
+
+    // So does changing a password: the current one isn't checked.
+    const pat = (await post('/api/v1/session', { email: 'pat@example.com', password: 'pat-password-1' })).headers.get('set-cookie')!.split(';')[0]!;
+    await q("insert into sign_in_failures (account) select 'pat@example.com' from generate_series(1, 10)");
+    const change = await fetch(`${o.base}/api/v1/account/password`, {
+      method: 'POST',
+      headers: { cookie: pat, 'content-type': 'application/json', 'x-bjj-app': '1', 'x-forwarded-for': '10.0.1.2' },
+      body: JSON.stringify({ current: 'pat-password-1', password: 'pat-password-2' }),
+    });
+    expect(change.status).toBe(429);
+    expect((await change.json()).message).toBe('Too many wrong passwords. Try again in a few minutes.');
+
+    // After the window, the right password works and clears the record.
+    await q("update sign_in_failures set at = now() - interval '16 minutes'");
+    expect((await session('owner@example.com', 'recovered owner password')).status).toBe(200);
+    expect(await failures('owner@example.com')).toBe(0);
+    expect(await failures('pat@example.com')).toBe(10); // someone else's record is their own
+  });
+
+  it("counts the owner's no-email sign-in as '(owner)'", async () => {
+    await q('update users set email = null where is_owner');
+    await q('delete from sign_in_failures');
+    expect((await session('', 'nope nope nope')).status).toBe(401);
+    expect((await session('someone-new@example.com', 'nope nope nope')).status).toBe(401);
+    expect(await failures('(owner)')).toBe(2);
+    expect((await session('', 'recovered owner password')).status).toBe(200);
+    expect(await failures('(owner)')).toBe(0);
   });
 });

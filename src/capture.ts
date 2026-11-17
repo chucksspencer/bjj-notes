@@ -283,12 +283,12 @@ export function appCaptureRouter(base: Ctx, structurer: Structurer | null, requi
 }
 
 /**
- * Plain HTTPS endpoints for Siri Shortcuts, authenticated with a bearer token: the owner's API_TOKEN,
- * or a token someone made on their Account page. Each token reads and writes its own person's notebook.
+ * Plain HTTPS endpoints for Siri Shortcuts, authenticated with a bearer token someone made on their
+ * Account page (the owner's list also holds API_TOKEN, imported at startup). Each token reads and writes its own person's notebook.
  *   POST /api/capture  { "text": "...", "url"?: "..." }  -> { speech, note_id }
  *   GET  /api/focus                                     -> { speech }
  */
-export function captureRouter(base: Ctx, apiToken: string, structurer: Structurer | null): Router {
+export function captureRouter(base: Ctx, structurer: Structurer | null): Router {
   const router = express.Router();
   // The token goes in the Authorization header, or (for POSTs) as a "token" field in the JSON body:
   // headers are fiddly to set in the Shortcuts app, and a body field isn't written to request logs.
@@ -297,7 +297,7 @@ export function captureRouter(base: Ctx, apiToken: string, structurer: Structure
       const header = req.get('authorization') ?? '';
       const bodyToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
       const token = header.replace(/^Bearer\s+/i, '').trim() || bodyToken;
-      const userId = token ? await userForApiToken(base.db, token, apiToken) : null;
+      const userId = token ? await userForApiToken(base.db, token) : null;
       if (userId === null) {
         res.status(401).json({
           error: 'unauthorized',

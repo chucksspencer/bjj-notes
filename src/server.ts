@@ -1,4 +1,5 @@
 import { buildApp } from './app.js';
+import { importOwnerSecrets } from './auth/users.js';
 import { claudeStructurer } from './capture.js';
 import { loadConfig } from './config.js';
 import { migrate, pgDb, pgliteDb } from './db.js';
@@ -20,6 +21,10 @@ if (!config.databaseUrl) {
 
 const ran = await migrate(db);
 if (ran.length) console.log(`Applied migrations: ${ran.join(', ')}`);
+// The owner's first password and Siri token come from deploy secrets, once; after that they're ignored.
+// Fails (and so the deploy's readiness check fails) if the owner has no password and OWNER_PASSWORD isn't set.
+const imported = await importOwnerSecrets(db, { ownerPassword: config.ownerPassword, apiToken: config.apiToken });
+if (imported.length) console.log(`Imported ${imported.join(' and ')}.`);
 
 const structurer = config.anthropicApiKey ? claudeStructurer(config.anthropicApiKey, config.captureModel) : null;
 const rewriter = rewriterFor(config);

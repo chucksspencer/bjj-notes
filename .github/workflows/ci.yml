@@ -129,6 +129,7 @@ jobs:
           IMAGE_TAG: sha-${{ github.sha }}
           GCP_REGION: ${{ vars.GCP_REGION }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Optional after the first install: the owner's first password and Siri token, imported once (see README).
           OWNER_PASSWORD: ${{ secrets.OWNER_PASSWORD }}
           API_TOKEN: ${{ secrets.API_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

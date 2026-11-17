@@ -474,8 +474,6 @@ export interface InviteView {
 export interface AccountView {
   me: Me;
   tokens: ApiTokenView[];
-  /** The owner's API_TOKEN secret also works for their Shortcuts. */
-  ownerApiToken: boolean;
   /** iCloud link to the shared "Save to BJJ Notes" shortcut, if one has been set up. */
   shareShortcutUrl: string | null;
   /** Only for the owner: whether search by meaning is on, and its most recent failure if the last try failed. */

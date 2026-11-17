@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { Response } from 'express';
 import type { OAuthRegisteredClientsStore } from '@modelcontextprotocol/sdk/server/auth/clients.js';
 import { InvalidGrantError, InvalidTargetError, InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
@@ -14,13 +14,6 @@ const CODE_TTL_S = 10 * 60;
 
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 const newSecret = () => randomBytes(32).toString('base64url');
-
-/** Constant-time comparison of two secrets of any length. */
-export function secretsMatch(given: string, expected: string): boolean {
-  const a = Buffer.from(sha256(given));
-  const b = Buffer.from(sha256(expected));
-  return timingSafeEqual(a, b);
-}
 
 const sameResource = (a: string, b: string) => a.replace(/#.*$/, '').replace(/\/$/, '') === b.replace(/#.*$/, '').replace(/\/$/, '');
 

@@ -158,3 +158,18 @@ describe('018: game plans', () => {
     expect(names).toEqual([]);
   });
 });
+
+describe('021: the owner as an ordinary account', () => {
+  it('applies on top of everything before it, leaving the owner and their tokens alone', async () => {
+    await migrateUpTo('021_owner_account.sql');
+    const owner = (await db.query<{ id: number }>('select id from users where is_owner')).rows[0]!.id;
+    await db.query("insert into api_tokens (user_id, token_hash, label) values ($1, 'h', 'Phone')", [owner]);
+    expect(await migrate(db, { through: '021_owner_account.sql' })).toEqual(['021_owner_account.sql']);
+    expect((await db.query('select password_hash, is_owner from users')).rows).toEqual([{ password_hash: null, is_owner: true }]);
+    expect((await db.query('select label from api_tokens')).rows).toEqual([{ label: 'Phone' }]);
+    await db.query("insert into app_state (key, value) values ('k', 'v')");
+    await expect(db.query("insert into app_state (key, value) values ('k', 'w')")).rejects.toThrow();
+    await db.query("insert into sign_in_failures (account) values ('a@example.com')");
+    expect((await db.query<{ c: number }>("select count(*)::int as c from sign_in_failures where at > now() - interval '1 minute'")).rows[0]!.c).toBe(1);
+  });
+});

@@ -1,8 +1,8 @@
 // People: who can sign in, their passwords, invite and reset links, and their Siri tokens.
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual, type ScryptOptions } from 'node:crypto';
-import type { Queryable } from '../db.js';
+import type { Db, Queryable } from '../db.js';
 import { UserError } from '../services/errors.js';
-import { secretsMatch, sha256 } from './provider.js';
+import { sha256 } from './provider.js';
 
 export const BELTS = ['white', 'blue', 'purple', 'brown', 'black'] as const;
 export type Belt = (typeof BELTS)[number];
@@ -104,29 +104,136 @@ export async function getOwner(q: Queryable): Promise<User> {
 }
 
 /**
- * The user an email and password belong to, or null. The owner's password is OWNER_PASSWORD. Until the
- * owner has an email on file, the owner signs in with the password alone (as before there were other
- * people), or with any email not already taken, which then becomes the owner's.
+ * The user an email and password belong to, or null. Everyone's password, the owner's included, is checked
+ * against their password_hash. Until the owner has an email on file, the owner signs in with the password
+ * alone (as before there were other people), or with any email not already taken, which then becomes the
+ * owner's. This doesn't count wrong passwords: sign-in goes through `signIn`, which does.
  */
-export async function authenticate(q: Queryable, emailInput: string, password: string, ownerPassword: string): Promise<User | null> {
+export async function authenticate(q: Queryable, emailInput: string, password: string): Promise<User | null> {
   if (!password) return null;
   const email = (emailInput ?? '').trim().toLowerCase();
   const row = email ? (await q.query<UserRow>(`select ${USER_COLS} from users where lower(email) = $1`, [email])).rows[0] : undefined;
-  if (row?.is_owner) return secretsMatch(password, ownerPassword) ? toUser(row) : null;
   if (row) {
     if (row.password_hash && (await verifyPassword(password, row.password_hash))) return toUser(row);
+    if (!row.password_hash) await wasteTime(password);
     return null;
   }
-  const owner = await getOwner(q);
-  if (!owner.email && secretsMatch(password, ownerPassword)) {
+  const owner = (await q.query<UserRow>(`select ${USER_COLS} from users where is_owner`)).rows[0];
+  if (owner && !owner.email && owner.password_hash) {
+    if (!(await verifyPassword(password, owner.password_hash))) return null;
     if (email && EMAIL.test(email)) {
       await q.query('update users set email = $2 where id = $1 and email is null', [owner.id, email]);
-      return { ...owner, email };
+      return { ...toUser(owner), email };
     }
-    return owner;
+    return toUser(owner);
   }
   await wasteTime(password);
   return null;
+}
+
+// ---------- the per-account sign-in limit ----------
+
+/** This many wrong passwords for one account within SIGN_IN_WINDOW_MINUTES, and that account's sign-in waits. */
+export const SIGN_IN_LIMIT = 10;
+export const SIGN_IN_WINDOW_MINUTES = 15;
+
+/** Too many wrong passwords for this account lately: the password wasn't checked. */
+export class TooManySignInsError extends UserError {
+  constructor() {
+    super('Too many wrong passwords. Try again in a few minutes.');
+  }
+}
+
+/** The account sign-in failures are counted against: the email as typed, or '(owner)' for the owner before they have an email. */
+async function signInAccount(q: Queryable, emailInput: string): Promise<string> {
+  const email = (emailInput ?? '').trim().toLowerCase();
+  if (email && (await q.query('select 1 from users where lower(email) = $1', [email])).rows[0]) return email;
+  const owner = (await q.query<{ email: string | null }>('select email from users where is_owner')).rows[0];
+  if (owner && !owner.email) return '(owner)';
+  return email || '(owner)';
+}
+
+/** Throws TooManySignInsError when the account has had SIGN_IN_LIMIT wrong passwords within the window. */
+export async function refuseIfTooManyFailures(q: Queryable, account: string): Promise<void> {
+  const { rows } = await q.query<{ c: number }>(
+    'select count(*)::int as c from sign_in_failures where account = $1 and at > now() - make_interval(mins => $2)',
+    [account, SIGN_IN_WINDOW_MINUTES],
+  );
+  if (rows[0]!.c >= SIGN_IN_LIMIT) throw new TooManySignInsError();
+}
+
+export async function recordSignInFailure(q: Queryable, account: string): Promise<void> {
+  await q.query('insert into sign_in_failures (account) values ($1)', [account]);
+}
+
+export async function clearSignInFailures(q: Queryable, account: string): Promise<void> {
+  await q.query('delete from sign_in_failures where account = $1', [account]);
+}
+
+/**
+ * Signs someone in: `authenticate`, counted per account. Throws TooManySignInsError (without checking the
+ * password) after too many wrong ones; a wrong password is recorded, and a right one clears the account's record.
+ */
+export async function signIn(q: Queryable, emailInput: string, password: string): Promise<User | null> {
+  const account = await signInAccount(q, emailInput);
+  await refuseIfTooManyFailures(q, account);
+  const user = await authenticate(q, emailInput, password);
+  if (user) await clearSignInFailures(q, account);
+  else if (password) await recordSignInFailure(q, account);
+  return user;
+}
+
+// ---------- the owner's deploy secrets, imported once at startup ----------
+
+/**
+ * Gives the owner a password_hash from OWNER_PASSWORD if they have none (a first install, or the recovery
+ * steps in docs/operations.md). Once there is a hash, OWNER_PASSWORD is ignored. Throws if there's no hash
+ * and no OWNER_PASSWORD, since then nobody could sign in as the owner. Returns whether it set the hash.
+ */
+export async function importOwnerPassword(q: Queryable, ownerPassword: string | undefined): Promise<boolean> {
+  const owner = (await q.query<{ id: number; password_hash: string | null }>('select id, password_hash from users where is_owner')).rows[0];
+  if (!owner) throw new Error('No owner account (has migration 013 run?).');
+  if (owner.password_hash) return false;
+  if (!ownerPassword) {
+    throw new Error(
+      'The owner has no password yet. Set the OWNER_PASSWORD secret (at least 12 characters) and deploy again: it becomes the owner\'s password, once.',
+    );
+  }
+  const updated = await q.query('update users set password_hash = $2 where id = $1 and password_hash is null returning id', [
+    owner.id,
+    await hashPassword(ownerPassword),
+  ]);
+  return updated.rows.length > 0;
+}
+
+const IMPORTED_API_TOKEN = 'imported_owner_api_token';
+
+/**
+ * Adds API_TOKEN to the owner's Siri tokens as "Original Siri token", the first time it's seen. It's
+ * imported only once (recorded in app_state), so deleting that token on the Account page sticks.
+ * Returns whether it imported it now.
+ */
+export async function importOwnerApiToken(db: Db, apiToken: string | undefined): Promise<boolean> {
+  if (!apiToken) return false;
+  return db.tx(async q => {
+    const fresh = await q.query("insert into app_state (key, value) values ($1, 'yes') on conflict (key) do nothing returning key", [IMPORTED_API_TOKEN]);
+    if (!fresh.rows.length) return false;
+    const owner = (await q.query<{ id: number }>('select id from users where is_owner')).rows[0];
+    if (!owner) throw new Error('No owner account (has migration 013 run?).');
+    await q.query("insert into api_tokens (user_id, token_hash, label) values ($1, $2, 'Original Siri token') on conflict (token_hash) do nothing", [
+      owner.id,
+      sha256(apiToken),
+    ]);
+    return true;
+  });
+}
+
+/** Both imports, as the server runs them at startup (after migrations). Returns what was imported, for the log. */
+export async function importOwnerSecrets(db: Db, secrets: { ownerPassword?: string; apiToken?: string }): Promise<string[]> {
+  const done: string[] = [];
+  if (await importOwnerPassword(db, secrets.ownerPassword)) done.push('OWNER_PASSWORD as the owner\'s password');
+  if (await importOwnerApiToken(db, secrets.apiToken)) done.push('API_TOKEN as the owner\'s "Original Siri token"');
+  return done;
 }
 
 export interface PersonRow extends User {
@@ -176,14 +283,26 @@ async function revokeAccess(q: Queryable, userId: number, keepSessionHash?: stri
   await q.query('delete from api_tokens where user_id = $1', [userId]);
 }
 
-/** Sets a new password. Every other sign-in (other browsers, Claude, Siri) ends; `keepSessionHash` is the browser session making the change. */
-export async function changePassword(q: Queryable, user: User, current: string, next: string, keepSessionHash?: string | null): Promise<void> {
-  if (user.isOwner) throw new UserError('Your password is the OWNER_PASSWORD secret; change it in GitHub and redeploy.');
-  const row = (await q.query<UserRow>(`select ${USER_COLS} from users where id = $1`, [user.id])).rows[0];
-  if (!row?.password_hash || !(await verifyPassword(current, row.password_hash))) throw new UserError('Your current password is wrong.');
+/**
+ * Sets a new password, after checking the current one (which counts toward the sign-in limit). Every other
+ * sign-in (other browsers, Claude, Siri) ends; `keepSessionHash` is the browser session making the change.
+ * Takes the pool, not a transaction, so a wrong password is recorded even though the change is refused.
+ */
+export async function changePassword(db: Db, user: User, current: string, next: string, keepSessionHash?: string | null): Promise<void> {
+  const account = user.email?.toLowerCase() ?? '(owner)';
+  await refuseIfTooManyFailures(db, account);
+  const row = (await db.query<UserRow>(`select ${USER_COLS} from users where id = $1`, [user.id])).rows[0];
+  if (!row?.password_hash || !(await verifyPassword(current, row.password_hash))) {
+    await recordSignInFailure(db, account);
+    throw new UserError('Your current password is wrong.');
+  }
+  await clearSignInFailures(db, account);
   checkNewPassword(next);
-  await q.query('update users set password_hash = $2 where id = $1', [user.id, await hashPassword(next)]);
-  await revokeAccess(q, user.id, keepSessionHash);
+  const hash = await hashPassword(next);
+  await db.tx(async q => {
+    await q.query('update users set password_hash = $2 where id = $1', [user.id, hash]);
+    await revokeAccess(q, user.id, keepSessionHash);
+  });
 }
 
 /** Removes someone and everything in their notebook. The owner can't be removed. */
@@ -376,10 +495,9 @@ export async function revokeApiToken(q: Queryable, userId: number, id: number): 
   return (await q.query('delete from api_tokens where id = $1 and user_id = $2 returning id', [id, userId])).rows.length > 0;
 }
 
-/** Whose bearer token this is: the owner's API_TOKEN, or a token someone made in the app. */
-export async function userForApiToken(q: Queryable, token: string, ownerApiToken: string): Promise<number | null> {
+/** Whose bearer token this is (a token someone made in the app, or the owner's imported API_TOKEN), or null. */
+export async function userForApiToken(q: Queryable, token: string): Promise<number | null> {
   if (!token) return null;
-  if (secretsMatch(token, ownerApiToken)) return (await getOwner(q)).id;
   const { rows } = await q.query<{ user_id: number }>(
     'update api_tokens set last_used_at = now() where token_hash = $1 returning user_id',
     [sha256(token)],

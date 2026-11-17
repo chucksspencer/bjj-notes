@@ -24,9 +24,13 @@ Everything below works in a phone browser. Expect about 30 minutes the first tim
 
 ### 2. Two secrets you make up
 
-- **OWNER_PASSWORD**: 12+ characters. Your password, as the owner: the person who invites everyone else.
-- **API_TOKEN**: 32+ random characters, used by your Siri Shortcuts. A password manager's generator works.
-  (Everyone, you included, can also make Shortcut tokens on their Account page.)
+- **OWNER_PASSWORD**: 12+ characters. Your first password, as the owner: the person who invites everyone else.
+- **API_TOKEN**: 32+ random characters, your first Siri Shortcut token. A password manager's generator works.
+
+Both are only for the first start. The server copies them into the database (the password as a hash, the token
+as **Original Siri token** in your list on the Account page) and ignores the secrets from then on. After the first
+successful deploy you can delete both from GitHub: you change your password, and make or remove Shortcut tokens,
+on the Account page, like everyone else.
 
 ### 3. GitHub secrets
 
@@ -35,8 +39,8 @@ In this repo: **Settings → Secrets and variables → Actions → New repositor
 | Secret | Value |
 | --- | --- |
 | `DATABASE_URL` | Neon connection string |
-| `OWNER_PASSWORD` | from step 2 |
-| `API_TOKEN` | from step 2 |
+| `OWNER_PASSWORD` | from step 2 (can be deleted after the first deploy) |
+| `API_TOKEN` | from step 2 (can be deleted after the first deploy) |
 | `ANTHROPIC_API_KEY` | *Optional.* Lets Siri captures be tidied and filed by Claude (Haiku), and turns on search by meaning (see below). Without it, captures link techniques named word-for-word and the rest goes to the inbox, and search matches words only. |
 
 ### 4. Google Cloud (Cloud Shell, once)
@@ -59,13 +63,13 @@ From then on, every push to `main` tests, builds and deploys. The deploy copies 
 
 ### 6. Connect Claude
 
-On claude.ai in a browser, add a **custom connector** in settings with the connector URL. Claude opens a sign-in page from this server; enter your email and `OWNER_PASSWORD`. (The first email you sign in with becomes yours; you can change it on the Account page.) Connectors added on the web also show up in the iOS app. Try it in voice mode first: that's the main thing this first version needs to prove.
+On claude.ai in a browser, add a **custom connector** in settings with the connector URL. Claude opens a sign-in page from this server; enter your email and your password (`OWNER_PASSWORD`, until you change it). (The first email you sign in with becomes yours; you can change it on the Account page.) Connectors added on the web also show up in the iOS app. Try it in voice mode first: that's the main thing this first version needs to prove.
 
 Try: *"What's on my BJJ focus list?"*, *"Add a note to ghost escape: turn to the knees before the hips"*, *"Move body lock passing to the top of my focus"*, *"Add a note to my half guard focus: frame on the hip before the underhook"*, *"What do I have from deep half bottom?"*, *"From bottom side, if they have the underhook and crossface, John Wayne sweep to make them post, then shuck; if they post the far leg go deep half, if they base back go octopus. Save that as a system."*, *"Take ankle locks off my focus."*, *"Undo that."*
 
 ### 7. The web app on your phone
 
-Open the server's address in Safari and sign in with your email and `OWNER_PASSWORD`. Then **Share → Add to Home Screen** for an app icon that opens full screen.
+Open the server's address in Safari and sign in with your email and your password. Then **Share → Add to Home Screen** for an app icon that opens full screen.
 
 - **Focus**: your ranked list of the game plans you're working on now. The ••• button moves one up, down or to the top, or takes it off focus (the game plan stays, steps and notes included). Add puts a game plan you have back on, or starts a new one.
 - **Game plans**: a part of your game, with a description (the strategy, the cues, what success looks like), technique cards, notes filed under it, and optionally **steps**: where it starts, the situation it's for, the main line of steps, branches for what they do ("if they post the far leg: go to deep half"), and alternatives at any step ("or": plan B, plan C, in the order you'd rather; side by side with the step they're alternatives to, each a branch with what comes after it nested under it; an alternative's sheet has *Make this plan A*, *Try earlier* and *Try later*). Read it as an outline with each step's stripes; a step that leaves you where another game plan starts says where it continues. Anything under a step folds away behind its chevron (over 10 steps start with their branches folded; *Show all* opens them), what comes next in a branch stays at the same indent, and a branch more than three levels in opens on its own, with a trail back to all the steps. Build it a step at a time (tap a step to change it; *Then* and *If they…* add under the step you tap, *Or* adds an alternative beside it, *Add a step at the end* extends the main line; the arrows move a step, with its alternatives, past the one above or below), or **Describe it** in your own words and Claude outlines it for you to check before saving. The *On focus* switch puts it on or takes it off the focus list. A note's sheet files it under techniques and game plans from one search; filed under a game plan, it's out of the inbox.
@@ -79,7 +83,7 @@ Every change shows an **Undo** button, the same undo Claude uses when you say "u
 
 ### 8. Siri Shortcuts
 
-Create these in the Shortcuts app. Replace `HOST` with your server address and `TOKEN` with `API_TOKEN` or a token from **Account → Siri Shortcuts** (anyone you invite makes their own there; notes land in the notebook of whoever the token belongs to).
+Create these in the Shortcuts app. Replace `HOST` with your server address and `TOKEN` with a token from **Account → Siri Shortcuts**: yours starts with `API_TOKEN`, listed as **Original Siri token**. Anyone you invite makes their own there; notes land in the notebook of whoever the token belongs to.
 
 **BJJ note** (say "Hey Siri, BJJ note")
 1. *Dictate Text*
@@ -133,14 +137,16 @@ undo history. Only the starter positions are shared. Nobody, the owner included,
   Changing your own password on the Account page does the same for everything but that browser.
 - **Removing someone.** People → ••• → **Remove**. Their account and whole notebook are deleted; their sign-ins,
   Claude connection and tokens stop working at once.
-- **Your password** stays the `OWNER_PASSWORD` secret. Everyone else changes theirs on their Account page.
+- **Your password** is like everyone else's: change it on your Account page. If you forget it, see
+  "If you forget your password" in [docs/operations.md](docs/operations.md).
 - **The iPhone app** reaches them through a public TestFlight link: no developer account needed on their side,
   just an iPhone on iOS 18+ and the free TestFlight app. One-time setup in App Store Connect is in
   [ios/README.md](ios/README.md#sharing-it-with-other-people). Until then, the web app works from their home screen.
 
 Upgrading from the single-user version needs nothing in GitHub: on the first start, everything that was there
-becomes the owner's, and existing sign-ins, the Claude connector and Siri Shortcuts keep working. The next time
-you sign in, enter your email with `OWNER_PASSWORD` (or add it on the Account page first).
+becomes the owner's, `OWNER_PASSWORD` becomes your stored password and `API_TOKEN` your **Original Siri token**,
+and existing sign-ins, the Claude connector and Siri Shortcuts keep working. The next time you sign in, enter your
+email with that password (or add your email on the Account page first).
 
 ## Search by meaning (optional)
 
