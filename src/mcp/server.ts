@@ -1,18 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { undo } from '../services/activity.js';
+import { undo } from '../services/undo.js';
 import type { Ctx } from '../services/context.js';
 import { getLab, getPosition, review, search } from '../services/explore.js';
-import {
-  deleteGamePlan,
-  focusHistory,
-  getFocus,
-  getGamePlan,
-  listGamePlans,
-  saveGamePlan,
-  updateFocus,
-} from '../services/gamePlans.js';
+import { focusHistory, getFocus, updateFocus } from '../services/focus.js';
+import { deleteGamePlan, getGamePlan, listGamePlans, saveGamePlan } from '../services/gamePlans.js';
 import { moveStepByName } from '../services/steps.js';
 import { MAX_DEPTH, MAX_STEPS } from '../shared/steps.js';
 import { clearStars } from '../services/marks.js';

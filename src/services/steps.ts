@@ -7,7 +7,7 @@ import { fromOutline, groupSlots, MAX_DEPTH, MAX_STEPS, outlineProblem, type Opt
 import { logActivity, STEP_SNAPSHOT_SQL, type GamePlanSnapshot, type StepSnapshot, type UndoOp } from './activity.js';
 import type { Ctx } from './context.js';
 import { ConflictError, NotFoundError, UserError } from './errors.js';
-import { gamePlanView } from './views.js';
+import { gamePlanView } from './views/gamePlans.js';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const capitalise = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);

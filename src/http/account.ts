@@ -32,7 +32,7 @@ import {
 import type { Ctx } from '../services/context.js';
 import { searchStatus } from '../services/semantic.js';
 import { ForbiddenError, NotFoundError, UserError } from '../services/errors.js';
-import { apiErrors } from './api.js';
+import { apiErrors } from './handler.js';
 import { CSRF_HEADER, sessionHashOf, sessionInfo, userIdOf } from './auth.js';
 
 const id = z.coerce.number().int().positive();

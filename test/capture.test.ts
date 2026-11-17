@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Structurer } from '../src/capture.js';
-import { inboxWhere } from '../src/services/views.js';
+import { inboxWhere } from '../src/services/views/notes.js';
 import { API_TOKEN, startServer, type TestServer } from './helpers.js';
 
 let s: TestServer | undefined;

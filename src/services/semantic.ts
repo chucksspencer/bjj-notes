@@ -8,7 +8,8 @@ import type { Config } from '../config.js';
 import { uid } from '../db.js';
 import type { NoteView, TechniqueListItem } from '../shared/api.js';
 import type { Ctx } from './context.js';
-import { noteList, techniqueList, type NoteQuery, type TechniqueQuery } from './views.js';
+import { noteList, type NoteQuery } from './views/notes.js';
+import { techniqueList, type TechniqueQuery } from './views/techniques.js';
 
 /** What to look for, according to Claude. */
 export interface Rewrite {

@@ -5,7 +5,11 @@ import { mediaTag } from './attachments.js';
 import { today, type Ctx } from './context.js';
 import type { NoteView, Status, TechniqueListItem, TechniqueType } from '../shared/api.js';
 import { searchNotes, searchTechniques } from './semantic.js';
-import { GAME_PLAN_LAST_NOTE_SQL, inboxWhere, LAB_DAYS, labView, positionView, techniqueList } from './views.js';
+import { LAB_DAYS, labView } from './views/lab.js';
+import { inboxWhere } from './views/notes.js';
+import { positionView } from './views/positions.js';
+import { GAME_PLAN_LAST_NOTE_SQL } from './views/sql.js';
+import { techniqueList } from './views/techniques.js';
 import { daysAgo, isoDate, type Role } from './vocab.js';
 
 /** What you can do from a position (optionally as top or bottom), what leads into it, and the gaps. */

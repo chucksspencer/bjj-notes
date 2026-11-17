@@ -6,7 +6,8 @@ import { logActivity, type EdgeSnapshot, type LinkSnapshot, type TechniqueSnapsh
 import type { Ctx } from './context.js';
 import type { Role, TechniqueType } from './vocab.js';
 import { UserError } from './errors.js';
-import { inboxWhere, techniqueView } from './views.js';
+import { inboxWhere } from './views/notes.js';
+import { techniqueView } from './views/techniques.js';
 
 export interface EdgeInput {
   from?: string;

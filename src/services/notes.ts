@@ -9,7 +9,7 @@ import { today, type Ctx } from './context.js';
 import { findOrCreateSession, sessionById, type SessionDetails } from './sessions.js';
 import { createStub } from './techniques.js';
 import { UserError } from './errors.js';
-import { inboxWhere, noteList } from './views.js';
+import { inboxWhere, noteList } from './views/notes.js';
 import { guessSourceKind, type NoteKind, type Role, type SourceKind, type TechniqueType } from './vocab.js';
 
 export interface SourceInput {

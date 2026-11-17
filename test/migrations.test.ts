@@ -1,8 +1,8 @@
 // Migrations that change what's already in a notebook, checked against data from before them.
 import { afterEach, describe, expect, it } from 'vitest';
 import { forUser, migrate, type Db } from '../src/db.js';
-import { undo } from '../src/services/activity.js';
-import { inboxWhere } from '../src/services/views.js';
+import { undo } from '../src/services/undo.js';
+import { inboxWhere } from '../src/services/views/notes.js';
 import { freshDb } from './helpers.js';
 
 let db: Db;
