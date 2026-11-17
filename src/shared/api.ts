@@ -1,4 +1,4 @@
-// Types shared by the JSON API (src/http/api.ts) and the web app (web/). No runtime code.
+// Types shared by the JSON API (src/http/api.ts and api/) and the web app (web/). No runtime code.
 
 export type TechniqueType =
   | 'submission'

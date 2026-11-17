@@ -198,7 +198,7 @@ $10 a month; the next deploy puts it back to 0 unless `infra/gcp-deploy.sh` is c
   that carry steps from before 020 are refused, not translated.
 - **Derive, don't store** (migration 022). What follows from other facts is worked out where it's read, not
   kept in sync by hand. The inbox: a note is in it when it isn't To try and nothing files it (no technique, no
-  game plan), worked out by `inboxWhere` in `src/services/views.ts` for the list, counts, search, Claude and Siri.
+  game plan), worked out by `inboxWhere` in `src/services/views/notes.ts` for the list, counts, search, Claude and Siri.
   The one fact of its own is `notes.unplaced`: a technique it named couldn't be matched, which keeps it in the
   inbox even when something else files it, until it's filed again (`file_note`, a change to its techniques, game
   plans or To try, or filing it under a game plan). A game plan's cards: `game_plan_techniques` holds only the
@@ -219,15 +219,28 @@ before merging. Things to keep true:
   and composite foreign keys.
 - Migrations are new numbered files in `db/migrations`, never edits to old ones.
 - Changes people make can be undone (`activity_log`, the Undo button, "undo that"). Renaming an undo op makes
-  older entries of it un-undoable; `UNDO_KINDS` in `src/services/activity.ts` lists the ones that work.
+  older entries of it un-undoable; `UNDO_KINDS` in `src/services/undo.ts` lists the ones that work.
   Undo names its change: `logActivity` returns the entry's id and also adds it to the request's collector (`activityIds`
-  on the handle `forUser` makes), the `handler` wrapper in `src/http/api.ts` sends the newest as `X-Activity-Id`, the web
+  on the handle `forUser` makes), the `handler` wrapper in `src/http/handler.ts` sends the newest as `X-Activity-Id`, the web
   `request` helper surfaces it as `activityId`, and the toast's Undo posts `{ id }` to `/api/v1/undo`, which refuses
   unless that entry is still the person's newest. Without an id (`undo_last`, "undo that") it undoes the newest.
   A write that changes nothing logs nothing.
 - Names are matched fuzzily, for voice: see `src/resolve.ts`.
 - What the app says is short and plain, in the app's own voice.
-- New behaviour comes with tests: over HTTP for the server, in Chromium for the web app.
+- New behaviour comes with tests: over HTTP for the server, in Chromium for the web app. How they're organised:
+  - One file per topic (`test/notes.test.ts`, `techniques`, `gamePlans`, `gamePlanSteps`, `lab`, `undo`, `web`,
+    `users`, `mcp`, `capture`, …). Each file starts one server with its own database (`startServer` in the file's
+    `beforeAll`); embedded ones are copies of a database `test/globalSetup.ts` migrates once per run.
+  - Each top-level `describe` makes the people it needs in its own `beforeAll` and works only in their notebooks:
+    `newPerson` (empty), `personWithWorkingList` (the notebook the owner starts with), then `seedTechnique`,
+    `seedNote`, `seedGamePlan` (steps too) and `mcpFor` for Claude's tools, all in `test/helpers.ts`. So a block
+    can't see another's notes or undo history, adding a step to one doesn't move another's ids or counts, and any
+    block runs alone. Inside a block, `it`s may build on each other.
+  - The owner is shared by the file's blocks, so only use them for what is the owner's (their account, inviting and
+    removing people, the original Siri token, the imported working list), and say in the block when it changes it.
+  - Run one file: `npx vitest run test/notes.test.ts`. Run one block alone:
+    `npx vitest run test/mcp.test.ts -t "MCP tools: game plans"` (`-t` matches the describe's name, so without the
+    file it runs that block wherever it is). JSON API blocks are named `JSON API: …` and MCP ones `MCP tools: …`.
 - The README and this file change with the behaviour they describe.
 - New GitHub Actions are pinned to a commit; new packages should have been out a while.
 

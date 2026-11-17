@@ -18,7 +18,7 @@ export const CHANGED_ELSEWHERE = 'This game plan changed somewhere else. Reload 
  * as it stands. With `expected` (its `updatedAt` as the caller last saw it), refuses if it has changed since.
  */
 export async function lockGamePlan(q: Queryable, id: number, expected?: string): Promise<GamePlanSnapshot> {
-  // The same text the game plan's page gets as `updatedAt` (see `iso` in views.ts).
+  // The same text the game plan's page gets as `updatedAt` (see `iso` in views/sql.ts).
   const row = (
     await q.query<GamePlanSnapshot & { updated_at: string }>(
       `select id, name, aliases, description, start_position_id, start_role, premise, (to_json(updated_at) #>> '{}') as updated_at

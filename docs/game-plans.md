@@ -98,9 +98,10 @@ GamePlanStep = { id, option, action, technique, to, toRole, note, continuesIn, s
 
 ## Code
 
-`src/services/gamePlans.ts`: the focus list (`getFocus`, `updateFocus`, `focusHistory`), game plans
-(`saveGamePlan` for Claude, `createGamePlan` / `editGamePlan` / `linkGamePlan` / `deleteGamePlan` for the web
-app) and reading (`getGamePlan`, `listGamePlans`).
+`src/services/gamePlans.ts`: game plans (`saveGamePlan` for Claude, `createGamePlan` / `editGamePlan` /
+`linkGamePlan` / `deleteGamePlan` for the web app) and reading them for Claude (`getGamePlan`, `listGamePlans`).
+The focus list is `src/services/focus.ts` (`getFocus`, `updateFocus`, `focusHistory`, `placeOnFocus`); the new row
+and the card and note links both use are in `src/services/gamePlanLinks.ts` (`insertGamePlan`, `linkIn`).
 
 `src/shared/steps.ts` (used by the server and the web app) is the structure: the `Slot` and `Option` types,
 rows to a tree (`toTree`, `groupSlots`), the flat outline to a tree and back (`fromOutline`, `toOutline`), checking
@@ -111,7 +112,7 @@ an outline (`outlineProblem`), walking (`walk`, `stepsIn`, `findStep`, `countSte
 `resolveStepNames` for Claude and `resolveStepIds` for the web app), one step at a time (`addStep`, `updateStep`,
 `deleteStep`, `moveStep`, and `moveStepByName` for Claude), the check against changes made elsewhere
 (`lockGamePlan`), text for Claude (`stepLines`) and speech for Siri (`gamePlanSpeech`). The read side for the web
-app is `gamePlanView`, `gamePlansView` and `stepsOf` in `src/services/views.ts`. "Describe it" is
+app is `gamePlanView`, `gamePlansView` and `stepsOf` in `src/services/views/gamePlans.ts`. "Describe it" is
 `src/services/gamePlanDrafts.ts`. Names match fuzzily (`resolveGamePlan` and `resolveStep` in `src/resolve.ts`).
 
 A whole outline arrives flat, in reading order, with a depth and an `or` flag: `NamedStepInput` from Claude (cards
@@ -170,9 +171,11 @@ way in (`fromOutline`).
   description and techniques; Delete is separate and asks first.
 - **Steps, reading:** an outline with a status bar per step; deeper branches open on tap.
 - **Steps, editing:** a step at a time, each change saved on its own through the step endpoints
-  (`web/src/components/Steps.tsx`; `useAddStep`, `useUpdateStep`, `useDeleteStep`, `useMoveStep` in
-  `web/src/api.ts`). If the game plan changed somewhere else since the page read it, the change isn't saved: the
-  page says so and reads it again. Tap a step for its sheet. *Then* (what comes after this step) and *If
+  (`web/src/components/steps/`: `StepsSection.tsx` holds the state and what each sheet saves, `Outline.tsx` draws
+  the outline, `StepSheet.tsx`, `StartSheet.tsx` and `DescribeSheet.tsx` are the sheets, and `model.ts` the shapes
+  and where a step can move; `useAddStep`, `useUpdateStep`, `useDeleteStep`, `useMoveStep` in `web/src/api.ts`).
+  If the game plan changed somewhere else since the page read it, the change isn't saved: the page says so and
+  reads it again. Tap a step for its sheet. *Then* (what comes after this step) and *If
   they…* (a branch) add a step under the one you tap, after what's there; *Or* adds an alternative beside it;
   *Add a step at the end* adds to the main line. The arrows at the end of a step's row move
   it (and its alternatives) past the step above or below, as the outline draws them: inside a branch, the "if

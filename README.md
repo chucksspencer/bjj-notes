@@ -215,19 +215,22 @@ The image is also built for Arm, so it runs as-is on a cheap VM with Docker Comp
 src/
   server.ts          entry point: config, database, migrations, HTTP
   app.ts             routes: OAuth, /mcp (stateless Streamable HTTP), /api, the web app, /healthz, /readyz
-  http/              the web app's sign-in (cookie sessions), JSON API (/api/v1), account and invites, static hosting
+  http/              the web app's sign-in (cookie sessions), JSON API (/api/v1: api.ts mounts one file per group of
+                     routes in api/; handler.ts wraps each one), account and invites, static hosting
   shared/api.ts      types shared by the JSON API and the web app
   shared/steps.ts    a game plan's steps as slots and options: the one place that structure is worked out (server and web app)
   mcp/server.ts      the 12 MCP tools and the instructions Claude sees
-  services/          notes, techniques, game plans and focus, their steps (steps.ts), "Describe it" drafting, search/positions/review, undo log; views.ts is the read side;
-                     semantic.ts is search by meaning
+  services/          notes, techniques, game plans (gamePlans.ts, gamePlanLinks.ts) and focus (focus.ts), their steps (steps.ts),
+                     "Describe it" drafting, search/positions/review, the undo log (activity.ts records, undo.ts reverses);
+                     views/ is the read side, one file per kind of page; semantic.ts is search by meaning
   resolve.ts         fuzzy name matching tuned for voice transcription
   auth/              OAuth server (dynamic registration, PKCE, rotating refresh tokens); users, passwords, invites, Siri tokens
   capture.ts         Siri endpoints and the optional Claude parser
 web/                 the web app (React, Vite); built into dist/public
 db/migrations/       schema, starter positions, your working list
 infra/               Google Cloud bootstrap (run once), deploy (run by CI), nightly backup and restore scripts
-test/                end-to-end tests over HTTP (OAuth, every MCP tool, capture, JSON API) and the web app in Chromium
+test/                end-to-end tests over HTTP, one file per topic (OAuth, MCP tools, capture, the JSON API's notes,
+                     techniques, game plans, steps…), and the web app in Chromium; helpers.ts seeds notebooks
 docs/operations.md   running it: what's where, settings, what expires, rollbacks, restores, fixing the usual problems
 ```
 
@@ -264,6 +267,7 @@ cp .env.example .env
 npm run dev          # server with an embedded database, http://localhost:8080
 npm run dev:web      # web app with live reload, http://localhost:5173 (talks to the server above)
 npm test             # embedded database
+npx vitest run test/mcp.test.ts -t "MCP tools: game plans"   # one block of one file
 npm run build && E2E=1 npx vitest run test/ui.e2e.test.ts   # the web app in Chromium
 TEST_PG_ADMIN_URL=postgres://postgres@localhost:5432/postgres npm test   # against real Postgres
 ```
