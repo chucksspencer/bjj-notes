@@ -6,7 +6,7 @@ import { GamePlanEditSheet, FocusControls } from '../components/GamePlanControls
 import { useCapture } from '../components/Capture';
 import { Icon } from '../components/Icon';
 import { NoteItem } from '../components/NoteItem';
-import { StepsSection } from '../components/Steps';
+import { StepsSection } from '../components/steps/StepsSection';
 import { Sheet } from '../components/Sheet';
 import { TechniquePicker } from '../components/TechniquePicker';
 import { useToast } from '../components/Toast';
