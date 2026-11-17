@@ -274,7 +274,8 @@ export async function captureNote(
 export function appCaptureRouter(base: Ctx, structurer: Structurer | null, requireAuth: express.RequestHandler): Router {
   const router = express.Router();
   // Room for a note's still images (each a small JPEG).
-  router.post('/api/v1/capture', express.json({ limit: '6mb' }), requireAuth, async (req, res) => {
+  // Sign in first, so nobody unauthenticated makes the server parse 6 MB.
+  router.post('/api/v1/capture', requireAuth, express.json({ limit: '6mb' }), async (req, res) => {
     const out = await captureNote(userCtx(base, userIdOf(res)), structurer, req.body);
     res.status(out.status).json(out.body);
   });
@@ -311,6 +312,7 @@ export function captureRouter(base: Ctx, apiToken: string, structurer: Structure
     }
   };
 
+  // The token may be in the JSON body, so this has to parse before it can authenticate; the small limit keeps that cheap.
   router.post('/api/capture', express.json({ limit: '64kb' }), auth, async (req, res) => {
     const out = await captureNote(userCtx(base, userIdOf(res)), structurer, req.body);
     res.status(out.status).json(out.body);

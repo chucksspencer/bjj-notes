@@ -21,6 +21,12 @@ function readCookie(req: Request, name: string): string | undefined {
   return undefined;
 }
 
+/** The hash of the session cookie on this request, if any (to keep that session when revoking the others). */
+export function sessionHashOf(req: Request): string | null {
+  const token = readCookie(req, COOKIE);
+  return token ? sha256(token) : null;
+}
+
 /** The signed-in user's id, set by requireAuth. */
 export function userIdOf(res: Response): number {
   const id = res.locals.userId;
@@ -143,6 +149,10 @@ export function webAuth(opts: WebAuthOptions) {
 
   router.delete('/api/v1/session', async (req, res, next) => {
     try {
+      if (req.get(CSRF_HEADER) !== '1') {
+        res.status(403).json({ error: 'csrf', message: 'Missing app header.' });
+        return;
+      }
       const token = readCookie(req, COOKIE);
       if (token) await db.query('delete from web_sessions where token_hash = $1', [sha256(token)]);
       cookie(res, '', 0);
