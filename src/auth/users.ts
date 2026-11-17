@@ -165,12 +165,25 @@ export async function updateProfile(
   return { ...user, name, email, belt };
 }
 
-export async function changePassword(q: Queryable, user: User, current: string, next: string): Promise<void> {
+/**
+ * Signs a person out everywhere: their web sessions (except the one named, if any), Claude connector codes and
+ * tokens, and Siri tokens. Used when their password changes, so whatever signed in with the old one stops working.
+ */
+async function revokeAccess(q: Queryable, userId: number, keepSessionHash?: string | null): Promise<void> {
+  await q.query('delete from web_sessions where user_id = $1 and ($2::text is null or token_hash <> $2)', [userId, keepSessionHash ?? null]);
+  await q.query('delete from oauth_tokens where user_id = $1', [userId]);
+  await q.query('delete from oauth_codes where user_id = $1', [userId]);
+  await q.query('delete from api_tokens where user_id = $1', [userId]);
+}
+
+/** Sets a new password. Every other sign-in (other browsers, Claude, Siri) ends; `keepSessionHash` is the browser session making the change. */
+export async function changePassword(q: Queryable, user: User, current: string, next: string, keepSessionHash?: string | null): Promise<void> {
   if (user.isOwner) throw new UserError('Your password is the OWNER_PASSWORD secret; change it in GitHub and redeploy.');
   const row = (await q.query<UserRow>(`select ${USER_COLS} from users where id = $1`, [user.id])).rows[0];
   if (!row?.password_hash || !(await verifyPassword(current, row.password_hash))) throw new UserError('Your current password is wrong.');
   checkNewPassword(next);
   await q.query('update users set password_hash = $2 where id = $1', [user.id, await hashPassword(next)]);
+  await revokeAccess(q, user.id, keepSessionHash);
 }
 
 /** Removes someone and everything in their notebook. The owner can't be removed. */
@@ -308,8 +321,8 @@ export async function acceptInvite(
     const target = row.user_id ? await getUser(q, row.user_id) : null;
     if (!target || target.isOwner) throw new UserError('This link has expired. Ask for a new one.');
     await q.query('update users set password_hash = $2 where id = $1', [target.id, hash]);
-    // Everywhere they were signed in with the old password signs out.
-    await q.query('delete from web_sessions where user_id = $1', [target.id]);
+    // Everywhere they were signed in with the old password signs out: browsers, Claude and Siri.
+    await revokeAccess(q, target.id);
     user = target;
   } else {
     const email = cleanEmail(input.email);

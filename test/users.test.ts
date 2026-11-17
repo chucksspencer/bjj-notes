@@ -367,14 +367,48 @@ describe('separate notebooks for Claude and Siri', () => {
 });
 
 describe('passwords and removing people', () => {
-  it('changes your own password', async () => {
+  /** Sam's Claude access token, a Siri token, and a second browser session: everything a password change or reset should end. */
+  async function samEverywhere() {
+    const claude = await connect(s, { email: SAM.email, password: SAM.password });
+    const siri = (await api<{ token: string }>(sam, 'POST', '/api/v1/account/tokens', { label: 'Phone' })).body.token;
+    const other = await signIn(SAM.email, SAM.password);
+    return { claude: claude.access_token, siri, other };
+  }
+  const mcpStatus = async (accessToken: string) =>
+    (
+      await fetch(s.mcpUrl, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+      })
+    ).status;
+  const siriStatus = async (token: string) => (await api({ csrf: false }, 'POST', '/api/capture', { token, text: '' })).status;
+
+  it('changes your own password, ending Claude, Siri and other browsers but not this one', async () => {
+    const before = await samEverywhere();
+    expect(await mcpStatus(before.claude)).toBe(200);
+    expect((await api({ bearer: before.siri }, 'GET', '/api/focus')).status).toBe(200);
+    expect((await api(before.other, 'GET', '/api/v1/focus')).status).toBe(200);
+
     expect((await api(sam, 'POST', '/api/v1/account/password', { current: 'wrong-password', password: 'new-password-456' })).status).toBe(400);
-    expect((await api(sam, 'POST', '/api/v1/account/password', { current: SAM.password, password: 'new-password-456' })).status).toBe(200);
+    expect(await mcpStatus(before.claude)).toBe(200); // a failed attempt revokes nothing
+    const changed = await api<{ message: string }>(sam, 'POST', '/api/v1/account/password', { current: SAM.password, password: 'new-password-456' });
+    expect(changed.status).toBe(200);
+    expect(changed.body.message).toMatch(/Claude and Siri/);
     SAM.password = 'new-password-456';
+
+    expect(await mcpStatus(before.claude)).toBe(401);
+    expect(await siriStatus(before.siri)).toBe(401);
+    expect((await api({ bearer: before.siri }, 'GET', '/api/focus')).status).toBe(401);
+    expect((await api(before.other, 'GET', '/api/v1/focus')).status).toBe(401);
+    expect((await api(sam, 'GET', '/api/v1/focus')).status).toBe(200); // the browser that made the change stays signed in
+    expect((await api<AccountView>(sam, 'GET', '/api/v1/account')).body.tokens).toHaveLength(0);
     expect((await api(owner, 'POST', '/api/v1/account/password', { current: OWNER_PASSWORD, password: 'whatever-12345' })).status).toBe(400);
   });
 
-  it('resets a password with a link from the owner, signing out the old sessions', async () => {
+  it('resets a password with a link from the owner, ending every sign-in', async () => {
+    const before = await samEverywhere();
+    expect(await mcpStatus(before.claude)).toBe(200);
     const made = await api<{ url: string }>(owner, 'POST', `/api/v1/people/${samId}/reset`);
     expect(made.status).toBe(201);
     const token = made.body.url.split('#')[1]!;
@@ -382,8 +416,25 @@ describe('passwords and removing people', () => {
     const reset = await api({}, 'POST', '/api/v1/invites/accept', { token, password: 'reset-password-789' });
     expect(reset.body).toMatchObject({ signedIn: true, user: { id: samId } });
     expect((await api(sam, 'GET', '/api/v1/focus')).status).toBe(401);
+    expect((await api(before.other, 'GET', '/api/v1/focus')).status).toBe(401);
+    expect(await mcpStatus(before.claude)).toBe(401);
+    expect(await siriStatus(before.siri)).toBe(401);
     expect((await api({}, 'POST', '/api/v1/session', { email: SAM.email, password: SAM.password })).status).toBe(401);
     sam = await signIn(SAM.email, 'reset-password-789');
+  });
+
+  it('needs the app header to sign out', async () => {
+    const other = await signIn(SAM.email, 'reset-password-789');
+    expect((await api({ ...other, csrf: false }, 'DELETE', '/api/v1/session')).status).toBe(403);
+    expect((await api(other, 'GET', '/api/v1/focus')).status).toBe(200);
+    expect((await api(other, 'DELETE', '/api/v1/session')).status).toBe(204);
+    expect((await api(other, 'GET', '/api/v1/focus')).status).toBe(401);
+  });
+
+  it('checks who you are before reading a large capture', async () => {
+    const big = { text: 'x'.repeat(5 * 1024 * 1024) };
+    expect((await api({}, 'POST', '/api/v1/capture', big)).status).toBe(401);
+    expect((await api({ csrf: false }, 'POST', '/api/v1/capture', big)).status).toBe(401);
   });
 
   it('removes a person and everything in their notebook', async () => {

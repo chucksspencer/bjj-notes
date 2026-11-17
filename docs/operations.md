@@ -100,6 +100,8 @@ added since the backup is lost, so look at what's newer first.
 **Look after people.** All on the web app's Account page, as the owner:
 - Invite: People → **Invite**, pick their belt, send them the link (good for 7 days).
 - Forgotten password: People → ••• → **Make a password reset link** (no email is ever sent; you send the link).
+  Using it signs them out everywhere, Claude and Siri Shortcuts included; they reconnect and make new Siri tokens.
+  Changing their own password on the Account page does the same, except for the browser they changed it in.
 - Remove: People → ••• → **Remove**. Deletes their account and notebook at once; it can't be undone except by
   restoring a backup, which rewinds everyone.
 - iPhone app for them: the public TestFlight link (ios/README.md → Sharing it with other people).

@@ -167,7 +167,7 @@ function Password({ a }: { a: AccountView }) {
               onSuccess: () => {
                 setCurrent('');
                 setPassword('');
-                toast.show('Password changed.');
+                toast.show('Password changed. Claude and Siri Shortcuts need to sign in again.');
               },
               onError: err => toast.error(err),
             },
@@ -471,7 +471,7 @@ function People({ a }: { a: AccountView }) {
             setLink({
               url,
               title: 'Password reset link',
-              note: `Send this to ${person.name ?? person.email}. It works once, for 7 days. Their old password stops working when they use it.`,
+              note: `Send this to ${person.name ?? person.email}. It works once, for 7 days. When they use it, they are signed out everywhere, including Claude and Siri Shortcuts.`,
             });
           }}
         />

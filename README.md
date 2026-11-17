@@ -129,7 +129,8 @@ undo history. Only the starter positions are shared. Nobody, the owner included,
 - **Their Claude and Siri.** They add the same connector URL in their own Claude settings and sign in with their
   email and password; their Shortcuts use a token they make on their own Account page.
 - **Forgotten passwords.** There's no email sending, so you make the reset: People → ••• → **Make a password
-  reset link**, and send it to them. Using it signs them out everywhere else.
+  reset link**, and send it to them. Using it signs them out everywhere, including Claude and Siri Shortcuts (they reconnect and make a new token).
+  Changing your own password on the Account page does the same for everything but that browser.
 - **Removing someone.** People → ••• → **Remove**. Their account and whole notebook are deleted; their sign-ins,
   Claude connection and tokens stop working at once.
 - **Your password** stays the `OWNER_PASSWORD` secret. Everyone else changes theirs on their Account page.

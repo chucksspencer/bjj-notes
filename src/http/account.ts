@@ -32,7 +32,7 @@ import type { Ctx } from '../services/context.js';
 import { searchStatus } from '../services/semantic.js';
 import { ForbiddenError, NotFoundError, UserError } from '../services/errors.js';
 import { apiErrors } from './api.js';
-import { CSRF_HEADER, sessionInfo, userIdOf } from './auth.js';
+import { CSRF_HEADER, sessionHashOf, sessionInfo, userIdOf } from './auth.js';
 
 const id = z.coerce.number().int().positive();
 const token = z.string().trim().min(10).max(100);
@@ -171,8 +171,9 @@ export function accountRouter(opts: AccountRouterOptions): Router {
     json,
     h(async (req, res): Promise<MessageResult> => {
       const b = z.object({ current: z.string().max(200), password: z.string().max(200) }).parse(req.body);
-      await changePassword(db, await me(res), b.current, b.password);
-      return { message: 'Password changed.' };
+      const user = await me(res);
+      await db.tx(q => changePassword(q, user, b.current, b.password, sessionHashOf(req)));
+      return { message: 'Password changed. Claude and Siri Shortcuts need to sign in again.' };
     }),
   );
 
