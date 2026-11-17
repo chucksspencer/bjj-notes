@@ -133,7 +133,7 @@ function StarredSection({ v }: { v: LabView }) {
   const older = v.olderStarred.techniques.length + v.olderStarred.notes.length;
   const weeks = Math.round(v.starDays / 7);
   const run = (olderThanDays?: number) =>
-    clear.mutate(olderThanDays, { onSuccess: r => toast.show(r.message.replace(/\.$/, ''), { undoable: true }), onError: toast.error });
+    clear.mutate(olderThanDays, { onSuccess: r => toast.show(r.message.replace(/\.$/, ''), { undoId: r.activityId }), onError: toast.error });
 
   return (
     <LabSection
@@ -211,7 +211,7 @@ function AskCoachSection({ v, selection }: { v: LabView; selection: Selection })
   const markSelected = () =>
     mark.mutate(selection.ids, {
       onSuccess: r => {
-        toast.show(r.message.replace(/\.$/, ''), { undoable: true });
+        toast.show(r.message.replace(/\.$/, ''), { undoId: r.activityId });
         selection.stop();
       },
       onError: toast.error,
@@ -371,8 +371,8 @@ function AnswerSheet({ note, onClose }: { note: NoteView; onClose: () => void })
           edit.mutate(
             { id: note.id, answered: true, ...(text ? { body: `${note.body}\n\nAnswer: ${text}` } : {}) },
             {
-              onSuccess: () => {
-                toast.show(text ? 'Answer saved' : 'Off the Ask coach list', { undoable: true });
+              onSuccess: r => {
+                toast.show(text ? 'Answer saved' : 'Off the Ask coach list', { undoId: r.activityId });
                 onClose();
               },
               onError: toast.error,

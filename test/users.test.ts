@@ -289,6 +289,18 @@ describe('separate notebooks over the JSON API', () => {
     expect((await api(owner, 'POST', '/api/v1/undo')).body.message).toMatch(/on Ghost escape$/);
   });
 
+  it("won't undo another person's change by its id", async () => {
+    const mine = await api(sam, 'POST', '/api/v1/techniques', { name: 'Sam probe', type: 'submission' });
+    const samEntry = Number(mine.headers.get('x-activity-id'));
+    const ownerEntry = Number((await api(owner, 'POST', '/api/v1/techniques', { name: 'Owner probe', type: 'submission' })).headers.get('x-activity-id'));
+    // Each is the newest in their own log, but only the person it belongs to can undo it.
+    expect((await api(owner, 'POST', '/api/v1/undo', { id: samEntry })).status).toBe(400);
+    expect((await api(sam, 'POST', '/api/v1/undo', { id: ownerEntry })).status).toBe(400);
+    expect((await api<TechniqueListItem[]>(sam, 'GET', '/api/v1/techniques')).body.map(t => t.name)).toContain('Sam probe');
+    expect((await api(sam, 'POST', '/api/v1/undo', { id: samEntry })).status).toBe(200);
+    expect((await api(owner, 'POST', '/api/v1/undo', { id: ownerEntry })).status).toBe(200);
+  });
+
   it("serves photos only to the person they belong to", async () => {
     const saved = await api(owner, 'POST', '/api/v1/capture', { text: 'Grip detail', attachments: [{ kind: 'photo', thumb: JPEG }] });
     const attachmentId = saved.body.attachments[0].id;

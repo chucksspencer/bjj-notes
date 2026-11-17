@@ -23,8 +23,8 @@ export function ToTry() {
 
   const tossSelected = () =>
     tossMany.mutate(selection.ids, {
-      onSuccess: () => {
-        toast.show(selection.ids.length === 1 ? 'Tossed it' : `Tossed ${selection.ids.length}`, { undoable: true });
+      onSuccess: r => {
+        toast.show(selection.ids.length === 1 ? 'Tossed it' : `Tossed ${selection.ids.length}`, { undoId: r.activityId });
         selection.stop();
       },
       onError: toast.error,
@@ -117,7 +117,7 @@ export function TryRow({ note, today }: { note: NoteView; today: string }) {
           type="button"
           className="btn quiet small"
           disabled={toss.isPending}
-          onClick={() => toss.mutate(note.id, { onSuccess: () => toast.show('Tossed it', { undoable: true }), onError: toast.error })}
+          onClick={() => toss.mutate(note.id, { onSuccess: r => toast.show('Tossed it', { undoId: r.activityId }), onError: toast.error })}
         >
           Toss
         </button>
@@ -181,7 +181,7 @@ export function TryCompactRow({ note, today }: { note: NoteView; today: string }
             type="button"
             className="btn ghost small"
             disabled={toss.isPending}
-            onClick={() => toss.mutate(note.id, { onSuccess: () => toast.show('Tossed it', { undoable: true }), onError: toast.error })}
+            onClick={() => toss.mutate(note.id, { onSuccess: r => toast.show('Tossed it', { undoId: r.activityId }), onError: toast.error })}
           >
             Toss
           </button>
@@ -236,7 +236,7 @@ function KeepSheet({ note, onClose }: { note: NoteView; onClose: () => void }) {
             },
             {
               onSuccess: r => {
-                toast.show(`Kept under ${r.techniques.map(t => t.name).join(', ')}`, { undoable: true });
+                toast.show(`Kept under ${r.techniques.map(t => t.name).join(', ')}`, { undoId: r.activityId });
                 onClose();
               },
               onError: toast.error,

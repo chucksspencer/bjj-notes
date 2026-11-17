@@ -49,7 +49,10 @@ export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn;
 }
 
-export async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/** What a write's response carries besides its body: the id of the undo entry it made (the X-Activity-Id header), if any. */
+export type WithActivity<T> = T & { activityId?: number };
+
+export async function request<T>(method: string, path: string, body?: unknown): Promise<WithActivity<T>> {
   const res = await fetch(path, {
     method,
     credentials: 'same-origin',
@@ -60,13 +63,15 @@ export async function request<T>(method: string, path: string, body?: unknown): 
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) return undefined as unknown as WithActivity<T>;
   const data = (await res.json().catch(() => null)) as { message?: string } | null;
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith('/api/v1/session')) onUnauthorized();
     throw new ApiError(data?.message ?? `Request failed (${res.status}).`, res.status, data);
   }
-  return data as T;
+  const activityId = Number(res.headers.get('x-activity-id'));
+  if (activityId && data && typeof data === 'object' && !Array.isArray(data)) (data as WithActivity<object>).activityId = activityId;
+  return data as WithActivity<T>;
 }
 
 export const queryClient = new QueryClient({
@@ -284,7 +289,7 @@ export function useCreateTechnique() {
 }
 
 /** Writes that return the updated technique. */
-function useTechniqueWrite<V>(fn: (v: V) => Promise<TechniqueView>) {
+function useTechniqueWrite<V>(fn: (v: V) => Promise<WithActivity<TechniqueView>>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
@@ -419,7 +424,7 @@ export const usePosition = (slug: string, role?: Role) =>
 export function useUndo() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => request<MessageResult>('POST', '/api/v1/undo'),
+    mutationFn: (id: number) => request<MessageResult>('POST', '/api/v1/undo', { id }),
     onSuccess: () => invalidateAll(qc),
   });
 }

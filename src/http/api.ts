@@ -17,7 +17,7 @@ import type {
   TechniqueListItem,
   TechniqueView,
 } from '../shared/api.js';
-import { undoLast } from '../services/activity.js';
+import { undo } from '../services/activity.js';
 import { ForbiddenError as Forbidden, NotFoundError as NotFound, UserError } from '../services/errors.js';
 import { userCtx, type Ctx } from '../services/context.js';
 import { uid } from '../db.js';
@@ -187,10 +187,15 @@ export const handler =
   (base: Ctx) =>
   <T>(fn: (ctx: Ctx, req: Request, res: Response) => Promise<T>): RequestHandler =>
   (req, res, next) => {
+    // The undo entries this request writes: the newest goes out as X-Activity-Id, so Undo can name the change it is for.
+    const activityIds: number[] = [];
     Promise.resolve()
-      .then(() => fn(userCtx(base, userIdOf(res)), req, res))
+      .then(() => fn(userCtx(base, userIdOf(res), activityIds), req, res))
       .then(body => {
-        if (!res.headersSent) res.set('Cache-Control', 'no-store').json(body);
+        if (res.headersSent) return;
+        res.set('Cache-Control', 'no-store');
+        if (activityIds.length) res.set('X-Activity-Id', String(activityIds[activityIds.length - 1]));
+        res.json(body);
       })
       .catch(next);
   };
@@ -572,7 +577,10 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
   );
 
   // Undo
-  r.post('/api/v1/undo', h(async (ctx): Promise<MessageResult> => ({ message: await undoLast(ctx.db) })));
+  r.post(
+    '/api/v1/undo',
+    h(async (ctx, req): Promise<MessageResult> => ({ message: await undo(ctx.db, z.object({ id: z.number().int().optional() }).parse(req.body ?? {}).id) })),
+  );
 
   r.use('/api/v1', (_req, res) => {
     res.status(404).json({ error: 'not_found', message: 'No such endpoint.' });

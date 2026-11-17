@@ -153,7 +153,7 @@ function LinkedNotes({ v, today, onLink }: { v: GamePlanDetail; today: string; o
                 className="btn quiet small"
                 disabled={link.isPending}
                 onClick={() =>
-                  link.mutate({ id: v.id, remove: { noteIds: [n.id] } }, { onSuccess: () => toast.show('Taken out', { undoable: true }), onError: toast.error })
+                  link.mutate({ id: v.id, remove: { noteIds: [n.id] } }, { onSuccess: r => toast.show('Taken out', { undoId: r.activityId }), onError: toast.error })
                 }
               >
                 Take out
@@ -186,7 +186,7 @@ function RelatedNotes({ v, today }: { v: GamePlanDetail; today: string }) {
                 className="btn quiet small"
                 disabled={link.isPending}
                 onClick={() =>
-                  link.mutate({ id: v.id, add: { noteIds: [n.id] } }, { onSuccess: () => toast.show('Filed here', { undoable: true }), onError: toast.error })
+                  link.mutate({ id: v.id, add: { noteIds: [n.id] } }, { onSuccess: r => toast.show('Filed here', { undoId: r.activityId }), onError: toast.error })
                 }
               >
                 File here
@@ -253,8 +253,8 @@ function TechniquesSheet({ v, onClose }: { v: GamePlanDetail; onClose: () => voi
           link.mutate(
             { id: v.id, add: { techniqueIds: add }, remove: { techniqueIds: remove } },
             {
-              onSuccess: () => {
-                toast.show('Saved', { undoable: true });
+              onSuccess: r => {
+                toast.show('Saved', { undoId: r.activityId });
                 onClose();
               },
               onError: toast.error,
@@ -305,7 +305,7 @@ function LinkNoteSheet({ v, today, onClose }: { v: GamePlanDetail; today: string
               aria-label={`File here: ${n.body.slice(0, 60)}`}
               disabled={link.isPending}
               onClick={() =>
-                link.mutate({ id: v.id, add: { noteIds: [n.id] } }, { onSuccess: () => toast.show('Filed here', { undoable: true }), onError: toast.error })
+                link.mutate({ id: v.id, add: { noteIds: [n.id] } }, { onSuccess: r => toast.show('Filed here', { undoId: r.activityId }), onError: toast.error })
               }
             >
               File here
@@ -334,8 +334,8 @@ function DeleteSheet({ v, onClose, onDeleted }: { v: GamePlanDetail; onClose: ()
         disabled={del.isPending}
         onClick={() =>
           del.mutate(v.id, {
-            onSuccess: () => {
-              toast.show(`Deleted ${v.name}`, { undoable: true });
+            onSuccess: r => {
+              toast.show(`Deleted ${v.name}`, { undoId: r.activityId });
               onDeleted();
             },
             onError: toast.error,

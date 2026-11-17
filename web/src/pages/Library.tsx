@@ -48,7 +48,7 @@ export function Library() {
     if (!window.confirm(`Delete ${countOf(n, 'technique')}? Notes stay; any that were only about ${which} go to your inbox.`)) return;
     del.mutate(selection.ids, {
       onSuccess: r => {
-        toast.show(r.message.replace(/\.$/, ''), { undoable: true });
+        toast.show(r.message.replace(/\.$/, ''), { undoId: r.activityId });
         selection.stop();
       },
       onError: toast.error,
@@ -193,7 +193,7 @@ export function NewTechniqueSheet({ initialName, onClose }: { initialName?: stri
             { name: name.trim(), type, role: role || null },
             {
               onSuccess: t => {
-                toast.show(`Added ${t.name}`, { undoable: true });
+                toast.show(`Added ${t.name}`, { undoId: t.activityId });
                 onClose();
                 navigate(`/t/${t.id}`);
               },

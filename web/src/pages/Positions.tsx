@@ -120,7 +120,7 @@ function NewGamePlan({ onClose }: { onClose: () => void }) {
             { name: name.trim(), focus },
             {
               onSuccess: r => {
-                toast.show(`Made ${r.gamePlan.name}`, { undoable: true });
+                toast.show(`Made ${r.gamePlan.name}`, { undoId: r.activityId });
                 onClose();
                 navigate(`/game-plans/${r.gamePlan.id}`);
               },

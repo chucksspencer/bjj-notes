@@ -4,13 +4,14 @@ import { useUndo } from '../api';
 interface ToastState {
   id: number;
   text: string;
-  undoable: boolean;
+  /** The undo entry this toast's Undo reverses; without one there is no Undo button. */
+  undoId?: number;
   error: boolean;
 }
 
 interface ToastApi {
-  /** Shows a confirmation; undoable ones offer Undo (reverses the last change on the server). */
-  show: (text: string, opts?: { undoable?: boolean }) => void;
+  /** Shows a confirmation; given the id of the change it reports (the mutation's activityId), it offers Undo for that change only. */
+  show: (text: string, opts?: { undoId?: number }) => void;
   error: (err: unknown) => void;
 }
 
@@ -25,12 +26,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const open = useCallback((t: Omit<ToastState, 'id'>) => {
     window.clearTimeout(timer.current);
     setToast({ ...t, id: Date.now() });
-    timer.current = window.setTimeout(() => setToast(null), t.undoable ? 6000 : 3500);
+    timer.current = window.setTimeout(() => setToast(null), t.undoId ? 6000 : 3500);
   }, []);
 
   const api: ToastApi = {
-    show: (text, opts) => open({ text, undoable: !!opts?.undoable, error: false }),
-    error: err => open({ text: err instanceof Error ? err.message : 'Something went wrong.', undoable: false, error: true }),
+    show: (text, opts) => open({ text, undoId: opts?.undoId, error: false }),
+    error: err => open({ text: err instanceof Error ? err.message : 'Something went wrong.', error: true }),
   };
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -42,14 +43,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toast && (
           <div className={`toast${toast.error ? ' error' : ''}`} key={toast.id} role="status">
             <span>{toast.text}</span>
-            {toast.undoable && (
+            {toast.undoId !== undefined && (
               <button
                 type="button"
                 className="btn small"
                 disabled={undo.isPending}
                 onClick={() =>
-                  undo.mutate(undefined, {
-                    onSuccess: r => open({ text: r.message, undoable: false, error: false }),
+                  undo.mutate(toast.undoId!, {
+                    onSuccess: r => open({ text: r.message, error: false }),
                     onError: e => api.error(e),
                   })
                 }

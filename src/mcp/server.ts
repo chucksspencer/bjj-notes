@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { undoLast } from '../services/activity.js';
+import { undo } from '../services/activity.js';
 import type { Ctx } from '../services/context.js';
 import { getLab, getPosition, review, search } from '../services/explore.js';
 import {
@@ -446,7 +446,7 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
       inputSchema: {},
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
-    () => run(() => undoLast(ctx.db)),
+    () => run(() => undo(ctx.db)),
   );
 
   return server;

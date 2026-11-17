@@ -176,6 +176,11 @@ before merging. Things to keep true:
 - Migrations are new numbered files in `db/migrations`, never edits to old ones.
 - Changes people make can be undone (`activity_log`, the Undo button, "undo that"). Renaming an undo op makes
   older entries of it un-undoable; `UNDO_KINDS` in `src/services/activity.ts` lists the ones that work.
+  Undo names its change: `logActivity` returns the entry's id and also adds it to the request's collector (`activityIds`
+  on the handle `forUser` makes), the `handler` wrapper in `src/http/api.ts` sends the newest as `X-Activity-Id`, the web
+  `request` helper surfaces it as `activityId`, and the toast's Undo posts `{ id }` to `/api/v1/undo`, which refuses
+  unless that entry is still the person's newest. Without an id (`undo_last`, "undo that") it undoes the newest.
+  A write that changes nothing logs nothing.
 - Names are matched fuzzily, for voice: see `src/resolve.ts`.
 - What the app says is short and plain, in the app's own voice.
 - New behaviour comes with tests: over HTTP for the server, in Chromium for the web app.
