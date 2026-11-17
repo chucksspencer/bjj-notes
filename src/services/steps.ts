@@ -3,16 +3,12 @@
 import { uid, type Queryable } from '../db.js';
 import { describeMiss, resolveGamePlan, resolvePosition, resolveStep, resolveTechnique } from '../resolve.js';
 import type { GamePlanSlot, GamePlanSpeech, GamePlanStep, GamePlanStepInput, Role, StepAdd, StepMove, StepPatch } from '../shared/api.js';
-import { fromOutline, groupSlots, MAX_DEPTH, MAX_STEPS, outlineProblem, type Option, type Slot } from '../shared/steps.js';
+import { fromOutline, groupSlots, lowerFirst, MAX_DEPTH, MAX_STEPS, outlineProblem, type Option, type Slot } from '../shared/steps.js';
 import { logActivity, STEP_SNAPSHOT_SQL, type GamePlanSnapshot, type StepSnapshot, type UndoOp } from './activity.js';
 import type { Ctx } from './context.js';
 import { ConflictError, NotFoundError, UserError } from './errors.js';
 import { gamePlanView } from './views/gamePlans.js';
-
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-const capitalise = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
-const clean = (t: string | null | undefined) => t?.trim() || null;
-export const lowerFirst = (t: string) => (/^[A-Z][a-z]/.test(t) ? t.charAt(0).toLowerCase() + t.slice(1) : t);
+import { capitalise, clean, plural } from './words.js';
 
 /** Said when a write names the game plan as last seen (`expectedUpdatedAt`) and it has changed since. */
 export const CHANGED_ELSEWHERE = 'This game plan changed somewhere else. Reload to see it.';

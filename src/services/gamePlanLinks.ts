@@ -4,9 +4,8 @@ import { uid, type Queryable } from '../db.js';
 import type { GamePlanLinksInput } from '../shared/api.js';
 import type { GamePlanLinkIds, UndoOp } from './activity.js';
 import { UserError } from './errors.js';
+import { clean, plural } from './words.js';
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-const clean = (t: string | null | undefined) => t?.trim() || null;
 
 /** Makes a game plan; returns its id. */
 export async function insertGamePlan(q: Queryable, name: string, description?: string | null): Promise<number> {

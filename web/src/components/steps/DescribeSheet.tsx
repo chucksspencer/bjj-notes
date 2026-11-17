@@ -1,10 +1,11 @@
 // "Describe it": say the game plan in words, check the outline Claude drafts, then save it.
 import { useState } from 'react';
 import type { GamePlanDetail } from '../../../../src/shared/api';
+import { lowerFirst } from '../../../../src/shared/steps';
 import { useDraftGamePlan, useEditGamePlan } from '../../api';
 import { Sheet } from '../Sheet';
 import { useToast } from '../Toast';
-import { fromDraft, lowerFirst, toInput } from './model';
+import { fromDraft, toInput } from './model';
 import { StepsOutline } from './Outline';
 
 /** Say the game plan in your own words; Claude outlines it; check it, then save it (replacing the steps). */

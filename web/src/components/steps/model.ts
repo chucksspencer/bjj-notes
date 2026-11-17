@@ -72,5 +72,3 @@ export function movesAt(steps: GamePlanSlot[], stepId: number): Moves {
     later: k < slot.options.length - 1 ? { within: 'choice', to: 'down' } : null,
   };
 }
-
-export const lowerFirst = (t: string) => (/^[A-Z][a-z]/.test(t) ? t.charAt(0).toLowerCase() + t.slice(1) : t);

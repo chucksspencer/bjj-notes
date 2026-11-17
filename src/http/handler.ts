@@ -5,26 +5,29 @@ import { ConflictError, ForbiddenError as Forbidden, NotFoundError as NotFound, 
 import { userCtx, type Ctx } from '../services/context.js';
 import { userIdOf } from './auth.js';
 
-/**
- * Wraps an async handler: it gets the signed-in user's context (set up by requireAuth), its result is sent
- * as JSON, and errors reach the error middleware.
- */
-export const handler =
-  (base: Ctx) =>
-  <T>(fn: (ctx: Ctx, req: Request, res: Response) => Promise<T>): RequestHandler =>
+/** Wraps an async handler: its result is sent as JSON, never cached, and errors reach the error middleware. */
+export const sendJson =
+  <T>(fn: (req: Request, res: Response) => Promise<T>): RequestHandler =>
   (req, res, next) => {
-    // The undo entries this request writes: the newest goes out as X-Activity-Id, so Undo can name the change it is for.
-    const activityIds: number[] = [];
     Promise.resolve()
-      .then(() => fn(userCtx(base, userIdOf(res), activityIds), req, res))
+      .then(() => fn(req, res))
       .then(body => {
-        if (res.headersSent) return;
-        res.set('Cache-Control', 'no-store');
-        if (activityIds.length) res.set('X-Activity-Id', String(activityIds[activityIds.length - 1]));
-        res.json(body);
+        if (!res.headersSent) res.set('Cache-Control', 'no-store').json(body);
       })
       .catch(next);
   };
+
+/** The same for one person's notebook: the handler also gets the signed-in user's context (set up by requireAuth). */
+export const handler =
+  (base: Ctx) =>
+  <T>(fn: (ctx: Ctx, req: Request, res: Response) => Promise<T>): RequestHandler =>
+    sendJson(async (req, res) => {
+      // The undo entries this request writes: the newest goes out as X-Activity-Id, so Undo can name the change it is for.
+      const activityIds: number[] = [];
+      const body = await fn(userCtx(base, userIdOf(res), activityIds), req, res);
+      if (activityIds.length && !res.headersSent) res.set('X-Activity-Id', String(activityIds[activityIds.length - 1]));
+      return body;
+    });
 
 /** The wrapper for one person's routes: what `handler(base)` returns. */
 export type Handle = ReturnType<typeof handler>;

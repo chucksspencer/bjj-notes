@@ -1,13 +1,13 @@
 // The steps on a game plan's page: the outline, which sheet is open, and the changes each one saves.
 import { useState } from 'react';
 import type { GamePlanDetail, StepMove } from '../../../../src/shared/api';
-import { countSteps, findStep } from '../../../../src/shared/steps';
+import { countSteps, findStep, lowerFirst } from '../../../../src/shared/steps';
 import { useAddStep, useDeleteStep, useGamePlanFetching, useMoveStep, useUpdateStep } from '../../api';
 import { ROLE_LABEL } from '../../lib/format';
 import { Icon } from '../Icon';
 import { useToast } from '../Toast';
 import { DescribeSheet } from './DescribeSheet';
-import { lowerFirst, movesAt } from './model';
+import { movesAt } from './model';
 import { StepsOutline } from './Outline';
 import { StartSheet } from './StartSheet';
 import { StepSheet } from './StepSheet';

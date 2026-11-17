@@ -7,8 +7,8 @@ import type { Ctx } from './context.js';
 import { insertGamePlan, linkIn, ownRows } from './gamePlanLinks.js';
 import { focusView } from './views/gamePlans.js';
 import { daysAgo, type FocusAction } from './vocab.js';
+import { plural } from './words.js';
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // ---------- reading it ----------
 

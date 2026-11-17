@@ -164,3 +164,6 @@ export function findStep<S extends Branch<S>>(slots: Slot<S>[], test: (step: S) 
   });
   return found;
 }
+
+/** A sentence's first word in lower case, to follow "when" or "if" (a word all in capitals is left alone). */
+export const lowerFirst = (t: string) => (/^[A-Z][a-z]/.test(t) ? t.charAt(0).toLowerCase() + t.slice(1) : t);
