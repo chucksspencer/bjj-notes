@@ -10,6 +10,7 @@ import type {
   LabView,
   LinkView,
   NoteView,
+  GamePlanSlot,
   GamePlanStep,
   PositionCategory,
   PositionListItem,
@@ -24,6 +25,7 @@ import type {
   TechniqueView,
 } from '../shared/api.js';
 import { uid, type Queryable } from '../db.js';
+import { toTree, type PlacedRow } from '../shared/steps.js';
 import { today, type Ctx } from './context.js';
 import { ATTACHMENTS_JSON } from './attachments.js';
 import { EXPECTED_BY_CATEGORY, minusDays } from './vocab.js';
@@ -462,10 +464,11 @@ interface GamePlanRow {
   note_count: number;
   last_note: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 const GAME_PLAN_SELECT = `
-  select a.id, a.name, a.aliases, a.description, a.rank, a.premise, a.start_role, ${iso('a.created_at')} as created_at,
+  select a.id, a.name, a.aliases, a.description, a.rank, a.premise, a.start_role, ${iso('a.created_at')} as created_at, ${iso('a.updated_at')} as updated_at,
          sp.id as sp_id, sp.slug as sp_slug, sp.name as sp_name,
          coalesce((select json_agg(${TECH_REF_JSON} order by t.name)
                    from game_plan_techniques ax join techniques t on t.id = ax.technique_id
@@ -506,11 +509,7 @@ export async function gamePlansView(ctx: Ctx, q: Queryable = ctx.db): Promise<Ga
 /** How many related notes a game plan's page shows. */
 export const RELATED_NOTES = 10;
 
-interface StepRow {
-  id: number;
-  parent_id: number | null;
-  alt: boolean;
-  trigger: string | null;
+interface StepRow extends PlacedRow {
   action: string;
   note: string | null;
   to_role: GamePlanStep['toRole'];
@@ -522,12 +521,12 @@ interface StepRow {
 }
 
 /**
- * A game plan's steps as a tree: the main line in order, each step with what follows it. A step that leaves
- * you where another game plan starts says so ("continues in").
+ * A game plan's steps as a tree of slots: the main line in order, each step with what follows it. A step that
+ * leaves you where another game plan starts says so ("continues in").
  */
-export async function stepsOf(q: Queryable, gamePlanId: number): Promise<GamePlanStep[]> {
+export async function stepsOf(q: Queryable, gamePlanId: number): Promise<GamePlanSlot[]> {
   const { rows } = await q.query<StepRow>(
-    `select st.id, st.parent_id, st.alt, st.trigger, st.action, st.note, st.to_role,
+    `select st.id, st.parent_id, st.ordinal, st.option, st.trigger, st.action, st.note, st.to_role,
             (select ${TECH_REF_JSON} from techniques t where t.id = st.technique_id) as technique,
             tp.id as tp_id, tp.slug as tp_slug, tp.name as tp_name,
             coalesce((select json_agg(${GAME_PLAN_REF_JSON} order by ${GAME_PLAN_ORDER})
@@ -537,33 +536,18 @@ export async function stepsOf(q: Queryable, gamePlanId: number): Promise<GamePla
                         and (st.to_role is null or a.start_role is null or a.start_role = st.to_role)), '[]'::json) as continues_in
      from game_plan_steps st
      left join positions tp on tp.id = st.to_position_id
-     where st.game_plan_id = $1 and st.user_id = $2
-     order by st.parent_id nulls first, st.ordinal, st.id`,
+     where st.game_plan_id = $1 and st.user_id = $2`,
     [gamePlanId, uid(q)],
   );
-  const byId = new Map<number, GamePlanStep>();
-  const top: GamePlanStep[] = [];
-  for (const r of rows) {
-    byId.set(r.id, {
-      id: r.id,
-      or: r.alt,
-      trigger: r.trigger,
-      action: r.action,
-      technique: json<TechniqueRef | null>(r.technique),
-      to: r.tp_id ? ({ id: r.tp_id, slug: r.tp_slug!, name: r.tp_name! } satisfies PositionRef) : null,
-      toRole: r.to_role,
-      note: r.note,
-      continuesIn: json<GamePlanRef[]>(r.continues_in),
-      children: [],
-    });
-  }
-  // Rows come parents-first within each level only by chance, so attach in a second pass.
-  for (const r of rows) {
-    const step = byId.get(r.id)!;
-    if (r.parent_id === null) top.push(step);
-    else byId.get(r.parent_id)?.children.push(step);
-  }
-  return top;
+  return toTree(rows, r => ({
+    id: r.id,
+    action: r.action,
+    technique: json<TechniqueRef | null>(r.technique),
+    to: r.tp_id ? ({ id: r.tp_id, slug: r.tp_slug!, name: r.tp_name! } satisfies PositionRef) : null,
+    toRole: r.to_role,
+    note: r.note,
+    continuesIn: json<GamePlanRef[]>(r.continues_in),
+  }));
 }
 
 /** One game plan's page, on focus or not; null if it isn't the signed-in person's. */
@@ -584,6 +568,7 @@ export async function gamePlanView(q: Queryable, id: number): Promise<GamePlanDe
   return {
     ...toGamePlan(row),
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
     steps: await stepsOf(q, id),
     notes,
     relatedNotes,

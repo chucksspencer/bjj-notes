@@ -27,10 +27,40 @@ and every index, constraint and sequence still named after areas or focus items.
 in 015), the old statuses in the focus history (`resumed` is now `added`; `paused`, `completed`, `backlogged` and
 `dropped` are `removed`) with `focus_events.from_status` and `to_status`, the older `update_focus` actions, and
 the focus list's `label` field (the name again, for iPhone app builds before 1.3).
+020 (`db/migrations/020_step_options.sql`) made alternatives explicit: `alt` became `option` (see the rule below).
 
 Nothing answers to the area or focus item names any more, apart from old web links (`/focus/:id` and `/areas/:id`
 redirect to `/game-plans/:id`; `/positions` to `/game`). Undo entries saved before 018 can't be undone; ones saved
-before 019 still can (a goal they carry is ignored, and old focus events are put back as what they mean now).
+before 019 still can (a goal they carry is ignored, and old focus events are put back as what they mean now),
+except those that put steps back: step snapshots from before 020 say `alt`, not `option`, and are refused ("saved by
+an older version of the app") rather than put back in the wrong place.
+
+## Steps: slots and options
+
+This is the rule; everything that reads or writes steps follows it, through one module (`src/shared/steps.ts`).
+
+- Under one parent (a step, or the game plan itself for the main line), the steps are a list of **slots**, in
+  order. `game_plan_steps.ordinal` is the slot: 1, 2, 3…
+- A slot is a **choice** between its **options**. `game_plan_steps.option` is the alternative within the slot: 0 is
+  plan A, 1 is plan B, and so on, in the order you'd rather. Most slots have one option.
+- Each option is a branch: its children (the rows whose `parent_id` it is) are what follows *that option*.
+- The next slot under the same parent is what follows *once the choice is resolved, whichever option was used*
+  (on the main line, step 2 after step 1a or 1b).
+- A slot whose option 0 has a `trigger` is an "if they…" branch; without one it is a "then". The trigger is the
+  slot's: an alternative answers the same reaction as its plan A, so only option 0 carries it.
+
+The database holds it to that: `unique nulls not distinct (game_plan_id, parent_id, ordinal, option)`
+(`game_plan_steps_slot_option`, checked at commit, because moving and deleting renumber a row at a time inside a
+transaction), `ordinal >= 1`, `option >= 0`, and `option = 0 or trigger is null`. The writers keep slots and
+options numbered with no gaps.
+
+The JSON API shows the same thing (`GamePlanDetail.steps` in `src/shared/api.ts`):
+
+```ts
+steps: GamePlanSlot[]
+GamePlanSlot = { ordinal, trigger, options: GamePlanStep[] }
+GamePlanStep = { id, option, action, technique, to, toRole, note, continuesIn, slots: GamePlanSlot[] }
+```
 
 ## Rules that keep it small
 
@@ -42,30 +72,55 @@ before 019 still can (a goal they carry is ignored, and old focus events are put
 - Readiness is read off the technique statuses of the steps. A game plan has no status of its own.
 - Hand-offs are derived: a step whose `to_position_id` and role match another game plan's start shows
   "continues in: <that game plan>".
-- Steps under the same parent are ordered by `ordinal` (1 = first). An alternative (`alt`) is plan B to the
-  step before it under the same parent: it answers the same reaction, so it has no trigger of its own, and the
-  first step under a parent is never an alternative.
-- A step and its alternatives are siblings, side by side, and each is a branch: what to do after it ("X, then
-  W, or Y, then Z", "if they… after Y") is its children, nested under it. A step after them in the same list
-  follows whichever was used (on the main line, step 2 after step 1a or 1b).
-- A step moves among the steps under the same parent, never to another parent. It moves as a *choice*: the
-  step and its alternatives together, with everything under them. Within a choice, steps move to change which is
-  plan A, B, C; whichever is first carries the choice's trigger (`moveStep` in `src/services/gamePlans.ts`).
-  Moves update the rows in place, so step ids stay; each one is a single undo.
+- A step has a stable id. Adding, changing, deleting or moving one step touches only the rows it must (the
+  step, and the numbering of the slots or options beside it), so every other step keeps its id. Only saving a
+  whole outline (Claude's `save_game_plan` with `steps`, and "Describe it") replaces them all.
+- A slot moves among the slots under the same parent, never to another parent: the step and its alternatives
+  together, with everything under them. Within a slot, options move to change which is plan A, B, C; the trigger
+  stays with the slot (`moveStep` in `src/services/steps.ts`).
+- Deleting a step deletes everything under it. If it was plan A and the slot has other options, plan B becomes
+  plan A and takes over the slot's trigger.
+- Every step write marks the game plan as changed (`game_plans.updated_at`, `updatedAt` on its page). A write can
+  say what it last saw (`expectedUpdatedAt`): if the game plan has changed since, nothing is saved and the answer
+  is 409, "This game plan changed somewhere else. Reload to see it." The web app sends it with every step write
+  and with "Describe it", shows the message and reads the game plan again. Claude's tools don't send it.
+- Each step write is one undo, which puts every step back as it was, ids included.
 - `technique_links` of kind `chain` / `setup` stay, but new chains belong in steps.
 
 ## Code
 
 `src/services/gamePlans.ts`: the focus list (`getFocus`, `updateFocus`, `focusHistory`), game plans
 (`saveGamePlan` for Claude, `createGamePlan` / `editGamePlan` / `linkGamePlan` / `deleteGamePlan` for the web
-app), reading (`getGamePlan`, `listGamePlans`, `stepLines`), and Siri (`gamePlanSpeech`). The read side for the
-web app is `gamePlanView`, `gamePlansView` and `stepsOf` in `src/services/views.ts`. "Describe it" is
-`src/services/gamePlanDrafts.ts`. Names match fuzzily (`resolveGamePlan` in `src/resolve.ts`), on the name,
-an alias, or a linked technique.
+app) and reading (`getGamePlan`, `listGamePlans`).
 
-Steps arrive flat, in reading order, with a depth: `NamedStepInput` from Claude (cards and positions by name,
-misses reported but not fatal) and `GamePlanStepInput` from the web app (by id). Saving steps replaces them all;
-undo (`restore_game_plan`) puts the old ones back with their ids.
+`src/shared/steps.ts` (used by the server and the web app) is the structure: the `Slot` and `Option` types,
+rows to a tree (`toTree`, `groupSlots`), the flat outline to a tree and back (`fromOutline`, `toOutline`), checking
+an outline (`outlineProblem`), walking (`walk`, `stepsIn`, `findStep`, `countSteps`), and the limits (`MAX_DEPTH`,
+`MAX_STEPS`). Nothing else works out which steps are alternatives to which.
+
+`src/services/steps.ts` is everything that writes or says steps: a whole outline (`writeSteps`, with
+`resolveStepNames` for Claude and `resolveStepIds` for the web app), one step at a time (`addStep`, `updateStep`,
+`deleteStep`, `moveStep`, and `moveStepByName` for Claude), the check against changes made elsewhere
+(`lockGamePlan`), text for Claude (`stepLines`) and speech for Siri (`gamePlanSpeech`). The read side for the web
+app is `gamePlanView`, `gamePlansView` and `stepsOf` in `src/services/views.ts`. "Describe it" is
+`src/services/gamePlanDrafts.ts`. Names match fuzzily (`resolveGamePlan` and `resolveStep` in `src/resolve.ts`).
+
+A whole outline arrives flat, in reading order, with a depth and an `or` flag: `NamedStepInput` from Claude (cards
+and positions by name, misses reported but not fatal) and `GamePlanStepInput` from "Describe it" (by id). Saving
+one replaces every step; undo (`restore_game_plan`) puts the old ones back with their ids.
+
+One step at a time, over HTTP (each scoped to the signed-in person, one transaction, one undo; each answers with
+the game plan as it is now):
+
+| Request | What it does |
+|---|---|
+| `POST /api/v1/game-plans/:id/steps` | Adds a step: `{ relation: 'then' \| 'if' \| 'or', of?, trigger?, action, techniqueId?, toPositionId?, toRole?, note? }`. `then` and `if` make a new slot under the step `of`, after what's there (without `of`: at the end of the main line); `if` needs a trigger and `then` takes none. `or` makes one more option at the end of `of`'s slot, and takes no trigger. Answers 201 with `stepId`. The step's card is linked to the game plan. |
+| `PATCH /api/v1/game-plans/:id/steps/:stepId` | Changes the step's own fields. A trigger on an alternative is refused: it's the slot's, so change it on plan A. |
+| `DELETE /api/v1/game-plans/:id/steps/:stepId` | Deletes the step and everything under it; plan B takes over if it was plan A. |
+| `POST /api/v1/game-plans/:id/steps/:stepId/move` | `{ to: 'up' \| 'down' \| 'first' \| 'last' }` or `{ before \| after: stepId }` moves its slot; with `within: 'choice'` (and `to`) it moves among its slot's options. |
+
+All four, and `PATCH /api/v1/game-plans/:id`, take an optional `expectedUpdatedAt` (for DELETE, in the body or the
+query).
 
 How `get_game_plan` reads one:
 
@@ -94,8 +149,9 @@ Weakest step: Shuck (learning).
 | `get_technique` | "In game plans: …". |
 | `search` | Also matches game plan names, aliases, premises, step triggers and actions, so "what do I do when they post the far leg" finds the branch. |
 
-The step list is flat with a `depth` on purpose: clients with a stale or simplified copy of a
-tool's schema handle that better than a nested one.
+The step list Claude sends is flat with a `depth` (and `or` for an alternative) on purpose: clients with a stale
+or simplified copy of a tool's schema handle that better than a nested one. It becomes slots and options on the
+way in (`fromOutline`).
 
 ## Web app
 
@@ -104,7 +160,10 @@ tool's schema handle that better than a nested one.
 - **Game plan page:** one switch, "On focus", with Up / Down / Top when it's on; the steps above the
   description and techniques; Delete is separate and asks first.
 - **Steps, reading:** an outline with a status bar per step; deeper branches open on tap.
-- **Steps, editing:** a step at a time. Tap a step for its sheet. *Then* (what comes after this step) and *If
+- **Steps, editing:** a step at a time, each change saved on its own through the step endpoints
+  (`web/src/components/Steps.tsx`; `useAddStep`, `useUpdateStep`, `useDeleteStep`, `useMoveStep` in
+  `web/src/api.ts`). If the game plan changed somewhere else since the page read it, the change isn't saved: the
+  page says so and reads it again. Tap a step for its sheet. *Then* (what comes after this step) and *If
   they…* (a branch) add a step under the one you tap, after what's there; *Or* adds an alternative beside it;
   *Add a step at the end* adds to the main line. The arrows at the end of a step's row move
   it (and its alternatives) past the step above or below, as the outline draws them: inside a branch, the "if
@@ -126,4 +185,5 @@ half") or by name; the iPhone app's "What's my game plan" intent uses it ("What'
 - Notes pinned to a single step.
 - Normalised opponent reactions or sub-positions.
 - A graph view across game plans. The derived hand-offs give most of it as text.
-- Moving a step to another parent (out of a branch, into another): delete and add, with Undo.
+- Moving a step to another parent (out of a branch, into another): delete it and add it there, each with Undo.
+- Changing one step from Claude: `save_game_plan` still takes the whole outline (or `move` for one step).

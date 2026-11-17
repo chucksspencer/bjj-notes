@@ -281,6 +281,110 @@ describe('019: cleanup', () => {
   });
 });
 
+describe('020: steps as slots and options', () => {
+  const q = async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows;
+  const columns = async (table: string) =>
+    (await q<{ column_name: string }>('select column_name from information_schema.columns where table_name = $1', [table])).map(c => c.column_name);
+
+  it('turns runs of alternatives into options of one slot, keeps ids, and enforces the shape', async () => {
+    await migrateUpTo('020_step_options.sql');
+    const owner = (await q<{ id: number }>('select id from users where is_owner'))[0]!.id;
+    const plan = (await q<{ id: number }>("insert into game_plans (name, user_id) values ('Mixed', $1) returning id", [owner]))[0]!.id;
+    const other = (await q<{ id: number }>("insert into game_plans (name, user_id) values ('Other', $1) returning id", [owner]))[0]!.id;
+    // [id, game plan, parent, ordinal, alt, trigger, action]
+    const rows: [number, number, number | null, number, boolean, string | null, string][] = [
+      // The main line: a step with two alternatives, then two steps that share an ordinal (id decides).
+      [110, plan, null, 1, false, null, 'A'],
+      [111, plan, null, 2, true, null, 'A, plan B'],
+      [112, plan, null, 3, true, null, 'A, plan C'],
+      [113, plan, null, 4, false, null, 'B'],
+      [114, plan, null, 4, false, null, 'C'],
+      // Under B: an alternative with nothing before it (a slot of its own), a branch with a plan B after a gap, a then.
+      [120, plan, 113, 1, true, null, 'Leading alternative'],
+      [121, plan, 113, 2, false, 'they post', 'X'],
+      [122, plan, 113, 5, true, null, 'X, plan B'],
+      [123, plan, 113, 6, false, null, 'Y'],
+      // Nested under an alternative, where plan B wrongly has a reaction of its own.
+      [130, plan, 122, 1, false, 'they turn', 'Deep'],
+      [131, plan, 122, 2, true, 'stray', 'Deep, plan B'],
+      // Another game plan's steps are numbered on their own.
+      [140, other, null, 3, false, null, 'Elsewhere'],
+      [141, other, null, 7, true, null, 'Elsewhere, plan B'],
+    ];
+    for (const [id, gamePlan, , ordinal, alt, trigger, action] of rows) {
+      await db.query('insert into game_plan_steps (id, game_plan_id, user_id, ordinal, alt, trigger, action) values ($1, $2, $3, $4, $5, $6, $7)', [
+        id, gamePlan, owner, ordinal, alt, trigger, action,
+      ]);
+    }
+    for (const [id, , parent] of rows) if (parent !== null) await db.query('update game_plan_steps set parent_id = $2 where id = $1', [id, parent]);
+    // Undo entries from before: one that puts steps back (they say alt), and one that doesn't touch steps.
+    const before = { id: plan, name: 'Mixed', aliases: [], description: null, start_position_id: null, start_role: null, premise: null };
+    const oldSteps = [{ id: 110, parent_id: null, ordinal: 1, alt: false, trigger: null, action: 'A', technique_id: null, to_position_id: null, to_role: null, note: null }];
+    const log = (summary: string, op: object) =>
+      db.query("insert into activity_log (action, summary, undo, user_id) values ('edit_game_plan', $1, $2, $3)", [summary, JSON.stringify(op), owner]);
+    await log('rename', { kind: 'restore_game_plan', before: { ...before, name: 'Was mixed' } });
+    await log('old steps', { kind: 'batch', ops: [{ kind: 'restore_game_plan', before, steps: oldSteps }] });
+
+    expect(await migrate(db, { through: '020_step_options.sql' })).toEqual(['020_step_options.sql']);
+
+    expect(await columns('game_plan_steps')).toContain('option');
+    expect(await columns('game_plan_steps')).not.toContain('alt');
+    const after = await q<{ id: number; parent_id: number | null; ordinal: number; option: number; trigger: string | null; action: string }>(
+      'select id, parent_id, ordinal, option, trigger, action from game_plan_steps order by id',
+    );
+    expect(after.map(r => [r.id, r.parent_id, r.ordinal, r.option, r.trigger])).toEqual([
+      [110, null, 1, 0, null],
+      [111, null, 1, 1, null],
+      [112, null, 1, 2, null],
+      [113, null, 2, 0, null],
+      [114, null, 3, 0, null],
+      [120, 113, 1, 0, null],
+      [121, 113, 2, 0, 'they post'],
+      [122, 113, 2, 1, null],
+      [123, 113, 3, 0, null],
+      [130, 122, 1, 0, 'they turn'],
+      [131, 122, 1, 1, null],
+      [140, null, 1, 0, null],
+      [141, null, 1, 1, null],
+    ]);
+    expect(after.map(r => r.action)).toEqual(rows.map(r => r[6]));
+
+    // One step per slot and option: on the main line (no parent) and under a step.
+    const add = (parent: number | null, ordinal: number, option: number, trigger: string | null = null) =>
+      db.query('insert into game_plan_steps (game_plan_id, user_id, parent_id, ordinal, option, trigger, action) values ($1, $2, $3, $4, $5, $6, $7)', [
+        plan, owner, parent, ordinal, option, trigger, 'New',
+      ]);
+    await expect(add(null, 1, 1)).rejects.toThrow(/game_plan_steps_slot_option/);
+    await expect(add(113, 2, 0)).rejects.toThrow(/game_plan_steps_slot_option/);
+    await expect(db.tx(t => t.query('update game_plan_steps set option = 0 where id = 111'))).rejects.toThrow(/game_plan_steps_slot_option/);
+    // It's checked at commit, so a swap a row at a time inside one transaction is fine.
+    await db.tx(async t => {
+      await t.query('update game_plan_steps set ordinal = 3 where id = 113');
+      await t.query('update game_plan_steps set ordinal = 2 where id = 114');
+    });
+    expect(await q('select id from game_plan_steps where game_plan_id = $1 and parent_id is null and option = 0 order by ordinal', [plan])).toEqual([
+      { id: 110 }, { id: 114 }, { id: 113 },
+    ]);
+    // Only plan A carries the slot's reaction; slots start at 1 and options at 0.
+    await expect(add(113, 2, 2, 'they stall')).rejects.toThrow(/game_plan_steps_option_trigger_check/);
+    await expect(db.query("update game_plan_steps set trigger = 'they stall' where id = 111")).rejects.toThrow(/game_plan_steps_option_trigger_check/);
+    await expect(add(null, 0, 0)).rejects.toThrow(/game_plan_steps_ordinal_check/);
+    await expect(add(null, 9, -1)).rejects.toThrow(/game_plan_steps_option_check/);
+    await add(113, 2, 2);
+    await add(null, 4, 0, 'they stall');
+    // The same slot numbers in another game plan are its own.
+    expect((await q<{ c: number }>('select count(*)::int as c from game_plan_steps where parent_id is null and ordinal = 1 and option = 0'))[0]!.c).toBe(2);
+
+    // An undo entry whose steps are from before can't say where they'd go now: refused, and nothing changes.
+    await expect(undo(forUser(db, owner))).rejects.toThrow('"old steps" was saved by an older version of the app and can\'t be undone.');
+    expect((await q<{ c: number }>('select count(*)::int as c from game_plan_steps where game_plan_id = $1', [plan]))[0]!.c).toBe(13);
+    // One that doesn't carry steps still works.
+    await db.query("update activity_log set undone = true where summary = 'old steps'");
+    expect(await undo(forUser(db, owner))).toBe('Undid: rename');
+    expect(await q('select name from game_plans where id = $1', [plan])).toEqual([{ name: 'Was mixed' }]);
+  });
+});
+
 describe('021: the owner as an ordinary account', () => {
   it('applies on top of everything before it, leaving the owner and their tokens alone', async () => {
     await migrateUpTo('021_owner_account.sql');

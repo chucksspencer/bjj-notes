@@ -43,9 +43,10 @@ export interface GamePlanSnapshot {
 export interface StepSnapshot {
   id: number;
   parent_id: number | null;
+  /** Its slot among the steps under the same parent (1 = first). */
   ordinal: number;
-  /** An alternative to the step before it (absent in undo entries from before alternatives). */
-  alt?: boolean;
+  /** Its place in the slot: 0 is plan A. Entries from before slots and options have `alt` instead, and can't be undone. */
+  option: number;
   trigger: string | null;
   action: string;
   technique_id: number | null;
@@ -54,7 +55,7 @@ export interface StepSnapshot {
   note: string | null;
 }
 
-export const STEP_SNAPSHOT_SQL = `select id, parent_id, ordinal, alt, trigger, action, technique_id, to_position_id, to_role, note
+export const STEP_SNAPSHOT_SQL = `select id, parent_id, ordinal, option, trigger, action, technique_id, to_position_id, to_role, note
   from game_plan_steps where game_plan_id = $1 and user_id = $2 order by id`;
 
 /** A session's details, to put back after they were filled in. */
@@ -488,9 +489,9 @@ export async function insertSteps(q: Queryable, gamePlanId: number, steps: StepS
   const me = uid(q);
   for (const st of steps) {
     await q.query(
-      `insert into game_plan_steps (id, game_plan_id, user_id, parent_id, ordinal, trigger, action, technique_id, to_position_id, to_role, note, alt)
+      `insert into game_plan_steps (id, game_plan_id, user_id, parent_id, ordinal, trigger, action, technique_id, to_position_id, to_role, note, option)
        values ($1, $2, $3, null, $4, $5, $6, (select id from techniques where id = $7 and user_id = $3), $8, $9, $10, $11)`,
-      [st.id, gamePlanId, me, st.ordinal, st.trigger, st.action, st.technique_id, st.to_position_id, st.to_role, st.note, st.alt ?? false],
+      [st.id, gamePlanId, me, st.ordinal, st.trigger, st.action, st.technique_id, st.to_position_id, st.to_role, st.note, st.option],
     );
   }
   for (const st of steps) {
@@ -554,7 +555,11 @@ const UNDO_KINDS: Record<UndoOp['kind'], true> = {
 };
 
 /** Whether this version can undo an entry: older ones in the log may use ops that have since been renamed. */
-const known = (op: UndoOp): boolean => Object.hasOwn(UNDO_KINDS, op.kind) && (op.kind !== 'batch' || op.ops.every(known));
+const known = (op: UndoOp): boolean =>
+  Object.hasOwn(UNDO_KINDS, op.kind) &&
+  (op.kind !== 'batch' || op.ops.every(known)) &&
+  // Steps saved before slots and options (020) say `alt`, not `option`: there's no telling where they'd go now.
+  ((op.kind !== 'restore_game_plan' && op.kind !== 'restore_deleted_game_plan') || (op.steps ?? []).every(st => Number.isInteger(st.option)));
 
 /**
  * Reverses the user's most recent write that hasn't been undone yet. With an id (the app's Undo button), it reverses

@@ -198,6 +198,9 @@ describe('separate notebooks over the JSON API', () => {
     expect((await api(sam, 'DELETE', '/api/v1/game-plans/1')).status).toBe(404);
     expect((await api(sam, 'POST', '/api/v1/game-plans/1/links', { add: { noteIds: [ownerNote.id] } })).status).toBe(404);
     expect((await api(sam, 'POST', '/api/v1/game-plans/1/steps/1/move', { to: 'up' })).status).toBe(404);
+    expect((await api(sam, 'POST', '/api/v1/game-plans/1/steps', { relation: 'then', action: 'Mine now' })).status).toBe(404);
+    expect((await api(sam, 'PATCH', '/api/v1/game-plans/1/steps/1', { action: 'Mine now' })).status).toBe(404);
+    expect((await api(sam, 'DELETE', '/api/v1/game-plans/1/steps/1')).status).toBe(404);
     expect((await api(sam, 'POST', '/api/v1/stars/clear', {})).body.message).toBe('Nothing is starred.');
 
     // Everything of the owner's is as it was.
@@ -236,7 +239,7 @@ describe('separate notebooks over the JSON API', () => {
     const planned = await api<{ gamePlan: GamePlanDetail }>(sam, 'PATCH', `/api/v1/game-plans/${escapes.id}`, {
       steps: [{ depth: 0, action: 'Ghost escape', techniqueId: ownerGhost.id }],
     });
-    expect(planned.body.gamePlan.steps).toMatchObject([{ action: 'Ghost escape', technique: null }]);
+    expect(planned.body.gamePlan.steps).toMatchObject([{ options: [{ action: 'Ghost escape', technique: null }] }]);
     expect((await api(sam, 'PATCH', `/api/v1/game-plans/${escapes.id}`, { startPositionId: 999_999 })).status).toBe(400);
     expect((await api<NoteView>(sam, 'PATCH', `/api/v1/notes/${note.body.note.id}`, { gamePlanIds: [1, escapes.id] })).body.gamePlans.map(f => f.id)).toEqual([
       escapes.id,

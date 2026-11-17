@@ -6,3 +6,6 @@ export class NotFoundError extends UserError {}
 
 /** Only the owner can do that. */
 export class ForbiddenError extends UserError {}
+
+/** The thing changed somewhere else since the caller last saw it; nothing was done. */
+export class ConflictError extends UserError {}

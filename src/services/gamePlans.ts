@@ -2,8 +2,9 @@
 // then a main line with branches for how the opponent reacts: what's called a "system"). Being on the focus list is
 // just a state of a game plan: it has a rank, or it doesn't.
 import { uid, type Queryable } from '../db.js';
-import { describeMiss, resolveGamePlan, resolvePosition, resolveStep, resolveTechnique, techniquesMentionedIn, type Resolution } from '../resolve.js';
-import type { GamePlanLinksInput, GamePlanPatch, GamePlanSpeech, GamePlanStep, GamePlanStepInput, Role, StepMove } from '../shared/api.js';
+import { describeMiss, resolveGamePlan, resolvePosition, resolveTechnique, techniquesMentionedIn, type Resolution } from '../resolve.js';
+import type { GamePlanLinksInput, GamePlanPatch, Role } from '../shared/api.js';
+import { stepsIn } from '../shared/steps.js';
 import {
   logActivity,
   refreshInbox,
@@ -17,18 +18,14 @@ import {
 } from './activity.js';
 import { mediaTag } from './attachments.js';
 import { today, type Ctx } from './context.js';
-import { NotFoundError, UserError } from './errors.js';
+import { UserError } from './errors.js';
+import { lockGamePlan, lowerFirst, resolveStepIds, resolveStepNames, stepLines, writeSteps, type NamedStepInput, type ResolvedStep } from './steps.js';
 import { gamePlansView, gamePlanView, focusView } from './views.js';
 import { daysAgo, type FocusAction } from './vocab.js';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const capitalise = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 const clean = (t: string | null | undefined) => t?.trim() || null;
-
-/** Steps can nest this deep (0 = main line). */
-export const MAX_DEPTH = 6;
-/** And this long. */
-export const MAX_STEPS = 60;
 
 // ---------- the focus list ----------
 
@@ -314,148 +311,7 @@ export async function linkGamePlan(ctx: Ctx, id: number, change: GamePlanLinksIn
   });
 }
 
-// ---------- editing a game plan and its steps ----------
-
-const GAME_PLAN_SNAPSHOT_SQL = `select id, name, aliases, description, start_position_id, start_role, premise
-  from game_plans where id = $1 and user_id = $2`;
-
-/** A step ready to store: names already matched to cards and positions. */
-interface ResolvedStep {
-  depth: number;
-  /** An alternative to the step before it at this depth. */
-  alt: boolean;
-  trigger: string | null;
-  action: string;
-  technique_id: number | null;
-  to_position_id: number | null;
-  to_role: Role | null;
-  note: string | null;
-}
-
-/** Checks the outline's shape: it starts on the main line and goes at most one level deeper per step. */
-function checkOutline(steps: { depth: number; alt?: boolean }[]): void {
-  if (steps.length > MAX_STEPS) throw new UserError(`A game plan can have at most ${MAX_STEPS} steps.`);
-  let prev = -1;
-  // Whether there's already a step at each depth under the current parent (for "or" to be an alternative to).
-  const has: boolean[] = [];
-  for (const [i, s] of steps.entries()) {
-    if (!Number.isInteger(s.depth) || s.depth < 0 || s.depth > MAX_DEPTH) throw new UserError(`Step ${i + 1}: depth must be 0 to ${MAX_DEPTH}.`);
-    if (s.depth > prev + 1) {
-      throw new UserError(
-        i === 0 ? 'The first step must be on the main line (depth 0).' : `Step ${i + 1} is ${s.depth - prev} levels deeper than the step before it.`,
-      );
-    }
-    if (s.alt && !has[s.depth]) throw new UserError(`Step ${i + 1}: "or" needs a step before it at the same level to be an alternative to.`);
-    has[s.depth] = true;
-    has.length = s.depth + 1;
-    prev = s.depth;
-  }
-}
-
-/**
- * Replaces a game plan's steps. Each step's technique card is linked to the game plan too, so notes on it show up there;
- * returns those newly linked card ids.
- */
-async function writeSteps(q: Queryable, gamePlanId: number, steps: ResolvedStep[]): Promise<number[]> {
-  checkOutline(steps);
-  const me = uid(q);
-  await q.query('delete from game_plan_steps where game_plan_id = $1 and user_id = $2', [gamePlanId, me]);
-  const parents: number[] = [];
-  const ordinals = new Map<number | null, number>();
-  for (const s of steps) {
-    const parent = s.depth === 0 ? null : parents[s.depth - 1]!;
-    const ordinal = (ordinals.get(parent) ?? 0) + 1;
-    ordinals.set(parent, ordinal);
-    const { rows } = await q.query<{ id: number }>(
-      `insert into game_plan_steps (game_plan_id, user_id, parent_id, ordinal, trigger, action, technique_id, to_position_id, to_role, note, alt)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id`,
-      [gamePlanId, me, parent, ordinal, s.alt ? null : s.trigger, s.action, s.technique_id, s.to_position_id, s.to_role, s.note, s.alt],
-    );
-    parents[s.depth] = rows[0]!.id;
-    parents.length = s.depth + 1;
-  }
-  const linked: number[] = [];
-  for (const t of new Set(steps.map(s => s.technique_id).filter((t): t is number => t !== null))) {
-    const { rows } = await q.query(
-      'insert into game_plan_techniques (game_plan_id, technique_id, user_id) values ($1, $2, $3) on conflict do nothing returning technique_id',
-      [gamePlanId, t, me],
-    );
-    if (rows[0]) linked.push(t);
-  }
-  return linked;
-}
-
-/** Steps from the web app, which names cards and positions by id. Ids that aren't yours are dropped. */
-async function resolveStepIds(q: Queryable, steps: GamePlanStepInput[]): Promise<ResolvedStep[]> {
-  const techniques = new Set(
-    (await ownRows(q, 'techniques', steps.map(s => s.techniqueId).filter((t): t is number => typeof t === 'number'))).map(t => t.id),
-  );
-  const positionIds = steps.map(s => s.toPositionId).filter((p): p is number => typeof p === 'number');
-  const positions = new Set(
-    positionIds.length ? (await q.query<{ id: number }>('select id from positions where id = any($1::int[])', [positionIds])).rows.map(r => r.id) : [],
-  );
-  return steps.map(s => ({
-    depth: s.depth,
-    alt: s.or === true,
-    trigger: clean(s.trigger),
-    action: s.action.trim(),
-    technique_id: s.techniqueId && techniques.has(s.techniqueId) ? s.techniqueId : null,
-    to_position_id: s.toPositionId && positions.has(s.toPositionId) ? s.toPositionId : null,
-    to_role: s.toRole ?? null,
-    note: clean(s.note),
-  }));
-}
-
-/** One step, as Claude sends it (naming cards and positions). */
-export interface NamedStepInput {
-  /** 0 = main line; 1 = a branch off the nearest depth-0 step above it; and so on. */
-  depth: number;
-  /**
-   * An alternative to the nearest step above it at the same depth: plan B (then C...), in order of preference.
-   * Each alternative, plan A included, is a branch: what comes after it goes one level deeper.
-   */
-  or?: boolean;
-  /** The reaction that leads here ("they post the far leg"). */
-  when?: string;
-  /** What to do, as said. Linked to a technique card when it names one clearly. */
-  do: string;
-  /** The card to link, when the words in `do` aren't its name. */
-  technique?: string;
-  /** Where it leaves you, e.g. "deep half". */
-  to?: string;
-  to_role?: Role;
-  /** Intent or cue. */
-  note?: string;
-}
-
-/** Steps from Claude, which names things: cards and positions are matched, and misses are reported, not fatal. */
-export async function resolveStepNames(q: Queryable, steps: NamedStepInput[], misses: string[]): Promise<ResolvedStep[]> {
-  const out: ResolvedStep[] = [];
-  const noCard: string[] = [];
-  for (const s of steps) {
-    const action = s.do.trim();
-    if (!action) throw new UserError('Every step needs "do": what to do.');
-    let technique: number | null = null;
-    if (s.technique?.trim()) {
-      const r = await resolveTechnique(q, s.technique);
-      if (r.match) technique = r.match.id;
-      else misses.push(describeMiss('technique', s.technique, r).replace(/\.$/, ''));
-    } else {
-      const r = await resolveTechnique(q, action);
-      if (r.match) technique = r.match.id;
-      else noCard.push(action);
-    }
-    let to: number | null = null;
-    if (s.to?.trim()) {
-      const r = await resolvePosition(q, s.to);
-      if (r.match) to = r.match.id;
-      else misses.push(describeMiss('position', s.to, r).replace(/\.$/, ''));
-    }
-    out.push({ depth: s.depth, alt: s.or === true, trigger: clean(s.when), action, technique_id: technique, to_position_id: to, to_role: s.to_role ?? null, note: clean(s.note) });
-  }
-  if (noCard.length) misses.push(`no technique card for: ${noCard.join('; ')}`);
-  return out;
-}
+// ---------- editing a game plan (its steps are in steps.ts) ----------
 
 interface Fields {
   name?: string;
@@ -470,10 +326,10 @@ interface Fields {
  * Changes a game plan's own fields and (when given) its steps. Returns what changed in words and the undo for it;
  * null if there's no such game plan.
  */
-async function editIn(q: Queryable, id: number, f: Fields, steps?: ResolvedStep[]) {
+async function editIn(q: Queryable, id: number, f: Fields, steps?: ResolvedStep[], expectedUpdatedAt?: string) {
   const me = uid(q);
-  const before = (await q.query<GamePlanSnapshot>(GAME_PLAN_SNAPSHOT_SQL, [id, me])).rows[0];
-  if (!before) return null;
+  if (!(await q.query('select 1 from game_plans where id = $1 and user_id = $2', [id, me])).rows.length) return null;
+  const before = await lockGamePlan(q, id, expectedUpdatedAt);
   const after: GamePlanSnapshot = {
     id,
     name: f.name?.trim() || before.name,
@@ -512,7 +368,10 @@ async function editIn(q: Queryable, id: number, f: Fields, steps?: ResolvedStep[
   return { before: before.name, name: after.name, parts, ops };
 }
 
-/** Changes a game plan from the web app: its fields and, when given, all its steps. */
+/**
+ * Changes a game plan from the web app: its fields and, when given, all its steps (what "Describe it" saves).
+ * With `expectedUpdatedAt`, nothing is saved if the game plan has changed since the app last read it.
+ */
 export async function editGamePlan(ctx: Ctx, id: number, patch: GamePlanPatch): Promise<string> {
   return ctx.db.tx(async q => {
     if (patch.startPositionId) {
@@ -532,168 +391,12 @@ export async function editGamePlan(ctx: Ctx, id: number, patch: GamePlanPatch): 
         premise: patch.premise,
       },
       steps,
+      patch.expectedUpdatedAt,
     );
     if (!r) return `No game plan #${id}.`;
     if (r.ops.length) await logActivity(q, 'edit_game_plan', `edit to "${r.before}"`, r.ops.length === 1 ? r.ops[0]! : { kind: 'batch', ops: r.ops });
     return r.parts.length ? `${r.name}: ${r.parts.join('; ')}.` : `Nothing changed on ${r.name}.`;
   });
-}
-
-// ---------- moving a step ----------
-
-interface SiblingRow {
-  id: number;
-  ordinal: number;
-  alt: boolean;
-  trigger: string | null;
-  action: string;
-}
-
-/** Steps under one parent as choices: each step with the alternatives right after it. */
-function choicesOf(rows: SiblingRow[]): SiblingRow[][] {
-  const out: SiblingRow[][] = [];
-  for (const r of rows) {
-    if (r.alt && out.length) out.at(-1)!.push(r);
-    else out.push([r]);
-  }
-  return out;
-}
-
-const letter = (i: number) => String.fromCharCode(65 + i);
-
-/**
- * Moves a step among its siblings (with its alternatives), or among its alternatives. Updates the steps in
- * place, so their ids stay; one undo puts the order back. Returns what happened in words.
- */
-async function moveIn(q: Queryable, gamePlanId: number, stepId: number, move: StepMove): Promise<{ message: string; changed: boolean }> {
-  const me = uid(q);
-  const self = (
-    await q.query<{ parent_id: number | null; action: string }>('select parent_id, action from game_plan_steps where id = $1 and game_plan_id = $2 and user_id = $3', [
-      stepId,
-      gamePlanId,
-      me,
-    ])
-  ).rows[0];
-  if (!self) throw new NotFoundError(`No step #${stepId} in that game plan.`);
-  const siblings = (
-    await q.query<SiblingRow>(
-      `select id, ordinal, alt, trigger, action from game_plan_steps
-       where game_plan_id = $1 and user_id = $2 and parent_id is not distinct from $3
-       order by ordinal, id for update`,
-      [gamePlanId, me, self.parent_id],
-    )
-  ).rows;
-  const groups = choicesOf(siblings);
-  const at = groups.findIndex(g => g.some(s => s.id === stepId));
-  const name = self.action;
-  const given = [move.to, move.before, move.after].filter(v => v !== undefined).length;
-  if (given !== 1) throw new UserError('Say where to move it: up, down, first, last, or before or after another step.');
-
-  let next: SiblingRow[][];
-  let said: string;
-  if (move.within === 'choice') {
-    if (move.to === undefined) throw new UserError('Among its alternatives, a step moves up, down, first or last.');
-    const choice = groups[at]!;
-    const from = choice.findIndex(s => s.id === stepId);
-    if (choice.length === 1) return { message: `${name} has no alternatives to move among.`, changed: false };
-    const to = { up: from - 1, down: from + 1, first: 0, last: choice.length - 1 }[move.to];
-    if (to < 0 || to >= choice.length || to === from) {
-      return { message: `${name} is already plan ${letter(from)}.`, changed: false };
-    }
-    const reordered = [...choice];
-    const [mine] = reordered.splice(from, 1);
-    reordered.splice(to, 0, mine!);
-    // The choice answers one reaction: its trigger stays with whichever step is first.
-    const trigger = choice[0]!.trigger;
-    next = groups.map((g, i) => (i === at ? reordered.map((s, k) => ({ ...s, alt: k > 0, trigger: k === 0 ? trigger : null })) : g));
-    said = `${name} is now plan ${letter(to)}`;
-  } else {
-    let to: number;
-    let where: string;
-    if (move.to !== undefined) {
-      to = { up: at - 1, down: at + 1, first: 0, last: groups.length - 1 }[move.to];
-      where = move.to === 'up' || move.to === 'down' ? move.to : `to ${move.to}`;
-      if (to < 0 || to >= groups.length || to === at) {
-        const end = at === 0 ? 'first' : 'last';
-        return { message: groups.length === 1 ? `${name} is the only step there.` : `${name} is already ${end}.`, changed: false };
-      }
-    } else {
-      const targetId = (move.before ?? move.after)!;
-      const target = groups.findIndex(g => g.some(s => s.id === targetId));
-      if (target < 0) throw new UserError('That step is somewhere else in the game plan: steps move among the steps next to them.');
-      if (target === at) return { message: `${name} and that step are alternatives to each other: move it among its alternatives instead.`, changed: false };
-      const targetName = groups[target]![0]!.action;
-      // Where it lands once it's out of the list: before the target, or just after it.
-      to = move.before !== undefined ? (target > at ? target - 1 : target) : target > at ? target : target + 1;
-      where = `${move.before !== undefined ? 'before' : 'after'} ${targetName}`;
-      if (to === at) return { message: `${name} is already ${where}.`, changed: false };
-    }
-    next = [...groups];
-    const [mine] = next.splice(at, 1);
-    next.splice(to, 0, mine!);
-    said = `Moved ${name} ${where}`;
-  }
-
-  const flat = next.flat();
-  for (const [i, s] of flat.entries()) {
-    const was = siblings.find(r => r.id === s.id)!;
-    if (was.ordinal === i + 1 && was.alt === s.alt && was.trigger === s.trigger) continue;
-    await q.query('update game_plan_steps set ordinal = $2, alt = $3, trigger = $4 where id = $1 and user_id = $5', [s.id, i + 1, s.alt, s.trigger, me]);
-  }
-  return { message: said, changed: true };
-}
-
-/** Moves a step (from the web app, by id). */
-export async function moveStep(ctx: Ctx, gamePlanId: number, stepId: number, move: StepMove): Promise<string> {
-  return ctx.db.tx(async q => {
-    const me = uid(q);
-    const before = (await q.query<GamePlanSnapshot>(GAME_PLAN_SNAPSHOT_SQL, [gamePlanId, me])).rows[0];
-    if (!before) throw new NotFoundError(`No game plan #${gamePlanId}.`);
-    const steps = (await q.query<StepSnapshot>(STEP_SNAPSHOT_SQL, [gamePlanId, me])).rows;
-    const r = await moveIn(q, gamePlanId, stepId, move);
-    if (!r.changed) return r.message;
-    await q.query('update game_plans set updated_at = now() where id = $1 and user_id = $2', [gamePlanId, me]);
-    await logActivity(q, 'move_step', `move in "${before.name}"`, { kind: 'restore_game_plan', before, steps });
-    return `${r.message}.`;
-  });
-}
-
-/** Moving a step by voice: the step, and where to, by what they say. */
-export interface NamedStepMove {
-  step: string;
-  to?: StepMove['to'];
-  before?: string;
-  after?: string;
-  /** Make it plan A: first among its alternatives. */
-  prefer?: boolean;
-}
-
-/** Moves a step of a game plan found by name (for Claude). */
-export async function moveStepByName(ctx: Ctx, gamePlanName: string, move: NamedStepMove): Promise<string> {
-  const q = ctx.db;
-  const plan = await resolveGamePlan(q, gamePlanName);
-  if (!plan.match) return describeMiss('game plan', gamePlanName, plan);
-  const id = plan.match.id;
-  const find = async (words: string): Promise<{ id: number; miss?: undefined } | { id?: undefined; miss: string }> => {
-    const r = await resolveStep(q, id, words);
-    if (r.match) return { id: r.match.id };
-    const names = new Set(r.candidates.map(c => c.name.toLowerCase()));
-    if (r.candidates.length > 1 && names.size === 1) {
-      return {
-        miss: `More than one step in ${plan.match!.name} says "${r.candidates[0]!.name}". Say it with the reaction that leads to it ("if they…"), or move it in the app.`,
-      };
-    }
-    return { miss: `${describeMiss('step', words, r).replace(/\.$/, '')} in ${plan.match!.name}.` };
-  };
-  const step = await find(move.step);
-  if (step.miss !== undefined) return step.miss;
-  if (move.prefer) return moveStep(ctx, id, step.id, { within: 'choice', to: 'first' });
-  if (move.before !== undefined || move.after !== undefined) {
-    const target = await find((move.before ?? move.after)!);
-    if (target.miss !== undefined) return target.miss;
-    return moveStep(ctx, id, step.id, move.before !== undefined ? { before: target.id } : { after: target.id });
-  }
-  return moveStep(ctx, id, step.id, { to: move.to });
 }
 
 export interface SaveGamePlanInput {
@@ -866,55 +569,6 @@ export async function deleteGamePlan(ctx: Ctx, target: { id?: number; name?: str
 
 // ---------- reading, for Claude and Siri ----------
 
-/** A step and its alternatives ("or": plan B, C…), which sit right after it in the same list. */
-interface Choice {
-  step: GamePlanStep;
-  alternatives: GamePlanStep[];
-}
-
-function choicesIn(steps: GamePlanStep[]): Choice[] {
-  const out: Choice[] = [];
-  for (const s of steps) {
-    if (s.or && out.length) out.at(-1)!.alternatives.push(s);
-    else out.push({ step: s, alternatives: [] });
-  }
-  return out;
-}
-
-/**
- * Steps as indented if/then lines. A step and its alternatives ("Or:") are siblings, lettered on the main line
- * (1a, 1b); what comes after each is indented under it.
- */
-export function stepLines(steps: GamePlanStep[], indent = ''): string[] {
-  const lines: string[] = [];
-  let n = 0;
-  let letter = 0;
-  steps.forEach((s, i) => {
-    if (s.or) letter++;
-    else {
-      n++;
-      letter = 0;
-    }
-    const choice = s.or || steps[i + 1]?.or === true;
-    const marker = indent ? '' : `${n}${choice ? String.fromCharCode(97 + letter) : ''}. `;
-    const head = s.or ? `Or: ${lowerFirst(s.action)}` : s.trigger ? `If ${s.trigger}: ${lowerFirst(s.action)}` : s.action;
-    const card = s.technique ? ` (${s.technique.status})` : '';
-    const leads = s.to ? ` → ${s.to.name}${s.toRole ? ` (${s.toRole})` : ''}` : '';
-    const why = s.note ? `: ${s.note}` : '';
-    const next = s.continuesIn.length ? ` Continues in: ${s.continuesIn.map(a => a.name).join(', ')}.` : '';
-    lines.push(`${indent}${marker}${head}${card}${leads}${why}.${next}`.replace(/\.\./g, '.'));
-    lines.push(...stepLines(s.children, `${indent}   `));
-  });
-  return lines;
-}
-
-const lowerFirst = (t: string) => (/^[A-Z][a-z]/.test(t) ? t.charAt(0).toLowerCase() + t.slice(1) : t);
-
-/** Every step, depth first. */
-function flatten(steps: GamePlanStep[]): GamePlanStep[] {
-  return steps.flatMap(s => [s, ...flatten(s.children)]);
-}
-
 const STATUS_ORDER = ['seen', 'learning', 'drilling', 'hitting', 'reliable'];
 
 /** One game plan as text: where it is on focus, its steps read as if/then, techniques and notes. */
@@ -933,7 +587,7 @@ export async function getGamePlan(ctx: Ctx, name: string): Promise<string> {
   if (v.description) lines.push(v.description);
   if (v.steps.length) {
     lines.push('Steps:', ...stepLines(v.steps));
-    const carded = flatten(v.steps).filter(s => s.technique);
+    const carded = stepsIn(v.steps).filter(s => s.technique);
     if (carded.length) {
       const weakest = carded.reduce((a, b) => (STATUS_ORDER.indexOf(b.technique!.status) < STATUS_ORDER.indexOf(a.technique!.status) ? b : a));
       lines.push(`Weakest step: ${weakest.technique!.name} (${weakest.technique!.status}).`);
@@ -970,59 +624,4 @@ export async function listGamePlans(ctx: Ctx): Promise<string> {
   for (const [k, v] of [...groups].sort(([a], [b]) => a.localeCompare(b))) lines.push(`${k}: ${v.join('; ')}`);
   if (none) lines.push(`No starting position: ${none.join('; ')}`);
   return lines.join('\n');
-}
-
-/**
- * A game plan said aloud, for Siri: found by name, or by where it starts ("bottom half", "half guard bottom").
- * The main line and its branches; deeper steps are left for the app.
- */
-export async function gamePlanSpeech(ctx: Ctx, query: string): Promise<GamePlanSpeech> {
-  const q = ctx.db;
-  const words = query.trim();
-  if (!words) return { gamePlanId: null, speech: 'Which game plan? Say its name or a position.' };
-  let id: number | null = null;
-  let none: string | null = null;
-  // "bottom half", "half guard, top": a position (and a side, if one is said) names the game plan that starts there.
-  const role = /\bbottom\b/i.test(words) ? 'bottom' : /\btop\b/i.test(words) ? 'top' : null;
-  const pos = await resolvePosition(q, words.replace(/\b(top|bottom|from|on|my|game|plan|the)\b/gi, ' ').replace(/\s+/g, ' ').trim() || words);
-  if (pos.match) {
-    const row = (
-      await q.query<{ id: number }>(
-        `select id from game_plans where user_id = $1 and start_position_id = $2 and ($3::text is null or start_role is null or start_role = $3)
-           and exists (select 1 from game_plan_steps st where st.game_plan_id = game_plans.id)
-         order by rank nulls last, name limit 1`,
-        [uid(q), pos.match.id, role],
-      )
-    ).rows[0];
-    if (row) id = row.id;
-    else none = `You don't have a game plan from ${pos.match.name}${role ? ` on ${role}` : ''} yet.`;
-  }
-  if (id === null) {
-    const byName = await resolveGamePlan(q, words);
-    if (byName.match) id = byName.match.id;
-    else if (none) return { gamePlanId: null, speech: none };
-  }
-  if (id === null) return { gamePlanId: null, speech: `I couldn't find a game plan called ${words}.` };
-  const v = (await gamePlanView(q, id))!;
-  if (!v.steps.length) return { gamePlanId: id, speech: `${v.name} doesn't have any steps yet.` };
-  const step = (s: GamePlanStep) => `${lowerFirst(s.action)}${s.note ? `, to ${lowerFirst(s.note)}` : ''}`;
-  // Where a step has alternatives, each is its own branch: said as one sentence, with what comes after it inside.
-  const branch = (s: GamePlanStep) =>
-    `${step(s)}${choicesIn(s.children)
-      .map(c => (c.step.trigger ? `; if ${c.step.trigger}, ${step(c.step)}` : `, then ${step(c.step)}`))
-      .join('')}`;
-  const parts: string[] = [];
-  choicesIn(v.steps).forEach((c, i) => {
-    const lead = (t: string) => (i === 0 ? capitalise(t) : `Then ${t}`);
-    if (c.alternatives.length) {
-      parts.push(`${lead(branch(c.step))}.`, ...c.alternatives.map(a => `Or instead, ${branch(a)}.`));
-      return;
-    }
-    parts.push(`${lead(step(c.step))}.`);
-    for (const r of choicesIn(c.step.children)) {
-      parts.push(`${r.step.trigger ? `If ${r.step.trigger}, ` : 'Then '}${step(r.step)}.`, ...r.alternatives.map(a => `Or ${step(a)}.`));
-    }
-  });
-  const when = v.premise ? ` When ${lowerFirst(v.premise)}:` : '';
-  return { gamePlanId: id, speech: `${v.name}.${when} ${parts.join(' ')}`.replace(/\.\./g, '.') };
 }

@@ -5,7 +5,8 @@ import type { Config } from '../config.js';
 import { uid } from '../db.js';
 import { resolvePosition } from '../resolve.js';
 import type { GamePlanDraft, Role } from '../shared/api.js';
-import { MAX_DEPTH, MAX_STEPS, resolveStepNames, type NamedStepInput } from './gamePlans.js';
+import { MAX_DEPTH, MAX_STEPS } from '../shared/steps.js';
+import { resolveStepNames, type NamedStepInput } from './steps.js';
 import type { Ctx } from './context.js';
 import { UserError } from './errors.js';
 import { ROLES } from './vocab.js';
@@ -164,7 +165,7 @@ export async function draftGamePlan(ctx: Ctx, text: string): Promise<GamePlanDra
     premise: drafted.premise?.trim() || null,
     steps: resolved.map(s => ({
       depth: s.depth,
-      or: s.alt,
+      or: s.or,
       trigger: s.trigger,
       action: s.action,
       techniqueId: s.technique_id,

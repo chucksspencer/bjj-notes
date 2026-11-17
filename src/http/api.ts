@@ -18,11 +18,13 @@ import type {
   TechniqueView,
 } from '../shared/api.js';
 import { undo } from '../services/activity.js';
-import { ForbiddenError as Forbidden, NotFoundError as NotFound, UserError } from '../services/errors.js';
+import { ConflictError, ForbiddenError as Forbidden, NotFoundError as NotFound, UserError } from '../services/errors.js';
 import { userCtx, type Ctx } from '../services/context.js';
 import { uid } from '../db.js';
 import { userIdOf } from './auth.js';
-import { createGamePlan, deleteGamePlan, editGamePlan, gamePlanSpeech, linkGamePlan, MAX_DEPTH, MAX_STEPS, moveStep, updateFocus } from '../services/gamePlans.js';
+import { createGamePlan, deleteGamePlan, editGamePlan, linkGamePlan, updateFocus } from '../services/gamePlans.js';
+import { addStep, deleteStep, gamePlanSpeech, moveStep, updateStep } from '../services/steps.js';
+import { MAX_DEPTH, MAX_STEPS } from '../shared/steps.js';
 import { draftGamePlan } from '../services/gamePlanDrafts.js';
 import { attachmentThumb, linkAttachment } from '../services/attachments.js';
 import { clearStars, markAnswered } from '../services/marks.js';
@@ -143,6 +145,8 @@ const focusActionBody = z.object({
   position: z.number().int().min(1).optional(),
 });
 const optLine = (max: number) => z.string().trim().max(max).nullable().optional();
+/** The game plan's updatedAt as the caller last saw it: the write is refused (409) if it has changed since. */
+const expectedUpdatedAt = z.string().max(64).optional();
 const gamePlanStep = z.object({
   depth: z.number().int().min(0).max(MAX_DEPTH),
   or: z.boolean().optional(),
@@ -161,13 +165,31 @@ const gamePlanPatch = z.object({
   startRole: z.enum(ROLES).nullable().optional(),
   premise: optLine(1000),
   steps: z.array(gamePlanStep).max(MAX_STEPS).optional(),
+  expectedUpdatedAt,
 });
+const stepFields = {
+  techniqueId: z.number().int().nullable().optional(),
+  toPositionId: z.number().int().nullable().optional(),
+  toRole: z.enum(ROLES).nullable().optional(),
+  note: optLine(1000),
+  expectedUpdatedAt,
+};
+const stepAction = z.string().trim().min(1).max(300);
+const stepAdd = z.object({
+  relation: z.enum(['then', 'if', 'or']),
+  of: z.number().int().positive().optional(),
+  trigger: optLine(300),
+  action: stepAction,
+  ...stepFields,
+});
+const stepPatch = z.object({ trigger: optLine(300), action: stepAction.optional(), ...stepFields });
 const stepMove = z
   .object({
     to: z.enum(['up', 'down', 'first', 'last']).optional(),
     before: z.number().int().optional(),
     after: z.number().int().optional(),
     within: z.literal('choice').optional(),
+    expectedUpdatedAt,
   })
   .refine(m => [m.to, m.before, m.after].filter(v => v !== undefined).length === 1, {
     message: 'Say where to move it: to (up, down, first or last), before, or after.',
@@ -277,6 +299,35 @@ export function apiRouter(base: Ctx, requireAuth: RequestHandler): Router {
     }),
   );
 
+  // One step at a time: every other step keeps its id, and each change is one undo.
+  r.post(
+    '/api/v1/game-plans/:id/steps',
+    h(async (ctx, req, res): Promise<MessageResult & { gamePlan: GamePlanDetail; stepId: number }> => {
+      const gamePlanId = id.parse(req.params.id);
+      const b = stepAdd.parse(req.body);
+      const out = await addStep(ctx, gamePlanId, b);
+      res.status(201);
+      return { ...out, gamePlan: await loadGamePlan(ctx, gamePlanId) };
+    }),
+  );
+  r.patch(
+    '/api/v1/game-plans/:id/steps/:stepId',
+    h(async (ctx, req): Promise<MessageResult & { gamePlan: GamePlanDetail }> => {
+      const gamePlanId = id.parse(req.params.id);
+      const message = await updateStep(ctx, gamePlanId, id.parse(req.params.stepId), stepPatch.parse(req.body));
+      return { message, gamePlan: await loadGamePlan(ctx, gamePlanId) };
+    }),
+  );
+  r.delete(
+    '/api/v1/game-plans/:id/steps/:stepId',
+    h(async (ctx, req): Promise<MessageResult & { gamePlan: GamePlanDetail }> => {
+      const gamePlanId = id.parse(req.params.id);
+      // What the caller last saw, in the body or (for clients that send no body with DELETE) the query.
+      const expected = z.object({ expectedUpdatedAt }).parse({ ...req.query, ...(req.body as object | undefined) }).expectedUpdatedAt;
+      const message = await deleteStep(ctx, gamePlanId, id.parse(req.params.stepId), expected);
+      return { message, gamePlan: await loadGamePlan(ctx, gamePlanId) };
+    }),
+  );
   r.post(
     '/api/v1/game-plans/:id/steps/:stepId/move',
     h(async (ctx, req): Promise<MessageResult & { gamePlan: GamePlanDetail }> => {
@@ -599,6 +650,8 @@ export function apiErrors(err: unknown, _req: Request, res: Response, next: Next
     res.status(403).json({ error: 'forbidden', message: err.message });
   } else if (err instanceof NotFound) {
     res.status(404).json({ error: 'not_found', message: err.message });
+  } else if (err instanceof ConflictError) {
+    res.status(409).json({ error: 'conflict', message: err.message });
   } else if (err instanceof UserError) {
     res.status(400).json({ error: 'rejected', message: err.message });
   } else if ((err as { type?: string }).type === 'entity.parse.failed') {

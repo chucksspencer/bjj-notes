@@ -188,6 +188,14 @@ $10 a month; the next deploy puts it back to 0 unless `infra/gcp-deploy.sh` is c
   into the description (migration 015), and the column was dropped in 019; undo entries from before ignore it.
   A rank is unique per person (`game_plans_user_rank`, checked at commit), so anything that writes ranks runs
   in a transaction (`ctx.db.tx`).
+- **Steps are slots and options** (migration 020). Under one parent, `ordinal` is the slot and `option` the
+  alternative within it (0 = plan A, which carries the slot's trigger); before, an alternative was a flag on the
+  row after its plan A, which nothing enforced and four places worked out separately. The database now enforces
+  the shape (`game_plan_steps_slot_option`, checked at commit, plus checks), one module works it out
+  (`src/shared/steps.ts`), and the web app saves one step at a time, so step ids are stable; a whole-outline save
+  (Claude, "Describe it") still replaces them all. A step write that says what it last saw (`expectedUpdatedAt`)
+  is refused with 409 if the game plan changed since, instead of the last writer silently winning. Undo entries
+  that carry steps from before 020 are refused, not translated.
 - **Renames go all the way down** (tables, columns, constraints, routes, MCP tools), with no compatibility
   layers: there's one person using the app, and the iPhone app ships alongside the server. Undo entries saved
   under an op's old name are refused ("saved by an older version of the app"), not translated.

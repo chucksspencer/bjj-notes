@@ -192,18 +192,14 @@ export interface GamePlanView extends GamePlanRef {
   lastNoteOn: string | null;
 }
 
-/** One step of a game plan, with what follows it. */
+/**
+ * One step of a game plan: one option of its slot, with what follows it. See `src/shared/steps.ts` for the
+ * structure and the functions that walk it.
+ */
 export interface GamePlanStep {
   id: number;
-  /**
-   * True when this is an alternative to the step before it in the same list ("or": plan B, plan C, in order
-   * of preference). It answers the same reaction, so it has no trigger of its own. The step and its
-   * alternatives are siblings, each a branch: what comes after each is its children. A step after them in the
-   * same list follows whichever was used.
-   */
-  or: boolean;
-  /** The reaction that leads here ("they post the far leg"); null for "then". */
-  trigger: string | null;
+  /** Its place in its slot: 0 is plan A, 1 is plan B, and so on, in order of preference. */
+  option: number;
   /** What to do, as said ("octopus sweeps", "go to deep half"). */
   action: string;
   /** The technique card it is, when it is one. */
@@ -215,15 +211,34 @@ export interface GamePlanStep {
   note: string | null;
   /** Other game plans that start where this step leaves you. */
   continuesIn: GamePlanRef[];
-  children: GamePlanStep[];
+  /** What follows this option, in order. */
+  slots: GamePlanSlot[];
+}
+
+/**
+ * A point in a game plan where one thing is done: a choice between its options (usually just one). The next slot
+ * in the same list follows once the choice is resolved, whichever option was used.
+ */
+export interface GamePlanSlot {
+  /** Its place in its list (1 = first). */
+  ordinal: number;
+  /** The reaction that leads here ("they post the far leg"): an "if they…" branch. Null for "then". */
+  trigger: string | null;
+  /** Plan A, then plan B, and so on. Never empty. */
+  options: GamePlanStep[];
 }
 
 /** One game plan's page. */
 export interface GamePlanDetail extends GamePlanView {
   /** ISO 8601 */
   createdAt: string;
-  /** The main line, in order. */
-  steps: GamePlanStep[];
+  /**
+   * When it or its steps last changed (ISO 8601). Send it back as `expectedUpdatedAt` with a step write, and the
+   * write is refused (409) if the game plan changed somewhere else in between.
+   */
+  updatedAt: string;
+  /** The main line, in order: each slot a step, or a choice between alternatives. */
+  steps: GamePlanSlot[];
   /** Linked notes, newest first. */
   notes: NoteView[];
   /** The newest notes on its techniques that aren't linked to it yet. */
@@ -234,7 +249,7 @@ export interface GamePlanDetail extends GamePlanView {
   history: { at: string; event: FocusEvent; toRank: number | null }[];
 }
 
-/** One step to save. Steps are flat, in reading order; depth says where each one hangs. */
+/** One step of a whole outline to save. Steps are flat, in reading order; depth says where each one hangs. */
 export interface GamePlanStepInput {
   /** 0 = main line; 1 = a branch off the nearest step above it at depth 0; and so on. */
   depth: number;
@@ -277,23 +292,53 @@ export interface GamePlanPatch {
   startPositionId?: number | null;
   startRole?: Role | null;
   premise?: string | null;
-  /** Replaces all the steps. */
+  /** Replaces all the steps (what "Describe it" saves). To change one step, use the step endpoints. */
   steps?: GamePlanStepInput[];
+  /** The game plan's `updatedAt` as last seen: if it has changed since, nothing is saved (409). */
+  expectedUpdatedAt?: string;
+}
+
+/** A step's own fields, as the step endpoints take them. */
+export interface StepFields {
+  action: string;
+  techniqueId?: number | null;
+  toPositionId?: number | null;
+  toRole?: Role | null;
+  note?: string | null;
 }
 
 /**
- * Moves a step among the steps under the same parent. A step and its alternatives ("or": plan A, B, C) are a
- * choice, and move together; with `within: 'choice'`, the step moves among its alternatives instead, changing
- * which is plan A. Give one of `to`, `before` or `after`.
+ * One step to add. `then` and `if` make a new slot: under the step `of`, after what's there, or at the end of the
+ * main line without `of`. `if` needs a trigger (the reaction); `then` has none. `or` makes one more option in
+ * the slot of the step `of`, after the ones it has; it answers the same reaction, so it takes no trigger.
+ */
+export interface StepAdd extends StepFields {
+  relation: 'then' | 'if' | 'or';
+  of?: number;
+  trigger?: string | null;
+  expectedUpdatedAt?: string;
+}
+
+/** Changes to one step; leave out what shouldn't change. The trigger is the slot's, so only plan A can change it. */
+export interface StepPatch extends Partial<StepFields> {
+  trigger?: string | null;
+  expectedUpdatedAt?: string;
+}
+
+/**
+ * Moves a step's slot among the slots under the same parent: the step and its alternatives ("or": plan A, B, C)
+ * move together. With `within: 'choice'`, the step moves among the options of its slot instead, changing which
+ * is plan A. Give one of `to`, `before` or `after`.
  */
 export interface StepMove {
   /** up and down: one place; first and last: to the end. */
   to?: 'up' | 'down' | 'first' | 'last';
-  /** Just before this step's choice (a step under the same parent). */
+  /** Just before this step's slot (a step under the same parent). */
   before?: number;
-  /** Just after this step's choice. */
+  /** Just after this step's slot. */
   after?: number;
   within?: 'choice';
+  expectedUpdatedAt?: string;
 }
 
 /** Links to add to or remove from a game plan. */

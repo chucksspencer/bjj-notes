@@ -1,4 +1,4 @@
-import { QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { QueryClient, useIsFetching, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AccountView,
   ApiTokenView,
@@ -27,7 +27,9 @@ import type {
   SessionInfo,
   SessionView,
   Status,
+  StepAdd,
   StepMove,
+  StepPatch,
   TechniqueListItem,
   TechniquePatch,
   TechniqueType,
@@ -180,12 +182,24 @@ export function useCreateGamePlan() {
   });
 }
 
-/** Change a game plan's fields, or (with steps) all its steps. */
+/**
+ * A write said the game plan changed somewhere else (409): nothing was saved, so fetch it again. The message is
+ * the caller's to show.
+ */
+function refetchIfChanged(qc: ReturnType<typeof useQueryClient>, err: unknown, gamePlanId: number) {
+  if (err instanceof ApiError && err.status === 409) void qc.invalidateQueries({ queryKey: keys.gamePlan(gamePlanId) });
+}
+
+/** Whether a game plan's page is being fetched again: what's on screen may be about to change. */
+export const useGamePlanFetching = (id: number) => useIsFetching({ queryKey: keys.gamePlan(id) }) > 0;
+
+/** Change a game plan's fields, or (with steps) replace all its steps with an outline. */
 export function useEditGamePlan() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...patch }: GamePlanPatch & { id: number }) => request<MessageResult & { gamePlan: GamePlanDetail }>('PATCH', `/api/v1/game-plans/${id}`, patch),
     onSuccess: r => afterGamePlanWrite(qc, r.gamePlan),
+    onError: (err, v) => refetchIfChanged(qc, err, v.id),
   });
 }
 
@@ -210,6 +224,39 @@ export function useLinkGamePlan() {
   });
 }
 
+/** Adds one step to a game plan: after a step ("then", "if they…"), beside it ("or"), or at the end of the main line. */
+export function useAddStep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ gamePlanId, ...step }: StepAdd & { gamePlanId: number }) =>
+      request<MessageResult & { gamePlan: GamePlanDetail; stepId: number }>('POST', `/api/v1/game-plans/${gamePlanId}/steps`, step),
+    onSuccess: r => afterGamePlanWrite(qc, r.gamePlan),
+    onError: (err, v) => refetchIfChanged(qc, err, v.gamePlanId),
+  });
+}
+
+/** Changes one step. */
+export function useUpdateStep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ gamePlanId, stepId, ...patch }: StepPatch & { gamePlanId: number; stepId: number }) =>
+      request<MessageResult & { gamePlan: GamePlanDetail }>('PATCH', `/api/v1/game-plans/${gamePlanId}/steps/${stepId}`, patch),
+    onSuccess: r => afterGamePlanWrite(qc, r.gamePlan),
+    onError: (err, v) => refetchIfChanged(qc, err, v.gamePlanId),
+  });
+}
+
+/** Deletes one step and everything under it. */
+export function useDeleteStep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ gamePlanId, stepId, expectedUpdatedAt }: { gamePlanId: number; stepId: number; expectedUpdatedAt?: string }) =>
+      request<MessageResult & { gamePlan: GamePlanDetail }>('DELETE', `/api/v1/game-plans/${gamePlanId}/steps/${stepId}`, { expectedUpdatedAt }),
+    onSuccess: r => afterGamePlanWrite(qc, r.gamePlan),
+    onError: (err, v) => refetchIfChanged(qc, err, v.gamePlanId),
+  });
+}
+
 /** Moves one step among the steps next to it, or among its alternatives. */
 export function useMoveStep() {
   const qc = useQueryClient();
@@ -217,6 +264,7 @@ export function useMoveStep() {
     mutationFn: ({ gamePlanId, stepId, ...move }: StepMove & { gamePlanId: number; stepId: number }) =>
       request<MessageResult & { gamePlan: GamePlanDetail }>('POST', `/api/v1/game-plans/${gamePlanId}/steps/${stepId}/move`, move),
     onSuccess: r => afterGamePlanWrite(qc, r.gamePlan),
+    onError: (err, v) => refetchIfChanged(qc, err, v.gamePlanId),
   });
 }
 

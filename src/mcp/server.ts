@@ -10,12 +10,11 @@ import {
   getFocus,
   getGamePlan,
   listGamePlans,
-  MAX_DEPTH,
-  MAX_STEPS,
-  moveStepByName,
   saveGamePlan,
   updateFocus,
 } from '../services/gamePlans.js';
+import { moveStepByName } from '../services/steps.js';
+import { MAX_DEPTH, MAX_STEPS } from '../shared/steps.js';
 import { clearStars } from '../services/marks.js';
 import { addNote, fileNote, getInbox, updateNote } from '../services/notes.js';
 import { logSession } from '../services/sessions.js';
