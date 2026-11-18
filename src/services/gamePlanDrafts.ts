@@ -9,6 +9,8 @@ import { MAX_DEPTH, MAX_STEPS } from '../shared/steps.js';
 import { resolveStepNames, type NamedStepInput } from './steps.js';
 import type { Ctx } from './context.js';
 import { UserError } from './errors.js';
+import { positionNames as visiblePositionNames } from './positions.js';
+import { visiblePosition } from './views/sql.js';
 import { ROLES } from './vocab.js';
 
 /** What Claude makes of a described game plan, before names are matched to cards and positions. */
@@ -108,7 +110,7 @@ export async function draftGamePlan(ctx: Ctx, text: string): Promise<GamePlanDra
   const techniques = (
     await q.query<{ name: string; aliases: string[] }>('select name, aliases from techniques where user_id = $1 order by name', [uid(q)])
   ).rows.map(r => (r.aliases.length ? `${r.name} (also: ${r.aliases.join(', ')})` : r.name));
-  const positions = (await q.query<{ name: string }>('select name from positions order by name')).rows.map(r => r.name);
+  const positions = await visiblePositionNames(q);
   let drafted: DraftedGamePlan;
   try {
     drafted = await ctx.gamePlanDrafter(text, { techniques, positions });
@@ -155,7 +157,9 @@ export async function draftGamePlan(ctx: Ctx, text: string): Promise<GamePlanDra
   }
   const pIds = [...resolved.map(s => s.to_position_id), startPositionId].filter((p): p is number => p !== null);
   if (pIds.length) {
-    for (const r of (await q.query<{ id: number; name: string }>('select id, name from positions where id = any($1::int[])', [pIds])).rows) {
+    for (const r of (
+      await q.query<{ id: number; name: string }>(`select p.id, p.name from positions p where p.id = any($1::int[]) and ${visiblePosition('p', '$2')}`, [pIds, uid(q)])
+    ).rows) {
       positionNames.set(r.id, r.name);
     }
   }

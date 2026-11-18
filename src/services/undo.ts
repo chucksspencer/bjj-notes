@@ -4,6 +4,7 @@ import { uid, type Db, type Queryable } from '../db.js';
 import type { EdgeSnapshot, LinkSnapshot, SessionChange, SessionSnapshot, StepSnapshot, UndoOp } from './activity.js';
 import { UserError } from './errors.js';
 import { renumberFocus } from './focus.js';
+import { restoreDeletedPosition, restorePosition, undoCreatePosition } from './positions.js';
 
 /** Puts a position edge back, if its technique is still there. */
 async function insertEdge(q: Queryable, e: EdgeSnapshot) {
@@ -257,6 +258,15 @@ async function apply(q: Queryable, op: UndoOp): Promise<void> {
       await renumberFocus(q);
       return;
     }
+    case 'delete_position':
+      await undoCreatePosition(q, op.positionId);
+      return;
+    case 'restore_position':
+      await restorePosition(q, op.before);
+      return;
+    case 'restore_deleted_position':
+      await restoreDeletedPosition(q, op.row);
+      return;
     case 'refile_note':
       await q.query('delete from note_techniques where note_id = $1 and user_id = $2', [op.noteId, me]);
       for (const t of op.techniqueIds) await insertNoteTechnique(q, op.noteId, t);
@@ -339,6 +349,9 @@ const UNDO_KINDS: Record<UndoOp['kind'], true> = {
   restore_game_plan: true,
   restore_deleted_game_plan: true,
   restore_marks: true,
+  delete_position: true,
+  restore_position: true,
+  restore_deleted_position: true,
   batch: true,
 };
 

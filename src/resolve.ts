@@ -52,6 +52,7 @@ export async function resolveTechnique(q: Queryable, name: string): Promise<Reso
   );
 }
 
+/** Positions match on their name, slug or an alias, among the ones the person can see: the starter ones and their own. */
 export async function resolvePosition(q: Queryable, name: string): Promise<Resolution> {
   return decide(
     await rank(
@@ -60,10 +61,11 @@ export async function resolvePosition(q: Queryable, name: string): Promise<Resol
               max(bjj_name_score(c, $1)) as score,
               bool_or(bjj_norm(c) = bjj_norm($1)) as exact
        from positions p, unnest(array_prepend(p.name, array_prepend(p.slug, p.aliases))) as c
-       group by p.id, p.name
-       order by exact desc, score desc
+       where p.user_id is null or p.user_id = $2
+       group by p.id, p.name, p.user_id
+       order by exact desc, score desc, p.user_id nulls last
        limit 5`,
-      [name],
+      [name, uid(q)],
     ),
   );
 }

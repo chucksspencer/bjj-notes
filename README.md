@@ -10,7 +10,7 @@ It is one small Node service with three front doors:
 | `/api/capture`, `/api/focus` | Siri Shortcuts ("Hey Siri, BJJ note") | Your bearer token |
 | `/` | The web app: Lab and focus list, technique library, notes, game plans and positions (Game), inbox | Your email and password (stays signed in 90 days) |
 
-The database starts with ~30 positions (shared by everyone) and, for the owner, the working list from 2026-10-09 (Baratoplata through ankle lock adjustments) as game plans on the focus list, each linked to a technique card. People you invite start with an empty notebook of their own.
+The database starts with 32 starter positions (shared by everyone; each person can add their own on top, which only they see) and, for the owner, the working list from 2026-10-09 (Baratoplata through ankle lock adjustments) as game plans on the focus list, each linked to a technique card. People you invite start with an empty notebook of their own.
 
 ## Set it up from your phone
 
@@ -65,7 +65,7 @@ From then on, every push to `main` tests, builds and deploys. The deploy copies 
 
 On claude.ai in a browser, add a **custom connector** in settings with the connector URL. Claude opens a sign-in page from this server; enter your email and your password (`OWNER_PASSWORD`, until you change it). (The first email you sign in with becomes yours; you can change it on the Account page.) Connectors added on the web also show up in the iOS app. Try it in voice mode first: that's the main thing this first version needs to prove.
 
-Try: *"What's on my BJJ focus list?"*, *"Add a note to ghost escape: turn to the knees before the hips"*, *"Move body lock passing to the top of my focus"*, *"Add a note to my half guard focus: frame on the hip before the underhook"*, *"What do I have from deep half bottom?"*, *"From bottom side, if they have the underhook and crossface, John Wayne sweep to make them post, then shuck; if they post the far leg go deep half, if they base back go octopus. Save that as a system."*, *"Take ankle locks off my focus."*, *"Undo that."*
+Try: *"What's on my BJJ focus list?"*, *"Add a note to ghost escape: turn to the knees before the hips"*, *"Move body lock passing to the top of my focus"*, *"Add a note to my half guard focus: frame on the hip before the underhook"*, *"What do I have from deep half bottom?"*, *"From bottom side, if they have the underhook and crossface, John Wayne sweep to make them post, then shuck; if they post the far leg go deep half, if they base back go octopus. Save that as a system."*, *"Take ankle locks off my focus."*, *"Add rubber guard as a guard position, also called mission control."*, *"Undo that."*
 
 ### 7. The web app on your phone
 
@@ -76,7 +76,7 @@ Open the server's address in Safari and sign in with your email and your passwor
 - **Library**: every technique, searchable by name, alias or detail (typos are fine), filterable by type and top/bottom. The search finds notes too, and, with search by meaning on, a phrase like *how do I stop the knee cut* finds notes and cards about it even when they use other words. The black bar on each row is its rank bar: one stripe for learning, two for drilling, three for hitting it live, four for reliable.
 - **Technique card**: tap the belt's stripes to change status; positions, key details, common mistakes, related techniques and notes, with YouTube videos that play from the saved timestamp.
 - **+**: a new note from anywhere. Notes without a technique land in the **Inbox** to file later.
-- **Game**: your game plans by where they start, then the positions you have something from (the rest fold away). A position shows the game plans that start there, what you have from it top or bottom, the ways in, and the gaps.
+- **Game**: your game plans by where they start, then the positions you have something from, and your own (the rest fold away). A position shows the game plans that start there, what you have from it top or bottom, the ways in, and the gaps. **Add a position** adds one of your own (a name, its kind, other names it goes by, a description) when the starter list doesn't have it; its page has *Edit position* and *Delete position* (refused while a technique, a game plan or a step uses it, saying which). A name another position already goes by is refused, so you use that one. The starter positions can't be changed.
 - **Account** (the person icon at the top of Focus): your name and belt (Claude knows both), email, password, Siri Shortcut tokens and, for the owner, People. The app wears your belt's colours, in light and dark mode; a black belt's rank bar is red. Signed out, and in its icon, the app is a black belt.
 
 Every change shows an **Undo** button, the same undo Claude uses when you say "undo that". The button undoes the change it was shown for, and only while nothing else has been saved since; if something has, it says so and changes nothing.
@@ -124,7 +124,7 @@ Anywhere else, copy the link, tap **+** in the web app and paste it into "Add a 
 ## More people
 
 Everyone has their own notebook: techniques, notes, sessions, sources, the focus list, the Lab, photos and
-undo history. Only the starter positions are shared. Nobody, the owner included, can read anyone else's notes.
+undo history, and positions they add. Only the starter positions are shared. Nobody, the owner included, can read anyone else's notes.
 
 - **Inviting.** Account → People → **Invite**, with their belt. You get a one-time link (good for 7 days) to send
   however you like. They open it, pick their email and password, and land in an empty notebook in their belt's
@@ -219,9 +219,9 @@ src/
                      routes in api/; handler.ts wraps each one), account and invites, static hosting
   shared/api.ts      types shared by the JSON API and the web app
   shared/steps.ts    a game plan's steps as slots and options: the one place that structure is worked out (server and web app)
-  mcp/server.ts      the 12 MCP tools and the instructions Claude sees
+  mcp/server.ts      the 19 MCP tools and the instructions Claude sees
   services/          notes, techniques, game plans (gamePlans.ts, gamePlanLinks.ts) and focus (focus.ts), their steps (steps.ts),
-                     "Describe it" drafting, search/positions/review, the undo log (activity.ts records, undo.ts reverses);
+                     "Describe it" drafting, search/positions/review, your own positions (positions.ts), the undo log (activity.ts records, undo.ts reverses);
                      views/ is the read side, one file per kind of page; semantic.ts is search by meaning
   resolve.ts         fuzzy name matching tuned for voice transcription
   auth/              OAuth server (dynamic registration, PKCE, rotating refresh tokens); users, passwords, invites, Siri tokens
@@ -234,7 +234,7 @@ test/                end-to-end tests over HTTP, one file per topic (OAuth, MCP 
 docs/operations.md   running it: what's where, settings, what expires, rollbacks, restores, fixing the usual problems
 ```
 
-**Data model.** `users` (the owner and everyone invited, each with a belt) · `invites` (join and password-reset links) · `api_tokens` (Siri Shortcuts) · `positions` (with aliases like "100 kilos"; shared) · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, `unplaced` when a technique it named couldn't be matched; whether it's in the inbox is worked out, not stored: not To try, and either nothing files it or it's `unplaced`) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `game_plans` (a name, aliases, description, where it starts (position and role), its premise, and a rank while on focus, one game plan per rank) + `game_plan_steps` (a tree of steps, each with what to do, an optional card and resulting position; under one parent `ordinal` is the slot and `option` the alternative within it, 0 being plan A, which carries the slot's trigger; see [docs/game-plans.md](docs/game-plans.md)) + `game_plan_techniques` (cards someone linked; the cards its steps use are on it through them, and the `game_plan_cards` view reads both, saying which) + `game_plan_notes` (notes filed under it) + `focus_events` (every time it went on, moved or came off, for focus over time) · `activity_log` (powers `undo_last`). Every notebook table, `technique_edges` and `focus_events` included, has a `user_id`; each request reads and writes only its signed-in user's rows (the handle services get carries the user, and a query without one throws), and composite foreign keys mean a row can only ever point at the same person's notes, techniques, game plans, sessions and sources.
+**Data model.** `users` (the owner and everyone invited, each with a belt) · `invites` (join and password-reset links) · `api_tokens` (Siri Shortcuts) · `positions` (with aliases like "100 kilos"; the starter ones have no `user_id` and are shared and read-only, changed only by migration; ones someone adds have theirs, and only they see and use them; a slug and name are unique among what each person sees) · `techniques` (type, role, status, details, mistakes, aliases) · `technique_edges` (from position/role → to position/role) · `technique_links` (chain, counter, variation, setup) · `notes` (dated, kind, where it came from, optional source and video timestamp, `unplaced` when a technique it named couldn't be matched; whether it's in the inbox is worked out, not stored: not To try, and either nothing files it or it's `unplaced`) · `sources` · `sessions` (a class, seminar, open mat… with optional event name, instructor and location: where notes came from) · `game_plans` (a name, aliases, description, where it starts (position and role), its premise, and a rank while on focus, one game plan per rank) + `game_plan_steps` (a tree of steps, each with what to do, an optional card and resulting position; under one parent `ordinal` is the slot and `option` the alternative within it, 0 being plan A, which carries the slot's trigger; see [docs/game-plans.md](docs/game-plans.md)) + `game_plan_techniques` (cards someone linked; the cards its steps use are on it through them, and the `game_plan_cards` view reads both, saying which) + `game_plan_notes` (notes filed under it) + `focus_events` (every time it went on, moved or came off, for focus over time) · `activity_log` (powers `undo_last`). Every notebook table, `technique_edges` and `focus_events` included, has a `user_id`; each request reads and writes only its signed-in user's rows (the handle services get carries the user, and a query without one throws), and composite foreign keys mean a row can only ever point at the same person's notes, techniques, game plans, sessions and sources. Positions can't use a composite key (the starter ones have no owner), so the code checks every position it's given, and constraint triggers on `technique_edges`, `game_plans` and `game_plan_steps` refuse a position that is neither a starter one nor the row owner's.
 
 **Name matching.** Voice transcription mangles names, so lookups combine trigram similarity, edit distance and word matching: "barra toe plata" finds Baratoplata, "ghost" finds Ghost escape, but "omoplata" is not mistaken for Baratoplata. Exact names and aliases always win; uncertain matches are reported back rather than guessed.
 
@@ -256,6 +256,8 @@ docs/operations.md   running it: what's where, settings, what expires, rollbacks
 | `get_game_plan` | One game plan, its steps read as if/then with each step's status and hand-offs; or every game plan by where it starts |
 | `save_game_plan` | Create or change a game plan: name, aliases, description, techniques, steps (a flat outline with depths; `or` marks an alternative to the step above it at that depth), on or off focus; or delete it. One undo takes it all back. `move` reorders one step by name ("move the kimura before the guillotine", "make the knee cut plan A") |
 | `get_position` | What you have from a position, what leads into it, and the gaps |
+| `save_position` | Add a position of your own (with a category), or change one of yours: rename, category, aliases, description. Starter positions can't be changed, and names another position goes by are refused |
+| `delete_position` | Delete one of your own positions, unless something uses it (it says what) |
 | `review` | Last N days: sessions, notes, most-noted techniques, quiet game plans on your focus |
 | `undo_last` | Reverse the most recent change |
 

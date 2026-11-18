@@ -7,6 +7,7 @@ import { fromOutline, groupSlots, lowerFirst, MAX_DEPTH, MAX_STEPS, outlineProbl
 import { logActivity, STEP_SNAPSHOT_SQL, type GamePlanSnapshot, type StepSnapshot, type UndoOp } from './activity.js';
 import type { Ctx } from './context.js';
 import { ConflictError, NotFoundError, UserError } from './errors.js';
+import { usablePositionIds } from './positions.js';
 import { gamePlanView } from './views/gamePlans.js';
 import { capitalise, clean, plural } from './words.js';
 
@@ -75,13 +76,12 @@ export async function writeSteps(q: Queryable, gamePlanId: number, steps: Resolv
   await touch(q, gamePlanId);
 }
 
-/** The card and position a step names by id, kept only if they're there (and the card is yours). */
+/** The card and position a step names by id, kept only if they're there and yours (a position may also be a starter one). */
 async function ownRefs(q: Queryable, techniqueIds: number[], positionIds: number[]): Promise<{ techniques: Set<number>; positions: Set<number> }> {
   const techniques = techniqueIds.length
     ? (await q.query<{ id: number }>('select id from techniques where id = any($1::int[]) and user_id = $2', [techniqueIds, uid(q)])).rows.map(r => r.id)
     : [];
-  const positions = positionIds.length ? (await q.query<{ id: number }>('select id from positions where id = any($1::int[])', [positionIds])).rows.map(r => r.id) : [];
-  return { techniques: new Set(techniques), positions: new Set(positions) };
+  return { techniques: new Set(techniques), positions: await usablePositionIds(q, positionIds) };
 }
 
 const isId = (v: number | null | undefined): v is number => typeof v === 'number';

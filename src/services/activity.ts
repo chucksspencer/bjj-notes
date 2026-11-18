@@ -17,6 +17,16 @@ export interface TechniqueSnapshot {
   starred_at?: string | null;
 }
 
+/** One of someone's own positions, as stored. */
+export interface PositionSnapshot {
+  id: number;
+  slug: string;
+  name: string;
+  category: string;
+  aliases: string[];
+  description: string | null;
+}
+
 /** A game plan's place on the focus list. */
 export interface FocusSnapshot {
   id: number;
@@ -160,6 +170,12 @@ export type UndoOp =
     }
   /** Puts stars (or answered marks) back as they were after clearing several at once. */
   | { kind: 'restore_marks'; mark: 'starred' | 'answered'; notes: MarkSnapshot[]; techniques: MarkSnapshot[] }
+  /** Takes back a position someone added (refused if something uses it by then). */
+  | { kind: 'delete_position'; positionId: number }
+  /** Puts one of someone's own positions back as it was before an edit. */
+  | { kind: 'restore_position'; before: PositionSnapshot }
+  /** Recreates one of someone's own positions after it was deleted (nothing used it). */
+  | { kind: 'restore_deleted_position'; row: PositionSnapshot }
   /** Several writes made as one (e.g. deleting a selection); undone together, last first. */
   | { kind: 'batch'; ops: UndoOp[] };
 

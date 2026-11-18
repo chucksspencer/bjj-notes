@@ -1,8 +1,9 @@
-// Position views: the list of positions, and one position with the techniques from and into it.
+// Position views: the list of positions, and one position with the techniques from and into it. Someone sees the
+// starter positions and their own (visiblePosition); anyone else's are as good as not there.
 import type { GamePlanRef, PositionCategory, PositionListItem, PositionView, Role, TechniqueType, TechniqueView } from '../../shared/api.js';
 import { uid, type Queryable } from '../../db.js';
 import { EXPECTED_BY_CATEGORY } from '../vocab.js';
-import { GAME_PLAN_ORDER } from './sql.js';
+import { GAME_PLAN_ORDER, visiblePosition } from './sql.js';
 import { toEdge, type EdgeRow } from './techniques.js';
 
 export async function positionList(q: Queryable): Promise<PositionListItem[]> {
@@ -13,21 +14,31 @@ export async function positionList(q: Queryable): Promise<PositionListItem[]> {
     category: PositionCategory;
     aliases: string[];
     techniques: number;
+    custom: boolean;
   }>(
-    `select p.id, p.slug, p.name, p.category, p.aliases,
+    `select p.id, p.slug, p.name, p.category, p.aliases, p.user_id is not null as custom,
             (select count(distinct e.technique_id)::int from technique_edges e
               where e.user_id = $1 and (e.from_position_id = p.id or e.to_position_id = p.id)) as techniques
-     from positions p order by p.id`,
+     from positions p where ${visiblePosition('p', '$1')} order by p.id`,
     [uid(q)],
   );
-  return rows.map(r => ({ id: r.id, slug: r.slug, name: r.name, category: r.category, aliases: r.aliases, techniqueCount: r.techniques }));
+  return rows.map(r => ({
+    id: r.id,
+    slug: r.slug,
+    name: r.name,
+    category: r.category,
+    aliases: r.aliases,
+    techniqueCount: r.techniques,
+    custom: r.custom,
+  }));
 }
 
 export async function positionView(q: Queryable, positionId: number, role?: Role | null): Promise<PositionView | null> {
   const pos = (
-    await q.query<{ id: number; slug: string; name: string; category: PositionCategory; aliases: string[]; description: string | null }>(
-      'select id, slug, name, category, aliases, description from positions where id = $1',
-      [positionId],
+    await q.query<{ id: number; slug: string; name: string; category: PositionCategory; aliases: string[]; description: string | null; custom: boolean }>(
+      `select p.id, p.slug, p.name, p.category, p.aliases, p.description, p.user_id is not null as custom
+       from positions p where p.id = $1 and ${visiblePosition('p', '$2')}`,
+      [positionId, uid(q)],
     )
   ).rows[0];
   if (!pos) return null;

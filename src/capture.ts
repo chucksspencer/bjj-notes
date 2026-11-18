@@ -9,6 +9,7 @@ import { techniquesMentionedIn } from './resolve.js';
 import { userCtx, type Ctx } from './services/context.js';
 import { getFocus } from './services/focus.js';
 import { addNote, type AddNoteInput } from './services/notes.js';
+import { positionNames } from './services/positions.js';
 import { NOTE_KINDS, ROLES, SESSION_KINDS, SOURCE_KINDS, TECHNIQUE_TYPES } from './services/vocab.js';
 
 /** What the parser extracts from a dictated note. */
@@ -217,7 +218,7 @@ export async function captureNote(
         techniques: (
           await ctx.db.query<{ name: string }>('select name from techniques where user_id = $1 order by name', [uid(ctx.db)])
         ).rows.map(r => r.name),
-        positions: (await ctx.db.query<{ name: string }>('select name from positions order by name')).rows.map(r => r.name),
+        positions: await positionNames(ctx.db),
       };
       const s = await structurer(text, known);
       input = {

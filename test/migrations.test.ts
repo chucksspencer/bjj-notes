@@ -530,6 +530,36 @@ describe('022: derive the inbox and step cards', () => {
   });
 });
 
+describe('023: custom positions', () => {
+  const q = async <T = Record<string, unknown>>(sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows;
+
+  it('keeps the starter positions shared, with their ids and everything pointing at them', async () => {
+    await migrateUpTo('023_custom_positions.sql');
+    const owner = (await q<{ id: number }>('select id from users where is_owner'))[0]!.id;
+    const before = await q<{ id: number; slug: string }>('select id, slug from positions order by id');
+    expect(before).toHaveLength(32);
+    const plan = (await q<{ id: number }>("insert into game_plans (name, start_position_id, user_id) values ('Old plan', $1, $2) returning id", [before[3]!.id, owner]))[0]!.id;
+    await db.query("insert into game_plan_steps (game_plan_id, user_id, ordinal, action, to_position_id) values ($1, $2, 1, 'Old step', $3)", [plan, owner, before[4]!.id]);
+    const edges = await q('select technique_id, from_position_id, to_position_id from technique_edges order by id');
+    expect(edges.length).toBeGreaterThan(0); // the working list's, from 003
+
+    expect(await migrate(db, { through: '023_custom_positions.sql' })).toEqual(['023_custom_positions.sql']);
+    expect(await q('select id, slug from positions order by id')).toEqual(before);
+    expect(await q('select count(*)::int as c from positions where user_id is not null')).toEqual([{ c: 0 }]);
+    expect(await q('select technique_id, from_position_id, to_position_id from technique_edges order by id')).toEqual(edges);
+    expect(await q('select start_position_id from game_plans where id = $1', [plan])).toEqual([{ start_position_id: before[3]!.id }]);
+    expect(await q('select to_position_id from game_plan_steps where game_plan_id = $1', [plan])).toEqual([{ to_position_id: before[4]!.id }]);
+
+    // Slugs are unique per person now, the shared list counting as one.
+    const sam = (await q<{ id: number }>("insert into users (email, name) values ('sam@example.com', 'Sam') returning id"))[0]!.id;
+    await expect(db.query("insert into positions (slug, name, category) values ('mount', 'Mount again', 'pin')")).rejects.toThrow();
+    await db.query("insert into positions (slug, name, category, user_id) values ('worm-guard', 'Worm guard', 'guard', $1)", [sam]);
+    await db.query("insert into positions (slug, name, category, user_id) values ('worm-guard', 'Worm guard', 'guard', $1)", [owner]);
+    await expect(db.query("insert into positions (slug, name, category, user_id) values ('worm-guard', 'Worm', 'guard', $1)", [sam])).rejects.toThrow();
+    await expect(db.query("insert into positions (slug, name, category, user_id) values ('x', 'X', 'nowhere', $1)", [sam])).rejects.toThrow();
+  });
+});
+
 /** How undo entries snapshotted a note before 022. */
 const NOTE_SNAPSHOT_SQL_BEFORE_022 = `select id, body, raw_text, kind, observed_on::text as observed_on, session_id, source_id,
   source_timestamp, inbox, to_try, starred_at::text as starred_at, answered_at::text as answered_at, created_via,
