@@ -2,8 +2,8 @@
 import { uid } from '../db.js';
 import { logActivity, type MarkSnapshot } from './activity.js';
 import type { Ctx } from './context.js';
+import { plural } from './words.js';
 
-const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
 /**
  * Unstars techniques and notes: all of them, or only those starred more than `olderThanDays` days ago.

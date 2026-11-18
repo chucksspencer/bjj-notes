@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import express, { type NextFunction, type Request, type Response, type Router } from 'express';
+import express, { type NextFunction, type Request, type RequestHandler, type Response, type Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { sha256 } from '../auth/provider.js';
 import { getUser, signIn, TooManySignInsError, userForApiToken, type User } from '../auth/users.js';
@@ -10,6 +10,18 @@ const COOKIE = 'bjj_session';
 const SESSION_DAYS = 90;
 /** Mutating requests from the web app carry this header; a cross-site form or image can't set it. */
 export const CSRF_HEADER = 'x-bjj-app';
+
+/** Refuses (403) a request that doesn't carry the app's header, which another site's page can't send; true if it did. */
+function refusedWithoutAppHeader(req: Request, res: Response): boolean {
+  if (req.get(CSRF_HEADER) === '1') return false;
+  res.status(403).json({ error: 'csrf', message: 'Missing app header.' });
+  return true;
+}
+
+/** Middleware: only requests with the app's header get through. */
+export const requireAppHeader: RequestHandler = (req, res, next) => {
+  if (!refusedWithoutAppHeader(req, res)) next();
+};
 
 function readCookie(req: Request, name: string): string | undefined {
   const header = req.headers.cookie;
@@ -89,10 +101,7 @@ export function webAuth(opts: WebAuthOptions) {
       const token = readCookie(req, COOKIE);
       const userId = token ? await sessionUserId(token) : null;
       if (userId !== null) {
-        if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.get(CSRF_HEADER) !== '1') {
-          res.status(403).json({ error: 'csrf', message: 'Missing app header.' });
-          return;
-        }
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && refusedWithoutAppHeader(req, res)) return;
         res.locals.userId = userId;
         return next();
       }
@@ -126,12 +135,8 @@ export function webAuth(opts: WebAuthOptions) {
     }
   });
 
-  router.post('/api/v1/session', limiter, express.json({ limit: '4kb' }), async (req, res, next) => {
+  router.post('/api/v1/session', limiter, express.json({ limit: '4kb' }), requireAppHeader, async (req, res, next) => {
     try {
-      if (req.get(CSRF_HEADER) !== '1') {
-        res.status(403).json({ error: 'csrf', message: 'Missing app header.' });
-        return;
-      }
       const password = typeof req.body?.password === 'string' ? req.body.password : '';
       const email = typeof req.body?.email === 'string' ? req.body.email.slice(0, 254) : '';
       let user;
@@ -153,12 +158,8 @@ export function webAuth(opts: WebAuthOptions) {
     }
   });
 
-  router.delete('/api/v1/session', async (req, res, next) => {
+  router.delete('/api/v1/session', requireAppHeader, async (req, res, next) => {
     try {
-      if (req.get(CSRF_HEADER) !== '1') {
-        res.status(403).json({ error: 'csrf', message: 'Missing app header.' });
-        return;
-      }
       const token = readCookie(req, COOKIE);
       if (token) await db.query('delete from web_sessions where token_hash = $1', [sha256(token)]);
       cookie(res, '', 0);

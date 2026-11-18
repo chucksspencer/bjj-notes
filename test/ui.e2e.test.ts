@@ -159,6 +159,8 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Frame on the hip');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
+    // The toast from the step before can still be showing: the sheet closing is what says this write is on screen.
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
     await page.getByRole('list', { name: 'Steps' }).getByText('Frame on the hip').waitFor();
 
     // A branch: what to do when they react.
@@ -168,6 +170,7 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Ghost escape');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
     await page.getByText('If crossface hard').waitFor();
 
     // An alternative: plan B for the first step, which can be made plan A.
@@ -175,6 +178,7 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Bridge and shrimp');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
     // Plan A and plan B side by side, each a branch with its own steps under it.
     const first = page.getByRole('list', { name: 'Steps' }).locator('> .step.numbered').first();
     const planAB = async () => first.locator('> .step-option > .step-line .step-do').allTextContents();
@@ -186,6 +190,7 @@ describe.runIf(run)('web app (end to end)', () => {
       await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill(action);
       await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
       await page.getByText('Step added').waitFor();
+      await page.getByRole('dialog').waitFor({ state: 'hidden' });
     };
     await add(1, 'Take the back');
     await add(0, 'Hold the hip');
@@ -194,6 +199,20 @@ describe.runIf(run)('web app (end to end)', () => {
     expect(await under(0)).toEqual(['Ghost escape', 'Hold the hip', 'Knee through']);
     expect(await under(1)).toEqual(['Take the back']);
     expect(await page.getByRole('list', { name: 'Steps' }).locator('> .step.numbered').count()).toBe(1);
+    // Editing one step saves that step only: every step keeps its id, and the others aren't drawn again.
+    const stepIds = () =>
+      page.locator('.step-option').evaluateAll(els => els.map(el => [el.querySelector('.step-do')!.textContent, (el as HTMLElement).dataset.stepId] as const));
+    const idsBefore = await stepIds();
+    expect(new Set(idsBefore.map(([, id]) => id)).size).toBe(6);
+    await page.locator('.step-option', { hasText: 'Frame on the hip' }).first().evaluate(el => ((el as HTMLElement & { kept?: boolean }).kept = true));
+    await page.getByRole('button', { name: 'Edit step: Take the back' }).click();
+    await page.getByRole('dialog').getByLabel('Why, or the cue (optional)').fill('Seat belt first');
+    await page.getByRole('dialog').getByLabel('Why, or the cue (optional)').press('Enter');
+    await page.getByText('Step saved').waitFor();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    await page.getByText('Seat belt first').waitFor();
+    expect(await stepIds()).toEqual(idsBefore);
+    expect(await page.locator('.step-option', { hasText: 'Frame on the hip' }).first().evaluate(el => (el as HTMLElement & { kept?: boolean }).kept)).toBe(true);
     await page.getByRole('button', { name: 'Edit step: Bridge and shrimp' }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Make this plan A' }).click();
     await page.getByText('Bridge and shrimp is now plan A.').waitFor();
@@ -216,10 +235,40 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByRole('dialog').getByRole('button', { name: 'Make this plan A' }).click();
     await page.getByText('Frame on the hip is now plan A.').waitFor();
 
+    // Meanwhile the game plan changes somewhere else (Claude, or another tab; here a direct API call). A save from
+    // this page, which hasn't seen that, changes nothing: it says so and shows the game plan as it is now.
+    const holdTheHip = (await stepIds()).find(([action]) => action === 'Hold the hip')![1];
+    const elsewhere = await page.evaluate(
+      async ([path, stepId]) => {
+        const res = await fetch(`/api/v1${path}/steps/${stepId}`, {
+          method: 'PATCH',
+          headers: { 'x-bjj-app': '1', 'content-type': 'application/json' },
+          body: JSON.stringify({ note: 'Made elsewhere' }),
+        });
+        return res.status;
+      },
+      [new URL(page.url()).pathname, holdTheHip] as const,
+    );
+    expect(elsewhere).toBe(200);
+    await page.getByRole('button', { name: 'Edit step: Take the back' }).click();
+    const cue = page.getByRole('dialog').getByLabel('Why, or the cue (optional)');
+    await cue.fill('Overwritten?');
+    await cue.press('Enter');
+    await page.getByText('This game plan changed somewhere else. Reload to see it.').waitFor();
+    await page.getByRole('list', { name: 'Steps' }).getByText('Made elsewhere').waitFor();
+    await page.getByRole('list', { name: 'Steps' }).getByText('Seat belt first').waitFor();
+    // Now that the page is up to date, the same sheet saves.
+    await cue.press('Enter');
+    await page.getByText('Step saved').waitFor();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    await page.getByRole('list', { name: 'Steps' }).getByText('Overwritten?').waitFor();
+    expect(await stepIds()).toEqual(idsBefore);
+
     await page.getByRole('button', { name: 'Add a step at the end' }).click();
     await page.getByRole('dialog').getByLabel('Do', { exact: true }).fill('Knee to elbow');
     await page.getByRole('dialog').getByRole('button', { name: 'Save step' }).click();
     await page.getByText('Step added').waitFor();
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
     const mainLine = page.getByRole('list', { name: 'Steps' }).locator('> .step.numbered > .step-option:first-of-type > .step-line .step-do');
     expect(await mainLine.allTextContents()).toEqual(['Frame on the hip', 'Knee to elbow']);
     expect(await page.getByRole('button', { name: 'Move Knee to elbow down' }).isDisabled()).toBe(true);
@@ -248,6 +297,31 @@ describe.runIf(run)('web app (end to end)', () => {
     // Put it back where it was, with Undo twice.
     await page.getByRole('button', { name: 'Undo' }).click();
     await page.getByText(/^Undid: add/).waitFor();
+  });
+
+  it('lists a card a step uses on the game plan, without offering to unlink it', async () => {
+    // A step with a card, added here straight through the API.
+    const path = new URL(page.url()).pathname;
+    const added = await page.evaluate(async path => {
+      const h = { 'x-bjj-app': '1', 'content-type': 'application/json' };
+      const plan = await (await fetch(`/api/v1${path}`, { headers: h })).json();
+      const cards = await (await fetch('/api/v1/techniques', { headers: h })).json();
+      const card = cards.find((t: { id: number }) => !plan.techniques.some((p: { id: number }) => p.id === t.id));
+      const res = await fetch(`/api/v1${path}/steps`, { method: 'POST', headers: h, body: JSON.stringify({ relation: 'then', action: card.name, techniqueId: card.id }) });
+      return { name: card.name as string, stepId: (await res.json()).stepId as number };
+    }, path);
+    await page.reload();
+    await page.locator('.row-split', { has: page.getByRole('heading', { name: 'Techniques' }) }).getByRole('button').click();
+    const sheet = page.getByRole('dialog');
+    await sheet.getByText(`Used in a step, so here while the step is: ${added.name}.`).waitFor();
+    expect(await sheet.getByRole('button', { name: `Remove ${added.name}` }).count()).toBe(0);
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    // Tidy up: the step goes, and the card with it.
+    const status = await page.evaluate(
+      async ([path, stepId]) => (await fetch(`/api/v1${path}/steps/${stepId}`, { method: 'DELETE', headers: { 'x-bjj-app': '1' } })).status,
+      [path, added.stepId] as const,
+    );
+    expect(status).toBe(200);
   });
 
   it('files an inbox note under a new technique', async () => {

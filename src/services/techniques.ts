@@ -6,7 +6,8 @@ import { logActivity, type EdgeSnapshot, type LinkSnapshot, type TechniqueSnapsh
 import type { Ctx } from './context.js';
 import type { Role, TechniqueType } from './vocab.js';
 import { UserError } from './errors.js';
-import { techniqueView } from './views.js';
+import { inboxWhere } from './views/notes.js';
+import { techniqueView } from './views/techniques.js';
 
 export interface EdgeInput {
   from?: string;
@@ -352,27 +353,23 @@ async function removeTechnique(q: Queryable, id: number): Promise<{ name: string
   ).rows.map(
     r => r.note_id,
   );
-  const gamePlanIds = (
+  // Game plans someone linked it to; the ones whose steps use it get it back with the steps.
+  const linkedGamePlanIds = (
     await q.query<{ game_plan_id: number }>('select game_plan_id from game_plan_techniques where technique_id = $1 and user_id = $2', [id, uid(q)])
   ).rows.map(r => r.game_plan_id);
   const stepIds = (await q.query<{ id: number }>('select id from game_plan_steps where technique_id = $1 and user_id = $2', [id, uid(q)])).rows.map(
     r => r.id,
   );
-  // Notes this was the only filing for go to the inbox; one filed under a game plan stays filed.
-  const orphaned = (
-    await q.query<{ id: number }>(
-      `select n.id from notes n where n.id = any($1::int[]) and n.user_id = $3 and not n.inbox
-         and not exists (select 1 from note_techniques x where x.note_id = n.id and x.technique_id <> $2)
-         and not exists (select 1 from game_plan_notes y where y.note_id = n.id)`,
-      [noteIds, id, uid(q)],
-    )
-  ).rows.map(r => r.id);
+  // Notes this was the only filing for land in the inbox (one filed under a game plan stays filed): counted, to say so.
+  const inInbox = async () =>
+    (await q.query<{ c: number }>(`select count(*)::int as c from notes n where n.id = any($1::int[]) and n.user_id = $2 and ${inboxWhere('n')}`, [noteIds, uid(q)]))
+      .rows[0]!.c;
+  const before = await inInbox();
   await q.query('delete from techniques where id = $1 and user_id = $2', [id, uid(q)]);
-  if (orphaned.length) await q.query('update notes set inbox = true where id = any($1::int[]) and user_id = $2', [orphaned, uid(q)]);
   return {
     name: row.name,
-    inboxed: orphaned.length,
-    undo: { kind: 'restore_deleted_technique', row, edges, links, noteIds, gamePlanIds, stepIds, inboxedNoteIds: orphaned },
+    inboxed: (await inInbox()) - before,
+    undo: { kind: 'restore_deleted_technique', row, edges, links, noteIds, linkedGamePlanIds, stepIds },
   };
 }
 

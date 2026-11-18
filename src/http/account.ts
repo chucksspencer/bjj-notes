@@ -32,26 +32,15 @@ import {
 import type { Ctx } from '../services/context.js';
 import { searchStatus } from '../services/semantic.js';
 import { ForbiddenError, NotFoundError, UserError } from '../services/errors.js';
-import { apiErrors } from './api.js';
-import { CSRF_HEADER, sessionHashOf, sessionInfo, userIdOf } from './auth.js';
+import { id } from './api/schemas.js';
+import { requireAppHeader as csrf, sessionHashOf, sessionInfo, userIdOf } from './auth.js';
+import { apiErrors, sendJson as h } from './handler.js';
 
-const id = z.coerce.number().int().positive();
 const token = z.string().trim().min(10).max(100);
 const optional = (max: number) => z.string().trim().max(max).nullable().optional();
 
 const toMe = (u: User): Me => ({ id: u.id, name: u.name, email: u.email, isOwner: u.isOwner, belt: u.belt });
 const belt = z.enum(BELTS);
-
-/** Wraps an async handler; the result is sent as JSON, errors go to the API error handler. */
-const h =
-  <T>(fn: (req: Request, res: Response) => Promise<T>): RequestHandler =>
-  (req, res, next) => {
-    fn(req, res)
-      .then(body => {
-        if (!res.headersSent) res.set('Cache-Control', 'no-store').json(body);
-      })
-      .catch(next);
-  };
 
 export interface AccountRouterOptions {
   base: Ctx;
@@ -89,13 +78,6 @@ export function accountRouter(opts: AccountRouterOptions): Router {
     const user = await me(res);
     if (!user.isOwner) throw new ForbiddenError('Only the owner can do that.');
     return user;
-  };
-  const csrf: RequestHandler = (req, res, next) => {
-    if (req.get(CSRF_HEADER) !== '1') {
-      res.status(403).json({ error: 'csrf', message: 'Missing app header.' });
-      return;
-    }
-    next();
   };
 
   // ---------- invite and reset links (no sign-in needed: the link is the permission) ----------

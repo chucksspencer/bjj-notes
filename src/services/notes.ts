@@ -9,7 +9,7 @@ import { today, type Ctx } from './context.js';
 import { findOrCreateSession, sessionById, type SessionDetails } from './sessions.js';
 import { createStub } from './techniques.js';
 import { UserError } from './errors.js';
-import { noteList } from './views.js';
+import { inboxWhere, noteList } from './views/notes.js';
 import { guessSourceKind, type NoteKind, type Role, type SourceKind, type TechniqueType } from './vocab.js';
 
 export interface SourceInput {
@@ -192,7 +192,7 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
     if (input.client_id) {
       const seen = (
         await q.query<{ id: number; inbox: boolean; to_try: boolean; names: string[] | null }>(
-          `select n.id, n.inbox, n.to_try,
+          `select n.id, ${inboxWhere('n')} as inbox, n.to_try,
                   (select array_agg(t.name order by t.name) from note_techniques nt join techniques t on t.id = nt.technique_id
                     where nt.note_id = n.id) as names
            from notes n where n.client_id = $1 and n.user_id = $2`,
@@ -236,10 +236,12 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
       if (r.match) gamePlans.push({ id: r.match.id, name: r.match.name });
       else gamePlanMiss = describeMiss('game plan', input.game_plan, r).replace(/\.$/, '');
     }
-    const inbox = !toTry && ((ids.size === 0 && gamePlans.length === 0) || unresolved.length > 0);
+    // A name that couldn't be placed keeps the note in the inbox even when something else files it.
+    const unplaced = !toTry && unresolved.length > 0;
+    const inbox = !toTry && (unplaced || (ids.size === 0 && gamePlans.length === 0));
 
     const { rows } = await q.query<{ id: number }>(
-      `insert into notes (body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, inbox, to_try, created_via, starred_at,
+      `insert into notes (body, raw_text, kind, observed_on, session_id, source_id, source_timestamp, unplaced, to_try, created_via, starred_at,
                           client_id, user_id)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, case when $11 then now() end, $12, $13) returning id`,
       [
@@ -250,7 +252,7 @@ export async function addNote(ctx: Ctx, input: AddNoteInput): Promise<AddNoteRes
         sessionId,
         sourceId,
         input.source?.timestamp ?? null,
-        inbox,
+        unplaced,
         toTry,
         input.via ?? 'mcp',
         input.starred === true,
@@ -307,7 +309,7 @@ export async function fileNote(
 ): Promise<string> {
   return ctx.db.tx(async q => {
     const note = (
-      await q.query<{ id: number; inbox: boolean; to_try: boolean }>('select id, inbox, to_try from notes where id = $1 and user_id = $2', [
+      await q.query<{ id: number; unplaced: boolean; to_try: boolean }>('select id, unplaced, to_try from notes where id = $1 and user_id = $2', [
         noteId,
         uid(q),
       ])
@@ -324,13 +326,13 @@ export async function fileNote(
         uid(q),
       ]);
     }
-    const total = new Set([...before, ...ids.keys()]).size;
-    const inbox = total === 0 || unresolved.length > 0;
-    await q.query('update notes set inbox = $2, to_try = false where id = $1 and user_id = $3', [noteId, inbox, uid(q)]);
+    await q.query('update notes set unplaced = $2, to_try = false where id = $1 and user_id = $3', [noteId, unresolved.length > 0, uid(q)]);
+    const inbox = (await q.query<{ inbox: boolean }>(`select ${inboxWhere('n')} as inbox from notes n where n.id = $1 and n.user_id = $2`, [noteId, uid(q)]))
+      .rows[0]!.inbox;
     await logActivity(q, 'file_note', `${note.to_try ? 'keeping' : 'filing'} note #${noteId}`, {
       kind: 'refile_note',
       noteId,
-      inbox: note.inbox,
+      unplaced: note.unplaced,
       toTry: note.to_try,
       techniqueIds: before,
       createdTechniqueIds: created.map(c => c.id),
@@ -350,7 +352,7 @@ export async function getInbox(ctx: Ctx, limit = 10, toTry = false): Promise<str
     : await noteList(ctx.db, { inbox: true, limit, oldestFirst: true });
   if (!rows.length) return toTry ? 'Nothing waiting to be tried.' : 'Inbox is empty.';
   const total = (
-    await ctx.db.query<{ c: number }>(`select count(*)::int as c from notes where user_id = $1 and ${toTry ? 'to_try' : 'inbox'}`, [
+    await ctx.db.query<{ c: number }>(`select count(*)::int as c from notes n where n.user_id = $1 and ${toTry ? 'n.to_try' : inboxWhere('n')}`, [
       uid(ctx.db),
     ])
   ).rows[0]!.c;
@@ -433,18 +435,12 @@ export async function updateNote(ctx: Ctx, id: number, input: UpdateNoteInput): 
       await q.query('delete from game_plan_notes where note_id = $1 and user_id = $2', [id, uid(q)]);
       await fileUnderGamePlans(q, id, (await ownGamePlans(q, input.game_plan_ids)).map(a => a.id));
     }
-    // A to-try note waits out of the inbox; otherwise a note with no technique and no game plan needs filing.
+    // Refiling it (techniques, game plans, on or off To try) settles any name that couldn't be placed; whether it's
+    // in the inbox then follows from what files it.
     const wasToTry = row.to_try ?? false;
     const toTry = input.to_try ?? wasToTry;
     if (input.technique_ids || fresh || input.game_plan_ids || toTry !== wasToTry) {
-      const count = (
-        await q.query<{ c: number }>(
-          `select (select count(*) from note_techniques where note_id = $1 and user_id = $2)
-                + (select count(*) from game_plan_notes where note_id = $1 and user_id = $2) as c`,
-          [id, uid(q)],
-        )
-      ).rows[0]!.c;
-      await q.query('update notes set inbox = $2, to_try = $3 where id = $1 and user_id = $4', [id, !toTry && Number(count) === 0, toTry, uid(q)]);
+      await q.query('update notes set unplaced = false, to_try = $2 where id = $1 and user_id = $3', [id, toTry, uid(q)]);
     }
     const wasStarred = !!row.starred_at;
     if (input.starred !== undefined && input.starred !== wasStarred) {
