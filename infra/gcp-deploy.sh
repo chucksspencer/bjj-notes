@@ -2,10 +2,12 @@
 # Deploys an image to Cloud Run. Run by GitHub Actions after it has authenticated to Google Cloud
 # (see .github/workflows/ci.yml); can also be run by hand in Cloud Shell with the same variables.
 #
-# Required: IMAGE (built image, by digest: ghcr.io/owner/bjj-notes@sha256:…, or tag), DATABASE_URL, OWNER_PASSWORD, API_TOKEN,
+# Required: IMAGE (built image, by digest: ghcr.io/owner/bjj-notes@sha256:…, or tag), DATABASE_URL,
 #           GCP_SERVICE_ACCOUNT (deploy account; gives the project id) or PROJECT_ID,
 #           GCP_WORKLOAD_IDENTITY_PROVIDER (gives the project number) or PROJECT_NUMBER
-# Optional: IMAGE_TAG (tag for the Artifact Registry copy, e.g. sha-abc), ANTHROPIC_API_KEY, PUBLIC_URL (custom domain),
+# Optional: OWNER_PASSWORD and API_TOKEN (the owner's first password and Siri token: needed for a first install,
+#           imported into the database once, ignored after that), IMAGE_TAG (tag for the Artifact Registry copy,
+#           e.g. sha-abc), ANTHROPIC_API_KEY, PUBLIC_URL (custom domain),
 #           TIME_ZONE, GCP_REGION, SERVICE, SHARE_SHORTCUT_URL (iCloud link to the shared "Save to BJJ Notes" shortcut),
 #           SEARCH_MODEL (the Claude model for search by meaning, or off)
 set -Eeuo pipefail
@@ -35,13 +37,17 @@ trim() { # pasted secrets often carry a stray newline or space, which would brea
 }
 
 missing=()
-for v in IMAGE DATABASE_URL OWNER_PASSWORD API_TOKEN; do
+for v in IMAGE DATABASE_URL; do
   [ -n "$(trim "${!v:-}")" ] || missing+=("$v")
 done
 [ ${#missing[@]} -eq 0 ] || fail "Missing GitHub secrets: ${missing[*]} (Settings → Secrets and variables → Actions)"
 [[ "$(trim "$DATABASE_URL")" =~ ^postgres(ql)?:// ]] || fail "DATABASE_URL should start with postgresql:// (the Neon connection string)"
-[ "$(trim "$OWNER_PASSWORD" | wc -c)" -ge 12 ] || fail "OWNER_PASSWORD must be at least 12 characters"
-[ "$(trim "$API_TOKEN" | wc -c)" -ge 32 ] || fail "API_TOKEN must be at least 32 characters"
+if [ -n "$(trim "${OWNER_PASSWORD:-}")" ]; then
+  [ "$(trim "$OWNER_PASSWORD" | wc -c)" -ge 12 ] || fail "OWNER_PASSWORD must be at least 12 characters"
+fi
+if [ -n "$(trim "${API_TOKEN:-}")" ]; then
+  [ "$(trim "$API_TOKEN" | wc -c)" -ge 32 ] || fail "API_TOKEN must be at least 32 characters"
+fi
 
 PROJECT_ID="${PROJECT_ID:-$(sed -E 's/^[^@]+@([^.]+)\.iam\.gserviceaccount\.com$/\1/' <<<"${GCP_SERVICE_ACCOUNT:-}")}"
 PROJECT_NUMBER="${PROJECT_NUMBER:-$(sed -nE 's#^projects/([0-9]+)/.*#\1#p' <<<"${GCP_WORKLOAD_IDENTITY_PROVIDER:-}")}"
@@ -81,9 +87,17 @@ sync_secret() {
   done
 }
 sync_secret database-url "$DATABASE_URL"
-sync_secret owner-password "$OWNER_PASSWORD"
-sync_secret api-token "$API_TOKEN"
-SECRETS="DATABASE_URL=database-url:latest,OWNER_PASSWORD=owner-password:latest,API_TOKEN=api-token:latest"
+SECRETS="DATABASE_URL=database-url:latest"
+# The owner's first password and Siri token: the server copies them into the database once and ignores
+# them afterwards, so they're passed on only while they're set (a first install, or a password recovery).
+if [ -n "$(trim "${OWNER_PASSWORD:-}")" ]; then
+  sync_secret owner-password "$OWNER_PASSWORD"
+  SECRETS="$SECRETS,OWNER_PASSWORD=owner-password:latest"
+fi
+if [ -n "$(trim "${API_TOKEN:-}")" ]; then
+  sync_secret api-token "$API_TOKEN"
+  SECRETS="$SECRETS,API_TOKEN=api-token:latest"
+fi
 if [ -n "$(trim "${ANTHROPIC_API_KEY:-}")" ]; then
   sync_secret anthropic-api-key "$ANTHROPIC_API_KEY"
   SECRETS="$SECRETS,ANTHROPIC_API_KEY=anthropic-api-key:latest"

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { buildApp } from '../src/app.js';
+import { importOwnerSecrets } from '../src/auth/users.js';
 import type { Structurer } from '../src/capture.js';
 import { loadConfig } from '../src/config.js';
 import { drafterFor } from '../src/services/gamePlanDrafts.js';
@@ -66,6 +67,8 @@ export async function startServer(
     TIME_ZONE: 'America/Chicago',
     ...env,
   });
+  // As src/server.ts does after migrating: the owner's first password and Siri token come from the settings, once.
+  await importOwnerSecrets(db, { ownerPassword: config.ownerPassword, apiToken: config.apiToken });
   const ctx: Ctx = { db, timeZone: config.timeZone, rewriter: rewriterFor(config), gamePlanDrafter: drafterFor(config) };
   http.on('request', buildApp({ ctx, config, structurer, webDir: webDir ?? '/nonexistent-web-dir' }));
   return {

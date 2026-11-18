@@ -15,6 +15,8 @@ const TOKEN_DAYS = 7;
 const CLIENT_DAYS = 7;
 /** Invites are pruned this many days after they were used or expired. */
 const INVITE_DAYS = 30;
+/** Wrong-password records (the sign-in limit only looks back 15 minutes) are pruned after this many days. */
+const SIGN_IN_FAILURE_DAYS = 1;
 /** How often the server runs housekeeping while it stays up (it also runs once at startup). */
 export const HOUSEKEEPING_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
@@ -70,5 +72,6 @@ export async function housekeep(db: Db): Promise<Record<string, number>> {
     'delete from invites where coalesce(used_at, expires_at) < now() - make_interval(days => $1)',
     [INVITE_DAYS],
   );
+  done.sign_in_failures = await count(db, 'delete from sign_in_failures where at < now() - make_interval(days => $1)', [SIGN_IN_FAILURE_DAYS]);
   return done;
 }

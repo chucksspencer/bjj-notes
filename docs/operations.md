@@ -28,8 +28,8 @@ workflow** so the deploy copies it to the server.
 | Secret | What it is | Changing it |
 | --- | --- | --- |
 | `DATABASE_URL` | Neon connection string | Reset the role's password in Neon, paste the new string, deploy. |
-| `OWNER_PASSWORD` | The owner's password | Deploy; then sign in again with your email and the new one. |
-| `API_TOKEN` | The owner's original Siri Shortcut token | Deploy, then update your Shortcuts. Tokens made on Account pages are separate. |
+| `OWNER_PASSWORD` | Optional after the first install. The owner's first password: copied (as a hash) into the owner's account at startup only if it has none, then ignored | Changing it does nothing. Change your password on the Account page; to recover a forgotten one, see below. Safe to delete once deployed. |
+| `API_TOKEN` | Optional after the first install. The owner's first Siri token: added once, at startup, to the owner's tokens as **Original Siri token**, then ignored | Changing it does nothing. Make or remove tokens on the Account page (removing the original sticks). Safe to delete once deployed. |
 | `ANTHROPIC_API_KEY` | Siri capture tidying and search by meaning | Make a new key in the Anthropic Console, deploy, delete the old key. |
 | `APPLE_TEAM_ID`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` | TestFlight uploads | A new App Store Connect API key; see ios/README.md. |
 
@@ -62,7 +62,8 @@ workflow** so the deploy copies it to the server.
   activity log entries older than 90 days (each person's newest 200 stay); photos and videos left without a note
   after 30 days, unless a live undo entry still needs them; sign-in codes expired a day ago; tokens expired 7 days
   ago; registered clients over 7 days old with no codes or tokens; browser sessions past their expiry; and invites
-  used or expired over 30 days ago. Notes and everything in a notebook are never touched.
+  used or expired over 30 days ago; and wrong-password records over a day old. Notes and everything in a notebook
+  are never touched.
 
 ## Things that expire
 
@@ -112,6 +113,28 @@ added since the backup is lost, so look at what's newer first.
 - Remove: People → ••• → **Remove**. Deletes their account and notebook at once; it can't be undone except by
   restoring a backup, which rewinds everyone.
 - iPhone app for them: the public TestFlight link (ios/README.md → Sharing it with other people).
+- Your own password: Account → Password, like anyone else's. It signs out Claude, Siri tokens (the original one
+  included) and your other browsers.
+
+**If you forget your password** (the owner's; anyone else gets a reset link from you). Nothing in the app does
+this, by design. In this order, so the server always has `OWNER_PASSWORD` when it starts with no password stored
+(it refuses to start otherwise, which would take the app down for everyone):
+1. GitHub → Settings → Secrets and variables → Actions: set `OWNER_PASSWORD` to a new password (12+ characters),
+   then **Actions → CI → Run workflow** on `main`. Nothing changes yet: you still have a stored password, so it's ignored.
+2. Neon console → SQL Editor, on the production branch: `update users set password_hash = null where is_owner;`
+   Until step 3, nobody can sign in as you (everyone else, and your existing sign-ins, keep working).
+3. **Actions → CI → Run workflow** again. On start the server stores the secret as your password (the log says
+   "Imported OWNER_PASSWORD as the owner's password").
+4. Sign in with it, change it on the Account page if you like, and delete the secret again.
+
+**Too many wrong passwords.** After 10 wrong passwords for one account in 15 minutes (counted in the
+`sign_in_failures` table, whichever address they come from), sign-in for that account says "Too many wrong
+passwords. Try again in a few minutes." without checking the password, until the oldest of those falls out of
+the window. A right password clears the count. On top of that, each address gets 10 wrong tries per 15 minutes,
+in memory (reset whenever the server restarts). The trade-off: anyone who knows an email can keep that account
+from signing in anew, a few minutes at a time; sessions already signed in, Claude and Siri tokens keep working.
+To let someone in at once: `delete from sign_in_failures where account = 'their@email';` (`'(owner)'` for the
+owner before they have an email).
 
 **Read the logs.** `gcloud run services logs read bjj-notes --region us-central1` (add `--limit 200`), or Cloud
 Console → Cloud Run → bjj-notes → Logs.
@@ -142,7 +165,11 @@ $10 a month; the next deploy puts it back to 0 unless `infra/gcp-deploy.sh` is c
 - **One small service, about $0 a month.** Node on Cloud Run with Neon's free Postgres. Fewer services are better:
   don't add a new vendor sign-up without a strong reason.
 - **People.** Invite-only, everyone's notebook separate down to the database's foreign keys, email and password.
-  No email sending: the owner makes reset links.
+  No email sending: the owner makes reset links. The owner is an ordinary account (since migration 021): password
+  hash and Siri tokens in the database like anyone's; `OWNER_PASSWORD` and `API_TOKEN` only bootstrap a first
+  install (or a password recovery) and are imported once at startup (`importOwnerSecrets` in `src/auth/users.ts`;
+  the token import is remembered in `app_state`). Wrong passwords are limited per account in the database as well as
+  per address in memory, accepting that someone who knows an email can hold up new sign-ins for it.
 - **Belts.** The owner picks a belt when inviting and people change their own; the app wears its colours. Signed
   out, and in the icon, it's a black belt with a red bar.
 - **Sharing without the iPhone app.** Android: the installed web app is a share target. iPhone: a shared iCloud

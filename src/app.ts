@@ -61,7 +61,7 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
       resource_name: 'BJJ Notes',
     });
   });
-  app.use(loginRouter(provider, ctx.db, config.ownerPassword));
+  app.use(loginRouter(provider, ctx.db));
 
   const bearer = requireBearerAuth({
     verifier: provider,
@@ -94,13 +94,11 @@ export function buildApp(opts: { ctx: Ctx; config: Config; structurer: Structure
     });
   });
 
-  app.use(captureRouter(ctx, config.apiToken, structurer));
+  app.use(captureRouter(ctx, structurer));
 
   // The web app: browser sign-in, its JSON API, and the built front end.
   const web = webAuth({
     db: ctx.db,
-    ownerPassword: config.ownerPassword,
-    apiToken: config.apiToken,
     secureCookies: config.publicUrl.protocol === 'https:',
   });
   app.use(web.router);
