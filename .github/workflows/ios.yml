@@ -155,11 +155,19 @@ jobs:
           EXPORT() {
             local log="$RUNNER_TEMP/export-$1.log"; shift
             if xcodebuild -exportArchive "$@" > "$log" 2>&1; then return 0; fi
-            # Xcode's own error lines first, then the distribution log's (skipping its raw API traffic).
+            local dist; dist=$(find "${TMPDIR:-/tmp}" -name 'IDEDistribution*.log' -newer "$ARCHIVE" 2>/dev/null)
+            # Xcode's own error lines first, then the distribution log's (skipping its raw API traffic and the
+            # provisioning checks it logs on every run, which only look like errors).
             { grep -hE '^(error|warning):|Error Domain=|NSLocalizedDescription|NSLocalizedRecoverySuggestion|EXPORT FAILED' "$log"
-              find "${TMPDIR:-/tmp}" -name 'IDEDistribution*.log' -newer "$ARCHIVE" 2>/dev/null \
-                | xargs grep -hE 'error|Error|fail|Fail' 2>/dev/null | grep -vE '^\s*"|developerservices|^\s*[{}\[\]],?\s*$'
-            } | sed 's/^[[:space:]]*//' | awk '!seen[$0]++' | head -9 | while IFS= read -r line; do echo "::error title=Export::${line:0:900}"; done
+              [ -n "$dist" ] && echo "$dist" | xargs grep -hE 'error|Error|fail|Fail' 2>/dev/null \
+                | grep -vE '^\s*"|developerservices|IDEProvisioningRepair|\[OPTIONAL\]|^\s*[{}\[\]],?\s*$'
+            } | sed 's/^[[:space:]]*//' | awk '!seen[$0]++' | head -9 | while IFS= read -r line; do echo "::error title=Export::${line:0:900}"; done || true
+            # What App Store Connect said, from that API traffic: the code, title and detail of each error it
+            # returned (a missing agreement, a key without access to the app...). "Error Downloading App
+            # Information" alone doesn't say which.
+            [ -n "$dist" ] && echo "$dist" | xargs grep -hE '"(code|title|detail)"[[:space:]]*:' 2>/dev/null \
+              | grep -viE 'token|authorization|bearer' | sed 's/^[[:space:]]*//' | awk '!seen[$0]++' | head -9 \
+              | while IFS= read -r line; do echo "::error title=App Store Connect::${line:0:900}"; done || true
             return 1
           }
 
