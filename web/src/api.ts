@@ -21,7 +21,9 @@ import type {
   NotePatch,
   NoteView,
   GamePlanDraft,
+  PositionCreateInput,
   PositionListItem,
+  PositionPatch,
   PositionView,
   Role,
   SessionInfo,
@@ -466,6 +468,33 @@ export const usePosition = (slug: string, role?: Role) =>
     queryFn: () => request<PositionView>('GET', `/api/v1/positions/${encodeURIComponent(slug)}${qs({ role })}`),
     placeholderData: prev => prev,
   });
+
+/** Adds a position of your own; everything that lists positions (the Game page, the pickers) shows it. */
+export function useCreatePosition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: PositionCreateInput) => request<PositionView>('POST', '/api/v1/positions', v),
+    onSuccess: () => invalidateAll(qc),
+  });
+}
+
+/** Changes one of your own positions; its slug changes with its name. */
+export function usePatchPosition(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: PositionPatch) => request<PositionView>('PATCH', `/api/v1/positions/${encodeURIComponent(slug)}`, v),
+    onSuccess: () => invalidateAll(qc),
+  });
+}
+
+/** Deletes one of your own positions; refused (with what uses it) while anything does. */
+export function useDeletePosition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (slug: string) => request<MessageResult>('DELETE', `/api/v1/positions/${encodeURIComponent(slug)}`),
+    onSuccess: () => invalidateAll(qc),
+  });
+}
 
 // ---------- undo ----------
 

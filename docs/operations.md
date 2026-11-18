@@ -205,6 +205,18 @@ $10 a month; the next deploy puts it back to 0 unless `infra/gcp-deploy.sh` is c
   plans or To try, or filing it under a game plan). A game plan's cards: `game_plan_techniques` holds only the
   links someone made, and the `game_plan_cards` view adds the cards its steps use. The cost is a subquery per read,
   which at a notebook's size doesn't matter; no new index.
+- **Custom positions are per person; the starter list is shared and changes only by migration** (migration 023).
+  A position with no `user_id` is a starter one: everyone sees it and nobody, the owner included, can change it from
+  the app or Claude. A position someone adds has their `user_id`, and only they see or use it: every read goes through
+  `visiblePosition` (`src/services/views/sql.ts`), and every write that takes a position by id checks it
+  (`assertUsablePosition`, `usablePositionIds` in `src/services/positions.ts`), so another person's position behaves
+  exactly like one that isn't there. Since the starter rows have no owner, a composite foreign key can't say this;
+  constraint triggers (`bjj_position_visible`) on `technique_edges`, `game_plans` and `game_plan_steps` refuse it in
+  the database too. Slugs are unique per owner, the shared list counting as one (`positions_user_slug`), and the code
+  keeps a person's names, aliases and slugs clear of the ones they can already see (compared as `bjj_norm` does), so a
+  name matches one position; to add another name for a starter position, there's no way but a migration. A position
+  that something uses can't be deleted (the refusal says what uses it). A migration that adds a starter position
+  should check people's own for its name first.
 - **Renames go all the way down** (tables, columns, constraints, routes, MCP tools), with no compatibility
   layers: there's one person using the app, and the iPhone app ships alongside the server. Undo entries saved
   under an op's old name are refused ("saved by an older version of the app"), not translated.

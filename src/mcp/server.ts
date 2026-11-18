@@ -10,6 +10,7 @@ import { moveStepByName } from '../services/steps.js';
 import { MAX_DEPTH, MAX_STEPS } from '../shared/steps.js';
 import { clearStars } from '../services/marks.js';
 import { addNote, fileNote, getInbox, updateNote } from '../services/notes.js';
+import { deletePositionByName, savePosition } from '../services/positions.js';
 import { logSession } from '../services/sessions.js';
 import { getTechnique, saveTechnique } from '../services/techniques.js';
 import {
@@ -17,6 +18,7 @@ import {
   GI,
   LINK_KINDS,
   NOTE_KINDS,
+  POSITION_CATEGORIES,
   ROLES,
   SESSION_KINDS,
   SOURCE_KINDS,
@@ -35,6 +37,7 @@ How to use it well:
 - When ${who} describes something learned or noticed, call add_note with the technique names it's about. Use new_techniques only for genuinely new techniques, with your best guess at type and role.
 - Before creating a technique card, use search to check whether it already exists under another name; add the alternative name as an alias.
 - Model techniques as moves between positions: a sweep goes from a guard (bottom) to top; a pass goes from a guard (top) to a pin; an escape starts from a pin (bottom).
+- Positions are a shared starter list (read-only) plus ${who}'s own. When a technique needs a position that isn't there, check get_position first (it may go by another name), then add it with save_position.
 - Say where a note came from with add_note's session (a class, a seminar with its name and instructor, an open mat): "notes from today's class" is {kind: "class"}; "Zen camp seminar by Josh Jones on 2024-02-03" is {kind: "seminar", name: "Zen camp", instructor: "Josh Jones", date: "2024-02-03"}. The same session is reused, not duplicated.
 - Videos and ideas not tried yet go on the To try list (add_note with to_try: true), not on a technique. It's also called "silly Instagram bullshit"; "add this to my SIB" or "something to try" means the same. Reels shared from Instagram land there automatically. Once one has been tried and is worth keeping, file_note keeps it under the technique; get_inbox with to_try: true lists what's waiting.
 - Lab is the short-term working set (get_lab): starred techniques and notes, videos to try, techniques new in the notes, questions for the coach. "Star that" or "flag that" stars whatever "that" is: a note (update_note with starred: true, or add_note with starred: true for a new one) or a technique (save_technique with starred: true). Stars are for what's pertinent now: after 4 weeks they fold away as older stars, and clear_stars unstars old ones (or all). When the coach answers a question, update_note with answered: true and add the answer to the text. The focus list is the long-term guide, over weeks or months.
@@ -419,6 +422,37 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
   );
 
   server.registerTool(
+    'save_position',
+    {
+      title: 'Add or change a position',
+      description:
+        "Adds a position of his own (a guard, pin, leg entanglement... not in the starter list), or changes one of his own that name matches (exactly, or closely when no category is given; with a category and no exact match, a new one is added). Starter positions can't be changed. A new one needs a category, and its name and aliases can't be ones a position already goes by: if it's another name for an existing position, use that one. aliases are appended to unless replace_aliases is true. Only he sees his own positions.",
+      inputSchema: {
+        name: z.string(),
+        rename_to: z.string().optional(),
+        category: z.enum(POSITION_CATEGORIES).optional().describe('Required when adding one'),
+        aliases: z.array(z.string()).optional().describe('Other names it goes by, e.g. "z guard"'),
+        replace_aliases: flag.optional(),
+        description: z.string().optional().describe('Replaces the description; an empty string clears it'),
+      },
+      annotations: write,
+    },
+    args => run(() => savePosition(ctx, args)),
+  );
+
+  server.registerTool(
+    'delete_position',
+    {
+      title: 'Delete a position',
+      description:
+        "Deletes one of his own positions. Refused while a technique, a game plan's start or a step uses it (the reply says which: change those first). Starter positions can't be deleted. undo_last puts it back.",
+      inputSchema: { name: z.string() },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    args => run(() => deletePositionByName(ctx, args.name)),
+  );
+
+  server.registerTool(
     'review',
     {
       title: 'Training review',
@@ -433,7 +467,7 @@ export function buildMcpServer(ctx: Ctx, user: { name: string | null; belt?: str
     'undo_last',
     {
       title: 'Undo the last change',
-      description: 'Reverses the most recent write (note, technique edit, game plan or focus change, session or filing).',
+      description: 'Reverses the most recent write (note, technique edit, game plan or focus change, position, session or filing).',
       inputSchema: {},
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },

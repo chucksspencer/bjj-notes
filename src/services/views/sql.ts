@@ -15,6 +15,12 @@ export const GAME_PLAN_LAST_NOTE_SQL = `greatest(
        join game_plan_cards ax on ax.technique_id = nt.technique_id
       where ax.game_plan_id = a.id and ax.user_id = a.user_id))::text`;
 
+/**
+ * The positions someone can see and use: the shared starter ones (no user_id) and their own. `p` is the table's
+ * alias and `param` the placeholder holding their user id. Every read of positions goes through this.
+ */
+export const visiblePosition = (p: string, param: string) => `(${p}.user_id is null or ${p}.user_id = ${param})`;
+
 /** A game plan (aliased `a`) as a GamePlanRef. */
 export const GAME_PLAN_REF_JSON = `json_build_object('id', a.id, 'name', a.name, 'rank', a.rank)`;
 export const GAME_PLAN_ORDER = 'a.rank nulls last, lower(a.name)';

@@ -20,6 +20,10 @@ export type Role = (typeof ROLES)[number];
 
 export const GI = ['gi', 'nogi', 'both'] as const;
 
+/** Kinds of position, as the positions table's check allows. */
+export const POSITION_CATEGORIES = ['standing', 'guard', 'pin', 'back', 'leg', 'transitional'] as const;
+export type PositionCategory = (typeof POSITION_CATEGORIES)[number];
+
 export const STATUSES = ['seen', 'learning', 'drilling', 'hitting', 'reliable'] as const;
 
 export const LINK_KINDS = ['chain', 'counter', 'variation', 'setup', 'related'] as const;

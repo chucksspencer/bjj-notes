@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import type { GamePlanView, PositionTechnique, Role } from '../../../src/shared/api';
-import { useGamePlans, useCreateGamePlan, usePosition, usePositions } from '../api';
+import type { GamePlanView, PositionCategory, PositionTechnique, PositionView, Role } from '../../../src/shared/api';
+import { useCreateGamePlan, useCreatePosition, useDeletePosition, useGamePlans, usePatchPosition, usePosition, usePositions } from '../api';
 import { RankBar } from '../components/Belt';
 import { Icon } from '../components/Icon';
 import { Sheet } from '../components/Sheet';
@@ -10,13 +10,14 @@ import { CATEGORY_LABEL, CATEGORY_ORDER, lastNoteText, localToday, ROLE_LABEL, T
 
 /**
  * Game: your game plans by where they start, then the positions they start from. Empty
- * positions fold away.
+ * positions fold away, except your own.
  */
 export function Game() {
   const gamePlans = useGamePlans();
   const positions = usePositions();
   const [all, setAll] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [addingPosition, setAddingPosition] = useState(false);
   const today = gamePlans.data?.today ?? localToday();
 
   const groups = new Map<string, { title: string; slug: string | null; gamePlans: GamePlanView[] }>();
@@ -30,7 +31,8 @@ export function Game() {
   const ordered = [...groups.entries()].sort(([ka, a], [kb, b]) => (ka === 'none' ? 1 : kb === 'none' ? -1 : a.title.localeCompare(b.title)));
   const planned = new Set((gamePlans.data?.gamePlans ?? []).map(a => a.start?.id).filter(Boolean));
   const used = (p: { id: number; techniqueCount: number }) => p.techniqueCount > 0 || planned.has(p.id);
-  const hidden = (positions.data ?? []).filter(p => !used(p)).length;
+  const shown = (p: { id: number; techniqueCount: number; custom: boolean }) => used(p) || p.custom;
+  const hidden = (positions.data ?? []).filter(p => !shown(p)).length;
 
   return (
     <div className="page">
@@ -70,11 +72,18 @@ export function Game() {
         </section>
       ))}
 
-      <h2 className="section-title">Positions</h2>
+      <div className="row-split" style={{ marginTop: 28, marginBottom: 8 }}>
+        <h2 className="section-title grow" style={{ margin: 0 }}>
+          Positions
+        </h2>
+        <button type="button" className="btn ghost small" onClick={() => setAddingPosition(true)}>
+          Add a position
+        </button>
+      </div>
       {positions.isError && <div className="panel empty">Couldn't load positions. {positions.error.message}</div>}
       {positions.data &&
         CATEGORY_ORDER.map(cat => {
-          const list = positions.data.filter(p => p.category === cat && (all || used(p)));
+          const list = positions.data.filter(p => p.category === cat && (all || shown(p)));
           if (!list.length) return null;
           return (
             <section key={cat}>
@@ -99,6 +108,7 @@ export function Game() {
       )}
 
       {adding && <NewGamePlan onClose={() => setAdding(false)} />}
+      {addingPosition && <PositionSheet onClose={() => setAddingPosition(false)} />}
     </div>
   );
 }
@@ -148,12 +158,105 @@ function NewGamePlan({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** What each kind of position is called, one at a time. */
+const CATEGORY_ONE: Record<PositionCategory, string> = {
+  guard: 'Guard',
+  pin: 'Pin',
+  back: 'Back',
+  leg: 'Leg entanglement',
+  transitional: 'In between',
+  standing: 'Standing',
+};
+
+const aliasList = (text: string) =>
+  text
+    .split(',')
+    .map(a => a.trim())
+    .filter(Boolean);
+
+/** Adds a position of your own, or (given one) changes it. Starter positions are shared and never come here. */
+function PositionSheet({ position, onClose }: { position?: PositionView['position']; onClose: () => void }) {
+  const [name, setName] = useState(position?.name ?? '');
+  const [category, setCategory] = useState<PositionCategory>(position?.category ?? 'guard');
+  const [aliases, setAliases] = useState(position?.aliases.join(', ') ?? '');
+  const [description, setDescription] = useState(position?.description ?? '');
+  const create = useCreatePosition();
+  const patch = usePatchPosition(position?.slug ?? '');
+  const toast = useToast();
+  const navigate = useNavigate();
+  const pending = create.isPending || patch.isPending;
+  return (
+    <Sheet title={position ? 'Edit position' : 'Add a position'} onClose={onClose}>
+      <form
+        onSubmit={e => {
+          e.preventDefault();
+          if (!name.trim()) return;
+          const v = { name: name.trim(), category, aliases: aliasList(aliases), description: description.trim() || null };
+          if (!position) {
+            create.mutate(v, {
+              onSuccess: r => {
+                toast.show(`Added ${r.position.name}`, { undoId: r.activityId });
+                onClose();
+              },
+              onError: toast.error,
+            });
+            return;
+          }
+          patch.mutate(v, {
+            onSuccess: r => {
+              toast.show('Saved', { undoId: r.activityId });
+              onClose();
+              if (r.position.slug !== position.slug) navigate(`/p/${r.position.slug}`, { replace: true });
+            },
+            onError: toast.error,
+          });
+        }}
+      >
+        <label className="field">
+          <span className="label">Name</span>
+          <input className="input" autoFocus placeholder="Rubber guard" value={name} onChange={e => setName(e.target.value)} />
+        </label>
+        <label className="field">
+          <span className="label">Kind</span>
+          <select className="select" value={category} onChange={e => setCategory(e.target.value as PositionCategory)}>
+            {CATEGORY_ORDER.map(c => (
+              <option key={c} value={c}>
+                {CATEGORY_ONE[c]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span className="label">Also called (comma separated)</span>
+          <input className="input" value={aliases} onChange={e => setAliases(e.target.value)} placeholder="Other names, common mishearings" />
+        </label>
+        <label className="field">
+          <span className="label">Description</span>
+          <textarea className="textarea" rows={3} value={description} onChange={e => setDescription(e.target.value)} />
+        </label>
+        <button className="btn block" type="submit" disabled={pending || !name.trim()}>
+          {position ? 'Save' : 'Add it'}
+        </button>
+        {!position && (
+          <p className="muted small" style={{ marginTop: 8 }}>
+            Only you see your own positions.
+          </p>
+        )}
+      </form>
+    </Sheet>
+  );
+}
+
 export function Position() {
   const slug = useParams().slug ?? '';
   const [params, setParams] = useSearchParams();
   const role = (params.get('role') as Role | null) ?? undefined;
   const view = usePosition(slug, role);
   const v = view.data;
+  const [editing, setEditing] = useState(false);
+  const del = useDeletePosition();
+  const toast = useToast();
+  const navigate = useNavigate();
 
   const byType = new Map<string, PositionTechnique[]>();
   for (const t of v?.from ?? []) byType.set(t.type, [...(byType.get(t.type) ?? []), t]);
@@ -169,6 +272,7 @@ export function Position() {
         <>
           <h1 className="display tech-name">{v.position.name}</h1>
           <p className="tech-meta">{v.position.aliases.length ? `Also called ${v.position.aliases.join(', ')}` : CATEGORY_LABEL[v.position.category]}</p>
+          {v.position.description && <p className="prose">{v.position.description}</p>}
           <div className="segments" role="group" aria-label="Whose side">
             {([undefined, 'top', 'bottom'] as const).map(r => (
               <button
@@ -260,6 +364,32 @@ export function Position() {
               </section>
             </>
           )}
+
+          {v.position.custom && (
+            <div className="row-split" style={{ marginTop: 32 }}>
+              <button type="button" className="btn" onClick={() => setEditing(true)}>
+                Edit position
+              </button>
+              <button
+                type="button"
+                className="btn danger"
+                disabled={del.isPending}
+                onClick={() => {
+                  if (!window.confirm(`Delete ${v.position.name}?`)) return;
+                  del.mutate(v.position.slug, {
+                    onSuccess: r => {
+                      toast.show(r.message.replace(/\.$/, ''), { undoId: r.activityId });
+                      navigate('/game');
+                    },
+                    onError: toast.error,
+                  });
+                }}
+              >
+                Delete position
+              </button>
+            </div>
+          )}
+          {editing && <PositionSheet position={v.position} onClose={() => setEditing(false)} />}
         </>
       )}
     </div>

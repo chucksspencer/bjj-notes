@@ -11,8 +11,10 @@ import { today, type Ctx } from './context.js';
 import { UserError } from './errors.js';
 import { focusSnapshot, placeOnFocus, renumberFocus, updateFocus } from './focus.js';
 import { insertGamePlan, linkIn } from './gamePlanLinks.js';
+import { assertUsablePosition } from './positions.js';
 import { lockGamePlan, resolveStepIds, resolveStepNames, stepLines, writeSteps, type NamedStepInput, type ResolvedStep } from './steps.js';
 import { gamePlansView, gamePlanView } from './views/gamePlans.js';
+import { visiblePosition } from './views/sql.js';
 import { daysAgo } from './vocab.js';
 import { capitalise, clean, plural } from './words.js';
 
@@ -93,8 +95,7 @@ async function editIn(q: Queryable, id: number, f: Fields, steps?: ResolvedStep[
 export async function editGamePlan(ctx: Ctx, id: number, patch: GamePlanPatch): Promise<string> {
   return ctx.db.tx(async q => {
     if (patch.startPositionId) {
-      const ok = (await q.query('select 1 from positions where id = $1', [patch.startPositionId])).rows.length > 0;
-      if (!ok) throw new UserError(`No position #${patch.startPositionId}.`);
+      await assertUsablePosition(q, patch.startPositionId);
     }
     const steps = patch.steps ? await resolveStepIds(q, patch.steps) : undefined;
     const r = await editIn(
@@ -203,7 +204,7 @@ export async function saveGamePlan(ctx: Ctx, input: SaveGamePlanInput): Promise<
 
     // Read the start back by name, so a misheard position is easy to catch.
     if (start) {
-      const pos = (await q.query<{ name: string }>('select name from positions where id = $1', [start])).rows[0]!.name;
+      const pos = (await q.query<{ name: string }>(`select p.name from positions p where p.id = $1 and ${visiblePosition('p', '$2')}`, [start, uid(q)])).rows[0]!.name;
       const at = parts.indexOf('start updated');
       const said = `starts in ${pos}${input.start_role ? ` (${input.start_role})` : ''}`;
       if (at >= 0) parts[at] = said;

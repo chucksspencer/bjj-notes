@@ -19,7 +19,8 @@ export async function getPosition(ctx: Ctx, name: string, role?: Role): Promise<
   const v = (await positionView(ctx.db, r.match.id, role))!;
 
   const where = `${v.position.name}${role ? ` (${role})` : ''}`;
-  const lines: string[] = [`${where} — ${v.position.category}.`];
+  const lines: string[] = [`${where} — ${v.position.category}${v.position.custom ? ', one of your own' : ''}.`];
+  if (v.position.description) lines.push(v.position.description);
   if (v.from.length) {
     const byType = new Map<string, string[]>();
     for (const t of v.from) {

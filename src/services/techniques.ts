@@ -2,6 +2,7 @@ import { uid, type Queryable } from '../db.js';
 import { describeMiss, resolvePosition, resolveTechnique } from '../resolve.js';
 import { noteOrigin } from '../shared/sessions.js';
 import { mediaTag } from './attachments.js';
+import { assertUsablePosition } from './positions.js';
 import { logActivity, type EdgeSnapshot, type LinkSnapshot, type TechniqueSnapshot, type UndoOp } from './activity.js';
 import type { Ctx } from './context.js';
 import type { Role, TechniqueType } from './vocab.js';
@@ -187,6 +188,8 @@ export async function saveTechniqueResult(ctx: Ctx, input: SaveTechniqueInput): 
         notes.push(describeMiss('position', e.to!, to));
         continue;
       }
+      // Positions by id (the web app) must be ones this person can use: someone else's is the same as one that isn't there.
+      for (const pid of [e.from_id, e.to_id]) if (pid !== undefined && pid !== null) await assertUsablePosition(q, pid);
       const fromId = e.from_id ?? from?.match?.id ?? null;
       const toId = e.to_id ?? to?.match?.id ?? null;
       const { rows } = await q.query<{ id: number }>(

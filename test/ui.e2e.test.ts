@@ -350,6 +350,69 @@ describe.runIf(run)('web app (end to end)', () => {
     await page.getByText('Ghost escape').first().waitFor();
   });
 
+  it('adds a position of your own, offers it in the step sheet, edits it and deletes it', async () => {
+    const send = (method: string, url: string, body?: unknown) =>
+      page.evaluate(
+        async ([m, u, b]) => {
+          const res = await fetch(u as string, {
+            method: m as string,
+            headers: { 'x-bjj-app': '1', ...(b ? { 'content-type': 'application/json' } : {}) },
+            body: b ? JSON.stringify(b) : undefined,
+          });
+          return { status: res.status, body: await res.json() };
+        },
+        [method, url, body] as const,
+      );
+    // Starter positions have no edit controls.
+    expect(await page.getByRole('button', { name: 'Edit position' }).count()).toBe(0);
+    await page.getByRole('navigation').getByRole('link', { name: 'Game' }).click();
+    await page.getByRole('button', { name: 'Add a position' }).click();
+    const sheet = page.getByRole('dialog');
+    await sheet.getByLabel('Name').fill('Z guard');
+    await sheet.getByRole('button', { name: 'Add it' }).click();
+    await page.getByText('Z guard is already Knee shield half guard (as an alias).').waitFor();
+    await sheet.getByLabel('Name').fill('Rubber guard');
+    await sheet.getByLabel('Also called (comma separated)').fill('mission control');
+    await sheet.getByRole('button', { name: 'Add it' }).click();
+    await page.getByText('Added Rubber guard').waitFor();
+    await sheet.waitFor({ state: 'hidden' });
+    // Listed with the guards, though nothing is in it yet.
+    await page.getByRole('link', { name: 'Rubber guard' }).waitFor();
+
+    // The step sheet's position picker offers it.
+    await page.locator('.row-title', { hasText: 'Baratoplata' }).first().click();
+    await page.getByRole('heading', { name: 'Baratoplata', level: 1 }).waitFor();
+    await page.getByRole('button', { name: 'First step' }).click();
+    const picker = page.getByRole('dialog').getByLabel('Leaves you in (optional)');
+    await expect.poll(() => picker.locator('option', { hasText: 'Rubber guard' }).count()).toBe(1);
+    await page.keyboard.press('Escape');
+    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+
+    // Its page: edit it.
+    await page.getByRole('navigation').getByRole('link', { name: 'Game' }).click();
+    await page.getByRole('link', { name: 'Rubber guard' }).click();
+    await page.getByRole('heading', { name: 'Rubber guard' }).waitFor();
+    await page.getByText('Also called mission control').waitFor();
+    await page.getByRole('button', { name: 'Edit position' }).click();
+    await page.getByRole('dialog').getByLabel('Description').fill('Shin across the back, high guard.');
+    await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
+    await page.getByText('Shin across the back, high guard.').waitFor();
+
+    // Deleting it is refused while a technique uses it (here added by a direct API call), and works once nothing does.
+    const ghost = ((await send('GET', '/api/v1/techniques?q=ghost%20escape')).body as { id: number; name: string }[]).find(t => t.name === 'Ghost escape')!;
+    const rubber = (await send('GET', '/api/v1/positions/rubber-guard')).body as { position: { id: number } };
+    expect((await send('POST', `/api/v1/techniques/${ghost.id}/edges`, { toPositionId: rubber.position.id })).status).toBe(200);
+    page.once('dialog', d => void d.accept());
+    await page.getByRole('button', { name: 'Delete position' }).click();
+    await page.getByText('Used by 1 technique: Ghost escape. Change those first.').waitFor();
+    expect((await send('POST', '/api/v1/undo')).status).toBe(200); // takes the edge back off
+    page.once('dialog', d => void d.accept());
+    await page.getByRole('button', { name: 'Delete position' }).click();
+    await page.getByText('Deleted Rubber guard').waitFor();
+    await page.getByRole('heading', { name: 'Game' }).waitFor();
+    expect(await page.getByRole('link', { name: 'Rubber guard' }).count()).toBe(0);
+  });
+
   it('records where a note came from and offers it again next time', async () => {
     const sheet = page.getByRole('dialog');
     await page.getByRole('button', { name: 'New note' }).click();

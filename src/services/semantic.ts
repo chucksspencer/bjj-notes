@@ -8,6 +8,7 @@ import type { Config } from '../config.js';
 import { uid } from '../db.js';
 import type { NoteView, TechniqueListItem } from '../shared/api.js';
 import type { Ctx } from './context.js';
+import { positionNames } from './positions.js';
 import { noteList, type NoteQuery } from './views/notes.js';
 import { techniqueList, type TechniqueQuery } from './views/techniques.js';
 
@@ -137,7 +138,7 @@ async function knownFor(ctx: Ctx): Promise<Known> {
       uid(ctx.db),
     ])
   ).rows.map(r => (r.aliases.length ? `${r.name} (also: ${r.aliases.join(', ')})` : r.name));
-  const positions = (await ctx.db.query<{ name: string }>('select name from positions order by name')).rows.map(r => r.name);
+  const positions = await positionNames(ctx.db);
   return { techniques, positions };
 }
 

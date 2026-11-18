@@ -42,6 +42,7 @@ describe('MCP tools: the connector', () => {
       [
         'add_note',
         'clear_stars',
+        'delete_position',
         'file_note',
         'get_game_plan',
         'get_focus',
@@ -52,6 +53,7 @@ describe('MCP tools: the connector', () => {
         'log_session',
         'review',
         'save_game_plan',
+        'save_position',
         'save_technique',
         'search',
         'undo_last',
@@ -592,5 +594,68 @@ describe('MCP tools: game plans', () => {
     expect(await call('get_game_plan', { name: 'winning the underhook' })).toContain('Continues in: Deep half sweeps.');
     await call('save_game_plan', { name: 'Deep half sweeps', delete: true });
     await call('save_game_plan', { name: 'winning the underhook', delete: true });
+  });
+});
+
+describe('MCP tools: your own positions', () => {
+  let claude: McpSession;
+  let other: McpSession;
+  const call = (name: string, args?: Record<string, unknown>) => claude.call(name, args);
+  beforeAll(async () => {
+    const { p } = await personWithWorkingList(s);
+    claude = await mcpFor(p);
+    other = await mcpFor((await personWithWorkingList(s)).p);
+  });
+  afterAll(async () => {
+    await claude.client.close();
+    await other.client.close();
+  });
+
+  it('adds a position, refuses names that are taken, and changes only your own', async () => {
+    expect(await call('save_position', { name: 'Rubber guard' })).toMatch(/^No confident position match for "Rubber guard"\..* To add a new position, call again with a category\.$/);
+    expect(await call('save_position', { name: 'Rubber guard', category: 'guard', aliases: ['mission control'] })).toBe('Added Rubber guard.');
+    await expect(call('save_position', { name: 'Gogoplata guard', category: 'guard', aliases: ['z guard'] })).rejects.toThrow(
+      'Error: z guard is already Knee shield half guard (as an alias).',
+    );
+    expect(await call('save_position', { name: 'mission control', aliases: ['new york'], description: 'Shin across the back, high guard.' })).toBe(
+      'Updated Rubber guard.',
+    );
+    expect(await call('save_position', { name: 'rubber gaurd', aliases: ['new york'] })).toBe(
+      'Nothing to change on Rubber guard (matched "rubber gaurd" to Rubber guard).',
+    );
+    expect(await call('save_position', { name: 'mount', aliases: ['the mountain'] })).toBe("Mount is a starter position, and starter positions can't be changed.");
+    await expect(call('delete_position', { name: 'mount' })).rejects.toThrow("Error: Starter positions can't be deleted.");
+    // A name only like a starter one makes a new position when there's a category, and says what it's like.
+    expect(await call('save_position', { name: 'Laso guard', category: 'guard' })).toBe('Added Laso guard (similar existing: Lasso guard).');
+    expect(await call('undo_last')).toBe('Undid: new position "Laso guard"');
+  });
+
+  it('finds it with get_position and search, uses it for techniques and game plans, and only for you', async () => {
+    await call('save_technique', { name: 'Gogoplata', type: 'submission', role: 'bottom', positions: [{ from: 'rubber guard', from_role: 'bottom' }] });
+    const pos = await call('get_position', { name: 'new york', role: 'bottom' });
+    expect(pos).toContain('Rubber guard (bottom) — guard, one of your own.');
+    expect(pos).toContain('Shin across the back, high guard.');
+    expect(pos).toContain('submission: Gogoplata');
+    expect(await call('search', { position: 'mission control' })).toContain('- Gogoplata (submission, bottom; seen; 0 notes)');
+    expect(await call('save_game_plan', { name: 'Rubber guard attacks', start: 'rubber guard', start_role: 'bottom' })).toContain(
+      'starts in Rubber guard (bottom)',
+    );
+
+    expect(await other.call('get_position', { name: 'rubber guard' })).not.toContain('Rubber guard (');
+    expect(await other.call('search', { position: 'rubber guard' })).not.toContain('Gogoplata');
+    expect(await other.call('save_technique', { name: 'Ghost escape', positions: [{ to: 'mission control' }] })).toMatch(/No (confident )?position match/);
+  });
+
+  it("refuses to delete one that's used, and deletes one that isn't, with undo", async () => {
+    await expect(call('delete_position', { name: 'rubber guard' })).rejects.toThrow(
+      'Error: Used by 1 technique and 1 game plan: Gogoplata, Rubber guard attacks. Change those first.',
+    );
+    expect(await call('save_position', { name: 'Crab ride', category: 'back' })).toBe('Added Crab ride.');
+    expect(await call('delete_position', { name: 'crab ride' })).toBe('Deleted Crab ride.');
+    expect(await call('get_position', { name: 'crab ride' })).not.toContain('Crab ride —');
+    expect(await call('undo_last')).toBe('Undid: deleted position "Crab ride"');
+    expect(await call('get_position', { name: 'crab ride' })).toContain('Crab ride — back, one of your own.');
+    expect(await call('undo_last')).toBe('Undid: new position "Crab ride"');
+    expect(await other.call('delete_position', { name: 'rubber guard' })).not.toContain('Deleted');
   });
 });

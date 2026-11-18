@@ -412,6 +412,8 @@ export interface PositionListItem extends PositionRef {
   category: PositionCategory;
   aliases: string[];
   techniqueCount: number;
+  /** One of your own positions (you can change it); false for the starter positions everyone shares. */
+  custom: boolean;
 }
 
 export interface PositionTechnique extends TechniqueRef {
@@ -419,7 +421,7 @@ export interface PositionTechnique extends TechniqueRef {
 }
 
 export interface PositionView {
-  position: PositionRef & { category: PositionCategory; aliases: string[]; description: string | null };
+  position: PositionRef & { category: PositionCategory; aliases: string[]; description: string | null; custom: boolean };
   role: Role | null;
   from: PositionTechnique[];
   into: PositionTechnique[];
@@ -431,6 +433,17 @@ export interface PositionView {
 export interface MessageResult {
   message: string;
 }
+
+/** A new position of your own (POST /api/v1/positions). */
+export interface PositionCreateInput {
+  name: string;
+  category: PositionCategory;
+  aliases?: string[];
+  description?: string | null;
+}
+
+/** Changes to one of your own positions (PATCH /api/v1/positions/:slug): aliases, when given, replace the list; a null description clears it. */
+export type PositionPatch = Partial<PositionCreateInput>;
 
 export interface NoteCreateInput {
   text: string;
