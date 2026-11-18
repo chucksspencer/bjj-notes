@@ -20,7 +20,9 @@ concurrency:
 
 jobs:
   app:
-    runs-on: macos-26
+    # GitHub's macOS images are now one per major Xcode. Apple requires the newest major SDK for uploads each
+    # April (iOS 27 SDK from April 2027), so move this to the next xcode-NN label once it's out each autumn.
+    runs-on: xcode-27
     timeout-minutes: 45
     defaults:
       run:

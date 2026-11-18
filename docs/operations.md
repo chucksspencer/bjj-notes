@@ -71,6 +71,7 @@ workflow** so the deploy copies it to the server.
 | --- | --- | --- |
 | TestFlight builds | 90 days after upload | Actions → iOS → Run workflow (any push under `ios/` also makes one) |
 | Apple Developer Program | Yearly ($99) | Renew in the Apple Developer app, or TestFlight stops |
+| Xcode for uploads | Each April Apple requires the SDK from the previous autumn's Xcode (Xcode 27 from April 2027) | Change `runs-on` in `.github/workflows/ios.yml` to the newest `xcode-NN` label (GitHub adds one each autumn) |
 | Backups | 30 days each | Nothing; the bucket deletes them |
 | Invite links | 7 days | Make a new one |
 | Sign-ins (web, iPhone app) | 90 days after last use | Sign in again |
